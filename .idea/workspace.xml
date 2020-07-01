@@ -1,0 +1,404 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ChangeListManager">
+    <list default="true" id="605325bb-f302-46e4-8025-caaabf115796" name="Default Changelist" comment="" />
+    <option name="EXCLUDED_CONVERTED_TO_IGNORED" value="true" />
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="FileEditorManager">
+    <leaf SIDE_TABS_SIZE_LIMIT_KEY="300">
+      <file pinned="false" current-in-tab="false">
+        <entry file="file://$PROJECT_DIR$/visnav/algo/bundleadj.py">
+          <provider selected="true" editor-type-id="text-editor">
+            <state relative-caret-position="143">
+              <caret line="10" selection-start-line="10" selection-end-line="10" />
+              <folding>
+                <element signature="e#103#121#0" expanded="true" />
+              </folding>
+            </state>
+          </provider>
+        </entry>
+      </file>
+      <file pinned="false" current-in-tab="false">
+        <entry file="file://$PROJECT_DIR$/visnav/algo/image.py">
+          <provider selected="true" editor-type-id="text-editor">
+            <state relative-caret-position="153">
+              <caret line="9" selection-start-line="9" selection-end-line="9" />
+            </state>
+          </provider>
+        </entry>
+      </file>
+      <file pinned="false" current-in-tab="false">
+        <entry file="file://$PROJECT_DIR$/visnav/algo/model.py">
+          <provider selected="true" editor-type-id="text-editor">
+            <state relative-caret-position="17">
+              <caret line="16" column="26" selection-start-line="16" selection-start-column="17" selection-end-line="16" selection-end-column="26" />
+            </state>
+          </provider>
+        </entry>
+      </file>
+      <file pinned="false" current-in-tab="true">
+        <entry file="file://$PROJECT_DIR$/README.md">
+          <provider selected="true" editor-type-id="split-provider[text-editor;markdown-preview-editor]">
+            <state split_layout="SPLIT">
+              <first_editor relative-caret-position="425">
+                <caret line="25" lean-forward="true" selection-start-line="25" selection-end-line="25" />
+              </first_editor>
+              <second_editor />
+            </state>
+          </provider>
+        </entry>
+      </file>
+      <file pinned="false" current-in-tab="false">
+        <entry file="file://$PROJECT_DIR$/tests/odometry.py">
+          <provider selected="true" editor-type-id="text-editor">
+            <state relative-caret-position="103">
+              <caret line="43" lean-forward="true" selection-start-line="43" selection-end-line="43" />
+              <folding>
+                <element signature="e#0#15#0" expanded="true" />
+              </folding>
+            </state>
+          </provider>
+        </entry>
+      </file>
+      <file pinned="false" current-in-tab="false">
+        <entry file="file://$PROJECT_DIR$/visnav/algo/tools.py">
+          <provider selected="true" editor-type-id="text-editor">
+            <state relative-caret-position="78">
+              <caret line="1066" column="20" lean-forward="true" selection-start-line="1066" selection-start-column="20" selection-end-line="1066" selection-end-column="20" />
+              <folding>
+                <element signature="e#1#12#0" expanded="true" />
+              </folding>
+            </state>
+          </provider>
+        </entry>
+      </file>
+      <file pinned="false" current-in-tab="false">
+        <entry file="file://$PROJECT_DIR$/visnav/algo/odometry.py">
+          <provider selected="true" editor-type-id="text-editor">
+            <state relative-caret-position="299">
+              <caret line="621" column="19" lean-forward="true" selection-start-line="621" selection-start-column="19" selection-end-line="621" selection-end-column="19" />
+              <folding>
+                <element signature="e#430#441#0" expanded="true" />
+              </folding>
+            </state>
+          </provider>
+        </entry>
+      </file>
+    </leaf>
+  </component>
+  <component name="FileTemplateManagerImpl">
+    <option name="RECENT_TEMPLATES">
+      <list>
+        <option value="Python Script" />
+      </list>
+    </option>
+  </component>
+  <component name="FindInProjectRecents">
+    <findStrings>
+      <find>lil_matrix</find>
+      <find>RenderEngine</find>
+      <find>ShapeModel</find>
+      <find>Asteroid</find>
+      <find>mpl_toolkits</find>
+      <find>Axes3D</find>
+      <find>plt</find>
+      <find>_bundle_adjustment_sparsity</find>
+      <find>equatorial_to_ecliptic</find>
+      <find>sys</find>
+      <find>nb</find>
+      <find>ImageProc</find>
+      <find>objloader</find>
+      <find>integrate</find>
+      <find>cv2</find>
+      <find>position</find>
+      <find>SkyCoord</find>
+      <find>@nb</find>
+      <find>time</find>
+      <find>noq</find>
+      <find>sc_q</find>
+      <find>assertAlmostEquals</find>
+      <find>est_cam_pose</find>
+      <find>Pose(</find>
+      <find>estimate_pose</find>
+      <find>prior</find>
+    </findStrings>
+  </component>
+  <component name="IdeDocumentHistory">
+    <option name="CHANGED_PATHS">
+      <list>
+        <option value="$PROJECT_DIR$/visnav/settings.py" />
+        <option value="$PROJECT_DIR$/visnav/algo/model.py" />
+        <option value="$PROJECT_DIR$/visnav/algo/image.py" />
+        <option value="$PROJECT_DIR$/visnav/algo/bundleadj.py" />
+        <option value="$PROJECT_DIR$/visnav/README.md" />
+        <option value="$PROJECT_DIR$/visnav/algo/odometry.py" />
+        <option value="$PROJECT_DIR$/visnav/algo/tools.py" />
+        <option value="$PROJECT_DIR$/tests/odometry.py" />
+        <option value="$PROJECT_DIR$/README.md" />
+      </list>
+    </option>
+  </component>
+  <component name="ProjectFrameBounds">
+    <option name="x" value="552" />
+    <option name="y" value="57" />
+    <option name="width" value="3573" />
+    <option name="height" value="1985" />
+  </component>
+  <component name="ProjectView">
+    <navigator proportions="" version="1">
+      <foldersAlwaysOnTop value="true" />
+    </navigator>
+    <panes>
+      <pane id="ProjectPane">
+        <subPane>
+          <expand>
+            <path>
+              <item name="hw_visnav" type="b2602c69:ProjectViewProjectNode" />
+              <item name="hw_visnav" type="462c0819:PsiDirectoryNode" />
+            </path>
+            <path>
+              <item name="hw_visnav" type="b2602c69:ProjectViewProjectNode" />
+              <item name="hw_visnav" type="462c0819:PsiDirectoryNode" />
+              <item name="tests" type="462c0819:PsiDirectoryNode" />
+            </path>
+            <path>
+              <item name="hw_visnav" type="b2602c69:ProjectViewProjectNode" />
+              <item name="hw_visnav" type="462c0819:PsiDirectoryNode" />
+              <item name="visnav" type="462c0819:PsiDirectoryNode" />
+            </path>
+          </expand>
+          <select />
+        </subPane>
+      </pane>
+      <pane id="Scope" />
+    </panes>
+  </component>
+  <component name="PropertiesComponent">
+    <property name="last_opened_file_path" value="$PROJECT_DIR$/visnav/algo" />
+    <property name="settings.editor.selected.configurable" value="configurable.group.tools" />
+  </component>
+  <component name="RecentsManager">
+    <key name="CopyFile.RECENT_KEYS">
+      <recent name="C:\projects\hw_visnav\visnav\algo" />
+      <recent name="C:\projects\hw_visnav\visnav" />
+    </key>
+    <key name="MoveFile.RECENT_KEYS">
+      <recent name="C:\projects\hw_visnav" />
+      <recent name="C:\projects\hw_visnav\visnav\algo" />
+      <recent name="C:\projects\hw_visnav\visnav\algo\links" />
+      <recent name="C:\projects\hw_visnav\visnav" />
+    </key>
+  </component>
+  <component name="RunDashboard">
+    <option name="ruleStates">
+      <list>
+        <RuleState>
+          <option name="name" value="ConfigurationTypeDashboardGroupingRule" />
+        </RuleState>
+        <RuleState>
+          <option name="name" value="StatusDashboardGroupingRule" />
+        </RuleState>
+      </list>
+    </option>
+  </component>
+  <component name="RunManager">
+    <configuration name="Unittests in odometry.py" type="tests" factoryName="Unittests" nameIsGenerated="true">
+      <module name="visnav" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/tests" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <EXTENSION ID="net.ashald.envfile">
+        <option name="IS_ENABLED" value="false" />
+        <option name="IS_SUBST" value="false" />
+        <option name="IS_PATH_MACRO_SUPPORTED" value="false" />
+        <option name="IS_IGNORE_MISSING_FILES" value="false" />
+        <option name="IS_ENABLE_EXPERIMENTAL_INTEGRATIONS" value="false" />
+        <ENTRIES>
+          <ENTRY IS_ENABLED="true" PARSER="runconfig" />
+        </ENTRIES>
+      </EXTENSION>
+      <option name="_new_pattern" value="&quot;&quot;" />
+      <option name="_new_additionalArguments" value="&quot;&quot;" />
+      <option name="_new_target" value="&quot;$PROJECT_DIR$/tests/odometry.py&quot;" />
+      <option name="_new_targetType" value="&quot;PATH&quot;" />
+      <method v="2" />
+    </configuration>
+  </component>
+  <component name="SvnConfiguration">
+    <configuration />
+  </component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="605325bb-f302-46e4-8025-caaabf115796" name="Default Changelist" comment="" />
+      <created>1593508536219</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1593508536219</updated>
+    </task>
+    <servers />
+  </component>
+  <component name="TestHistory">
+    <history-entry file="Unittests_in_odometry_py - 2020.07.01 at 19h 22m 30s.xml">
+      <configuration name="Unittests in odometry.py" configurationId="tests" />
+    </history-entry>
+    <history-entry file="Unittests_in_odometry_py - 2020.07.01 at 19h 24m 24s.xml">
+      <configuration name="Unittests in odometry.py" configurationId="tests" />
+    </history-entry>
+    <history-entry file="Unittests_in_odometry_py - 2020.07.01 at 19h 33m 39s.xml">
+      <configuration name="Unittests in odometry.py" configurationId="tests" />
+    </history-entry>
+    <history-entry file="Unittests_in_odometry_py - 2020.07.01 at 19h 34m 00s.xml">
+      <configuration name="Unittests in odometry.py" configurationId="tests" />
+    </history-entry>
+    <history-entry file="Unittests_in_odometry_py - 2020.07.01 at 19h 35m 01s.xml">
+      <configuration name="Unittests in odometry.py" configurationId="tests" />
+    </history-entry>
+    <history-entry file="Unittests_in_odometry_py - 2020.07.01 at 19h 42m 16s.xml">
+      <configuration name="Unittests in odometry.py" configurationId="tests" />
+    </history-entry>
+    <history-entry file="Unittests_in_odometry_py - 2020.07.01 at 19h 42m 46s.xml">
+      <configuration name="Unittests in odometry.py" configurationId="tests" />
+    </history-entry>
+    <history-entry file="Unittests_in_odometry_py - 2020.07.01 at 19h 47m 34s.xml">
+      <configuration name="Unittests in odometry.py" configurationId="tests" />
+    </history-entry>
+    <history-entry file="Unittests_in_odometry_py - 2020.07.01 at 19h 54m 03s.xml">
+      <configuration name="Unittests in odometry.py" configurationId="tests" />
+    </history-entry>
+    <history-entry file="Unittests_in_odometry_py - 2020.07.01 at 19h 54m 18s.xml">
+      <configuration name="Unittests in odometry.py" configurationId="tests" />
+    </history-entry>
+  </component>
+  <component name="ToolWindowManager">
+    <frame x="221" y="23" width="1429" height="794" extended-state="0" />
+    <editor active="true" />
+    <layout>
+      <window_info content_ui="combo" id="Project" order="0" visible="true" weight="0.3641577" />
+      <window_info id="Structure" order="1" side_tool="true" weight="0.25" />
+      <window_info id="Favorites" order="2" side_tool="true" />
+      <window_info anchor="bottom" id="Message" order="0" />
+      <window_info anchor="bottom" id="Find" order="1" />
+      <window_info active="true" anchor="bottom" id="Run" order="2" visible="true" weight="0.37142858" />
+      <window_info anchor="bottom" id="Debug" order="3" weight="0.4" />
+      <window_info anchor="bottom" id="Cvs" order="4" weight="0.25" />
+      <window_info anchor="bottom" id="Inspection" order="5" weight="0.4" />
+      <window_info anchor="bottom" id="TODO" order="6" />
+      <window_info anchor="bottom" id="Version Control" order="7" />
+      <window_info anchor="bottom" id="Terminal" order="8" />
+      <window_info anchor="bottom" id="Event Log" order="9" side_tool="true" />
+      <window_info anchor="bottom" id="Python Console" order="10" weight="0.36619717" />
+      <window_info anchor="right" id="Commander" order="0" weight="0.4" />
+      <window_info anchor="right" id="Ant Build" order="1" weight="0.25" />
+      <window_info anchor="right" content_ui="combo" id="Hierarchy" order="2" weight="0.25" />
+    </layout>
+  </component>
+  <component name="editorHistoryManager">
+    <entry file="file://$PROJECT_DIR$/visnav/__init__.py" />
+    <entry file="file://$PROJECT_DIR$/visnav/algo/base.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="219">
+          <caret line="15" column="19" selection-start-line="15" selection-start-column="19" selection-end-line="15" selection-end-column="19" />
+          <folding>
+            <element signature="e#0#13#0" expanded="true" />
+          </folding>
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/visnav/algo/orig/__init__.py">
+      <provider selected="true" editor-type-id="text-editor" />
+    </entry>
+    <entry file="file://$PROJECT_DIR$/visnav/settings.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="255">
+          <caret line="15" lean-forward="true" selection-start-line="15" selection-end-line="15" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/visnav/algo/image.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="153">
+          <caret line="9" selection-start-line="9" selection-end-line="9" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$APPLICATION_HOME_DIR$/helpers/typeshed/stdlib/3/unittest/__init__.pyi">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="137">
+          <caret line="113" column="28" lean-forward="true" selection-start-line="113" selection-start-column="28" selection-end-line="113" selection-end-column="28" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://C:/ProgramData/Anaconda3/envs/hw_visnav/Lib/site-packages/numpy/linalg/linalg.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="171">
+          <caret line="2370" column="52" lean-forward="true" selection-start-line="2370" selection-start-column="52" selection-end-line="2370" selection-end-column="52" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/visnav/algo/bundleadj.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="143">
+          <caret line="10" selection-start-line="10" selection-end-line="10" />
+          <folding>
+            <element signature="e#103#121#0" expanded="true" />
+          </folding>
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/visnav/algo/model.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="17">
+          <caret line="16" column="26" selection-start-line="16" selection-start-column="17" selection-end-line="16" selection-end-column="26" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/visnav/algo/odometry.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="299">
+          <caret line="621" column="19" lean-forward="true" selection-start-line="621" selection-start-column="19" selection-end-line="621" selection-end-column="19" />
+          <folding>
+            <element signature="e#430#441#0" expanded="true" />
+          </folding>
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/visnav/algo/tools.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="78">
+          <caret line="1066" column="20" lean-forward="true" selection-start-line="1066" selection-start-column="20" selection-end-line="1066" selection-end-column="20" />
+          <folding>
+            <element signature="e#1#12#0" expanded="true" />
+          </folding>
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/tests/odometry.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="103">
+          <caret line="43" lean-forward="true" selection-start-line="43" selection-end-line="43" />
+          <folding>
+            <element signature="e#0#15#0" expanded="true" />
+          </folding>
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/README.md">
+      <provider selected="true" editor-type-id="split-provider[text-editor;markdown-preview-editor]">
+        <state split_layout="SPLIT">
+          <first_editor relative-caret-position="425">
+            <caret line="25" lean-forward="true" selection-start-line="25" selection-end-line="25" />
+          </first_editor>
+          <second_editor />
+        </state>
+      </provider>
+    </entry>
+  </component>
+</project>
