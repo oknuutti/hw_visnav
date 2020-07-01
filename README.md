@@ -14,7 +14,11 @@ apt-get install libgl1-mesa-dev libx11-dev
 pip install numba astropy moderngl
 ```
 
-## Run a test with:
+## Run a test
+Download test data from [here](https://drive.google.com/file/d/1JepyAQa2jZpCBJPfJjeAh53xw33QPLMa/view?usp=sharing) to `tests/data`.
+
+Then run:
+
 ```
 python -m unittest tests/odometry.py
 ```
