@@ -4,6 +4,7 @@ import tempfile
 import os
 import math
 from datetime import datetime
+import logging
 
 import numpy as np
 import quaternion
@@ -22,6 +23,7 @@ class TestOdometry(unittest.TestCase):
             'min_inliers': 12,
             'min_2d2d_inliers': 24,
         }
+        logging.basicConfig(level=logging.DEBUG)
         self.odo = VisualOdometry(self.cam, self.cam.width/4, verbose=0, pause=False,
                                   use_scale_correction=False, est_cam_pose=False, **params)
 

@@ -1,5 +1,9 @@
 syntax:glob
 
+# custom own stuff
+arducam/
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
