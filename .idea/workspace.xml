@@ -2,19 +2,15 @@
 <project version="4">
   <component name="ChangeListManager">
     <list default="true" id="605325bb-f302-46e4-8025-caaabf115796" name="Default Changelist" comment="">
+      <change afterPath="$PROJECT_DIR$/sensehat/sensehat.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/visnav/algo/featdet.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/visnav/calibrate.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/visnav/run.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.hgignore" beforeDir="false" afterPath="$PROJECT_DIR$/.hgignore" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/visnav.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/visnav.iml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/odometry.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/odometry.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/visnav/algo/bundleadj.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/algo/bundleadj.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/visnav/algo/image.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/algo/image.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/visnav/algo/model.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/algo/model.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/visnav/algo/odometry.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/algo/odometry.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/visnav/algo/orig/bundleadj.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/algo/orig/bundleadj.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/visnav/algo/orig/image.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/algo/orig/image.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/visnav/algo/orig/model.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/algo/orig/model.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/visnav/algo/orig/odometry.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/algo/orig/odometry.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/visnav/algo/orig/tools.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/algo/orig/tools.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/visnav/algo/tools.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/algo/tools.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -29,40 +25,6 @@
       </list>
     </option>
   </component>
-  <component name="FindInProjectRecents">
-    <findStrings>
-      <find>lil_matrix</find>
-      <find>RenderEngine</find>
-      <find>ShapeModel</find>
-      <find>Asteroid</find>
-      <find>mpl_toolkits</find>
-      <find>Axes3D</find>
-      <find>plt</find>
-      <find>_bundle_adjustment_sparsity</find>
-      <find>equatorial_to_ecliptic</find>
-      <find>sys</find>
-      <find>nb</find>
-      <find>ImageProc</find>
-      <find>objloader</find>
-      <find>integrate</find>
-      <find>cv2</find>
-      <find>position</find>
-      <find>SkyCoord</find>
-      <find>@nb</find>
-      <find>time</find>
-      <find>noq</find>
-      <find>sc_q</find>
-      <find>assertAlmostEquals</find>
-      <find>est_cam_pose</find>
-      <find>Pose(</find>
-      <find>estimate_pose</find>
-      <find>prior</find>
-      <find>init</find>
-      <find>arducam</find>
-      <find>Py_ArduCam_setMode</find>
-      <find>camera_initFromFile</find>
-    </findStrings>
-  </component>
   <component name="ProjectId" id="1igws4gmtkEGKTtl6DDuDmyIrQb" />
   <component name="ProjectLevelVcsManager" settingsEditedManually="true" />
   <component name="ProjectViewState">
@@ -71,23 +33,87 @@
   </component>
   <component name="PropertiesComponent">
     <property name="SHARE_PROJECT_CONFIGURATION_FILES" value="true" />
-    <property name="last_opened_file_path" value="$PROJECT_DIR$" />
+    <property name="last_opened_file_path" value="$PROJECT_DIR$/../sispo" />
+    <property name="restartRequiresConfirmation" value="false" />
     <property name="settings.editor.selected.configurable" value="com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable" />
     <property name="two.files.diff.last.used.file" value="$PROJECT_DIR$/arducam/arducam_api/Windows/Python/Streaming_demo/ArduCam_Py_Demo.py" />
   </component>
   <component name="RecentsManager">
-    <key name="CopyFile.RECENT_KEYS">
-      <recent name="C:\projects\hw_visnav\visnav\algo" />
-      <recent name="C:\projects\hw_visnav\visnav" />
-    </key>
     <key name="MoveFile.RECENT_KEYS">
+      <recent name="C:\projects\hw_visnav\sensehat" />
       <recent name="C:\projects\hw_visnav" />
       <recent name="C:\projects\hw_visnav\visnav\algo" />
       <recent name="C:\projects\hw_visnav\visnav\algo\links" />
       <recent name="C:\projects\hw_visnav\visnav" />
     </key>
+    <key name="CopyFile.RECENT_KEYS">
+      <recent name="C:\projects\hw_visnav\visnav\algo" />
+      <recent name="C:\projects\hw_visnav\visnav" />
+    </key>
   </component>
-  <component name="RunManager" selected="Python tests.Unittests in odometry.py">
+  <component name="RunManager" selected="Python.run">
+    <configuration name="calibrate" type="PythonConfigurationType" factoryName="Python" nameIsGenerated="true">
+      <module name="visnav" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/visnav" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <EXTENSION ID="net.ashald.envfile">
+        <option name="IS_ENABLED" value="false" />
+        <option name="IS_SUBST" value="false" />
+        <option name="IS_PATH_MACRO_SUPPORTED" value="false" />
+        <option name="IS_IGNORE_MISSING_FILES" value="false" />
+        <option name="IS_ENABLE_EXPERIMENTAL_INTEGRATIONS" value="false" />
+        <ENTRIES>
+          <ENTRY IS_ENABLED="true" PARSER="runconfig" />
+        </ENTRIES>
+      </EXTENSION>
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/visnav/calibrate.py" />
+      <option name="PARAMETERS" value="--path D:\projects\hw_visnav\arducam-output\calib\cb -x 7 -y 5 -s 58" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="run" type="PythonConfigurationType" factoryName="Python" nameIsGenerated="true">
+      <module name="visnav" />
+      <option name="INTERPRETER_OPTIONS" value="-m cProfile -o profile.out" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/visnav" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <EXTENSION ID="net.ashald.envfile">
+        <option name="IS_ENABLED" value="false" />
+        <option name="IS_SUBST" value="false" />
+        <option name="IS_PATH_MACRO_SUPPORTED" value="false" />
+        <option name="IS_IGNORE_MISSING_FILES" value="false" />
+        <option name="IS_ENABLE_EXPERIMENTAL_INTEGRATIONS" value="false" />
+        <ENTRIES>
+          <ENTRY IS_ENABLED="true" PARSER="runconfig" />
+        </ENTRIES>
+      </EXTENSION>
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/visnav/run.py" />
+      <option name="PARAMETERS" value="--dir C:\projects\hw_visnav\data\data_25112020\images" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
     <configuration name="test" type="PythonConfigurationType" factoryName="Python">
       <module name="visnav" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -145,7 +171,9 @@
       <method v="2" />
     </configuration>
     <list>
+      <item itemvalue="Python.run" />
       <item itemvalue="Python.test" />
+      <item itemvalue="Python.calibrate" />
       <item itemvalue="Python tests.Unittests in odometry.py" />
     </list>
   </component>
@@ -164,30 +192,72 @@
     <servers />
   </component>
   <component name="WindowStateProjectService">
+    <state x="136" y="69" key="#com.intellij.execution.impl.EditConfigurationsDialog" timestamp="1609274838996">
+      <screen x="0" y="0" width="1536" height="834" />
+    </state>
+    <state x="136" y="69" key="#com.intellij.execution.impl.EditConfigurationsDialog/0.0.1536.834@0.0.1536.834" timestamp="1609274838996" />
     <state x="111" y="34" width="1337" height="680" key="DiffContextDialog" timestamp="1605272285730">
       <screen x="0" y="0" width="1536" height="834" />
     </state>
     <state x="111" y="34" width="1337" height="680" key="DiffContextDialog/0.0.1536.834@0.0.1536.834" timestamp="1605272285730" />
-    <state x="656" y="164" key="FileChooserDialogImpl" timestamp="1605270388675">
+    <state x="656" y="164" key="FileChooserDialogImpl" timestamp="1607940511494">
       <screen x="0" y="0" width="1536" height="834" />
     </state>
-    <state x="656" y="164" key="FileChooserDialogImpl/0.0.1536.834@0.0.1536.834" timestamp="1605270388675" />
-    <state width="1203" height="218" key="GridCell.Tab.0.bottom" timestamp="1605273356556">
+    <state x="656" y="164" key="FileChooserDialogImpl/0.0.1536.834@0.0.1536.834" timestamp="1607940511494" />
+    <state width="1390" height="160" key="GridCell.Tab.0.bottom" timestamp="1609367417053">
       <screen x="0" y="0" width="1536" height="834" />
     </state>
-    <state width="1203" height="218" key="GridCell.Tab.0.bottom/0.0.1536.834@0.0.1536.834" timestamp="1605273356556" />
-    <state width="1203" height="218" key="GridCell.Tab.0.center" timestamp="1605273356556">
+    <state width="1390" height="160" key="GridCell.Tab.0.bottom/0.0.1536.834@0.0.1536.834" timestamp="1609367417053" />
+    <state width="1390" height="160" key="GridCell.Tab.0.center" timestamp="1609367417053">
       <screen x="0" y="0" width="1536" height="834" />
     </state>
-    <state width="1203" height="218" key="GridCell.Tab.0.center/0.0.1536.834@0.0.1536.834" timestamp="1605273356556" />
-    <state width="1203" height="218" key="GridCell.Tab.0.left" timestamp="1605273356556">
+    <state width="1390" height="160" key="GridCell.Tab.0.center/0.0.1536.834@0.0.1536.834" timestamp="1609367417053" />
+    <state width="1390" height="160" key="GridCell.Tab.0.left" timestamp="1609367417053">
       <screen x="0" y="0" width="1536" height="834" />
     </state>
-    <state width="1203" height="218" key="GridCell.Tab.0.left/0.0.1536.834@0.0.1536.834" timestamp="1605273356556" />
-    <state width="1203" height="218" key="GridCell.Tab.0.right" timestamp="1605273356556">
+    <state width="1390" height="160" key="GridCell.Tab.0.left/0.0.1536.834@0.0.1536.834" timestamp="1609367417053" />
+    <state width="1390" height="160" key="GridCell.Tab.0.right" timestamp="1609367417053">
       <screen x="0" y="0" width="1536" height="834" />
     </state>
-    <state width="1203" height="218" key="GridCell.Tab.0.right/0.0.1536.834@0.0.1536.834" timestamp="1605273356556" />
+    <state width="1390" height="160" key="GridCell.Tab.0.right/0.0.1536.834@0.0.1536.834" timestamp="1609367417053" />
+    <state width="1390" height="312" key="GridCell.Tab.1.bottom" timestamp="1609361906901">
+      <screen x="0" y="0" width="1536" height="834" />
+    </state>
+    <state width="1390" height="312" key="GridCell.Tab.1.bottom/0.0.1536.834@0.0.1536.834" timestamp="1609361906901" />
+    <state width="1390" height="312" key="GridCell.Tab.1.center" timestamp="1609361906901">
+      <screen x="0" y="0" width="1536" height="834" />
+    </state>
+    <state width="1390" height="312" key="GridCell.Tab.1.center/0.0.1536.834@0.0.1536.834" timestamp="1609361906901" />
+    <state width="1390" height="312" key="GridCell.Tab.1.left" timestamp="1609361906901">
+      <screen x="0" y="0" width="1536" height="834" />
+    </state>
+    <state width="1390" height="312" key="GridCell.Tab.1.left/0.0.1536.834@0.0.1536.834" timestamp="1609361906901" />
+    <state width="1390" height="312" key="GridCell.Tab.1.right" timestamp="1609361906901">
+      <screen x="0" y="0" width="1536" height="834" />
+    </state>
+    <state width="1390" height="312" key="GridCell.Tab.1.right/0.0.1536.834@0.0.1536.834" timestamp="1609361906901" />
+    <state x="410" y="155" width="672" height="678" key="search.everywhere.popup" timestamp="1608752146208">
+      <screen x="0" y="0" width="1536" height="834" />
+    </state>
+    <state x="410" y="155" width="672" height="678" key="search.everywhere.popup/0.0.1536.834@0.0.1536.834" timestamp="1608752146208" />
+  </component>
+  <component name="XDebuggerManager">
+    <breakpoint-manager>
+      <breakpoints>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/visnav/calibrate.py</url>
+          <line>56</line>
+          <option name="timeStamp" value="60" />
+        </line-breakpoint>
+      </breakpoints>
+      <default-breakpoints>
+        <breakpoint type="python-exception">
+          <properties notifyOnTerminate="true" exception="BaseException">
+            <option name="notifyOnTerminate" value="true" />
+          </properties>
+        </breakpoint>
+      </default-breakpoints>
+    </breakpoint-manager>
   </component>
   <component name="hg4idea.settings">
     <option name="CHECK_INCOMING_OUTGOING" value="true" />

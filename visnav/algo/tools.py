@@ -165,6 +165,10 @@ def vector_rejection(a, b):
     return a - vector_projection(a, b)
 
 
+def parallax(f0, f1, pt):
+    return angle_between_v(f0-pt, f1-pt)
+
+
 def angle_between_v(v1, v2):
     # Notice: only returns angles between 0 and 180 deg
 
@@ -172,8 +176,8 @@ def angle_between_v(v1, v2):
         v1 = np.reshape(v1, (1, -1))
         v2 = np.reshape(v2, (-1, 1))
 
-        n1 = v1 / np.linalg.norm(v1)
-        n2 = v2 / np.linalg.norm(v2)
+        n1 = normalize_v(v1)
+        n2 = normalize_v(v2)
 
         cos_angle = n1.dot(n2)
     except TypeError as e:
@@ -327,8 +331,55 @@ def mean_q(qs, ws=None):
     return qtot
 
 
+# from https://gist.github.com/davegreenwood/e1d2227d08e24cc4e353d95d0c18c914
+# ~3.5x slower than cv2.triangulatePoints, seems to be less accurate?
+def triangulate_nviews(P, ip):
+    """
+    Triangulate a point visible in n camera views.
+    P is a list of camera projection matrices.
+    ip is a list of homogenised image points. eg [ [x, y, 1], [x, y, 1] ], OR,
+    ip is a 2d array - shape nx3 - [ [x, y, 1], [x, y, 1] ]
+    len of ip must be the same as len of P
+    """
+    if not len(ip) == len(P):
+        raise ValueError('Number of points and number of cameras not equal.')
+    n = len(P)
+    M = np.zeros([3*n, 4+n])
+    for i, (x, p) in enumerate(zip(ip, P)):
+        M[3*i:3*i+3, :4] = p
+        M[3*i:3*i+3, 4+i] = -x
+    V = np.linalg.svd(M)[-1]
+    X = V[-1, :4]
+    return X / X[3]
+
+
+def naive_triangulate_points(P, uv):
+    A = np.vstack(P)
+    y = np.vstack([np.vstack((u.reshape((2, -1)), 1)) for u in uv])
+    x = np.linalg.inv(A.T.dot(A)).dot(A.T).dot(y)
+    return x
+
+
+def q_times_img_coords(q, pt2d, cam, distort=True, opengl=False):
+    # project to unit sphere
+    vo = cam.to_unit_sphere(*pt2d.flatten(), undistort=distort, opengl=opengl)
+
+    # rotate vector
+    vn = q_times_v(q, vo)
+
+    # project back to image space
+    if (vn[2] > 0 and not opengl) or (vn[2] < 0 and opengl):
+        # still in front of camera
+        pt2d_n = np.array(cam.calc_img_xy(*vn, distort=distort, legacy=not opengl)) - np.array([0.5, 0.5])
+    else:
+        # backside of camera
+        pt2d_n = np.array([float('nan'), float('nan')])
+
+    return pt2d_n
+
+
 def q_times_v(q, v):
-    qv = np.quaternion(0, *v)
+    qv = np.quaternion(0, *(v.flatten()))
     qv2 = q * qv * q.conj()
     return np.array([qv2.x, qv2.y, qv2.z])
 

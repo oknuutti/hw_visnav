@@ -789,7 +789,7 @@ class Camera:
                  quantum_eff=None, qeff_coefs=None, px_saturation_e=None, emp_coef=1,
                  lambda_min=None, lambda_eff=None, lambda_max=None,
                  dark_noise_mu=None, dark_noise_sd=None, readout_noise_sd=None,
-                 point_spread_fn=None, scattering_coef=None,
+                 point_spread_fn=None, scattering_coef=None, cam_mx=None,
                  exclusion_angle_x=90, exclusion_angle_y=90):
         self.width = width      # in pixels
         self.height = height    # in pixels
@@ -802,6 +802,7 @@ class Camera:
         self.f_stop = None
         self.aperture = None
         self.dist_coefs = dist_coefs  # np.zeros(12) if dist_coefs is None else dist_coefs
+        self.cam_mx = cam_mx  # camera matrix estimated using cv2.calibrateCamera
 
         self.emp_coef = emp_coef
         self.px_saturation_e = px_saturation_e
@@ -1120,13 +1121,21 @@ class Camera:
         return np.clip(gain * self.gain * np.floor(electrons), 0, 1)
 
     def intrinsic_camera_mx(self, legacy=True):
-        return Camera._intrinsic_camera_mx(self.width, self.height, self.x_fov, self.y_fov, legacy=legacy)
+        if self.cam_mx is None:
+            return Camera._intrinsic_camera_mx(self.width, self.height, self.x_fov, self.y_fov, legacy=legacy)
+        else:
+            return Camera._intrinsic_camera_mx_2(tuple(self.cam_mx.flatten()), legacy=legacy)
 
     def inv_intrinsic_camera_mx(self, legacy=True):
-        return Camera._inv_intrinsic_camera_mx(self.width, self.height, self.x_fov, self.y_fov, legacy=legacy)
+        if self.cam_mx is None:
+            return Camera._inv_intrinsic_camera_mx(self.width, self.height, self.x_fov, self.y_fov, legacy=legacy)
+        else:
+            return Camera._intrinsic_camera_mx_2(tuple(self.cam_mx.flatten()), legacy=legacy, inverse=True)
 
     @staticmethod
     def _intrinsic_camera_mx(width, height, x_fov, y_fov, legacy=True):
+        # legacy=True: opencv cam +z axis, -y up; legacy=False: opengl cam -z axis, +y up
+
         x = width / 2
         y = height / 2
         fl_x = x / math.tan(math.radians(x_fov) / 2)
@@ -1136,22 +1145,40 @@ class Camera:
                          [0, 0, 1]], dtype="float")
 
     @staticmethod
-    @lru_cache(maxsize=1)
+    @lru_cache(maxsize=3)
+    def _intrinsic_camera_mx_2(cam_mx, inverse=False, legacy=True):
+        cam_mx = np.array(cam_mx).reshape((3, 3))
+        if not legacy:
+            cam_mx[0, 0] = -cam_mx[0, 0]
+        return np.linalg.inv(cam_mx) if inverse else cam_mx
+
+    @staticmethod
+    @lru_cache(maxsize=3)
     def _inv_intrinsic_camera_mx(w, h, xfov, yfov, legacy=True):
         return np.linalg.inv(Camera._intrinsic_camera_mx(w, h, xfov, yfov, legacy=legacy))
 
-    def calc_xy(self, xi, yi, z_off):
+    def to_unit_sphere(self, xi, yi, undistort=True, opengl=False):
+        if undistort and self.dist_coefs is not None:
+            xi, yi = Camera._undistort(np.array([[xi, yi]]), self.intrinsic_camera_mx(), self.dist_coefs)[0, 0, :]
+        xh = xi + 0.5
+        yh = yi + 0.5
+        iK = self.inv_intrinsic_camera_mx(legacy=not opengl)
+        v = iK.dot(np.array([xh, yh, 1]))
+        return tools.normalize_v(v)
+
+    def calc_xy(self, xi, yi, z_off, undistort=True, legacy=False):
         """ xi and yi are unaltered image coordinates, z_off is usually negative  """
+
+        if undistort and self.dist_coefs is not None:
+            xi, yi = Camera._undistort(np.array([[xi, yi]]), self.intrinsic_camera_mx(), self.dist_coefs)[0, 0, :]
 
         xh = xi + 0.5
         # yh = height - (yi+0.5)
         yh = yi + 0.5
         # zh = -z_off
 
-        # TODO: (2) undistort if self.dist_coefs given (use cv2.undistortPoints?)
-
         if True:
-            iK = self.inv_intrinsic_camera_mx(legacy=False)
+            iK = self.inv_intrinsic_camera_mx(legacy=legacy)
             x_off, y_off, _ = iK.dot(np.array([xh, yh, 1])) * z_off
 
         else:
@@ -1167,34 +1194,50 @@ class Camera:
         # print('%.3f~%.3f, %.3f~%.3f, %.3f~%.3f'%(ax, x_off, ay, y_off, az, z_off))
         return x_off, y_off
 
-    def calc_img_xy(self, x, y, z, undistorted=False):
+    def calc_img_xy(self, x, y, z, distort=True, legacy=False):
         """ x, y, z are in camera frame (z typically negative),  return image coordinates  """
-        K = self.intrinsic_camera_mx(legacy=False)[:2, :]
+        K = self.intrinsic_camera_mx(legacy=legacy)[:2, :]
         xd, yd = x / z, y / z
 
         # DISTORT
-        if self.dist_coefs is not None:
-            xd, yd, _ = Camera.distort(np.array([[xd, yd]]), self.dist_coefs)[0]
+        if distort and self.dist_coefs is not None:
+            xd, yd = self.distort(np.array([[xd, yd]]))
 
         ix, iy = K.dot(np.array([xd, yd, 1]))
         return ix, iy
 
-    def calc_img_R(self, R, undistorted=False):
+    def calc_img_R(self, R, distort=True, legacy=False):
         """
         R is a matrix where each row is a point in camera frame (z typically negative),
         returns a matrix where each row corresponds to points in image space """
         R = R / R[:, 2].reshape((-1, 1))
 
         # DISTORT
-        if self.dist_coefs is not None:
-            R = Camera.distort(R, self.dist_coefs)
+        if distort and self.dist_coefs is not None:
+            R = Camera.distort(R)
 
-        K = self.intrinsic_camera_mx(legacy=False)[:2, :].T
+        K = self.intrinsic_camera_mx(legacy=legacy)[:2, :].T
         iR = R.dot(K)
         return iR
 
+    def distort(self, P):
+        if self.dist_coefs is not None:
+            if 1:
+                return Camera._distort(P, self.dist_coefs)[0].flatten()
+            else:
+                dP = Camera._distort_own(P, self.dist_coefs)
+                return (dP[:, :2] / dP[:, 2:]).flatten()
+        return P
+
     @staticmethod
-    def distort(P, dist_coefs, cam_mx=None, inv_cam_mx=None):
+    def _distort(P, dist_coefs):
+        import cv2
+        return cv2.projectPoints(np.array([*P.flatten(), 1]).reshape((1, 3)),
+                                 np.eye(3), np.array([[0, 0, 0]], dtype=np.float32), np.eye(3), np.array(dist_coefs),
+                                 jacobian=False)
+
+    @staticmethod
+    def _distort_own(P, dist_coefs, cam_mx=None, inv_cam_mx=None):
         """
         return distorted coords from undistorted ones based on dist_coefs
         if inv_cam_mx given, assume P are image coordinates instead of coordinates in camera frame
@@ -1231,6 +1274,19 @@ class Camera:
         if cam_mx is not None:
             img_P = img_P.dot(cam_mx[:2, :].T)
         return img_P
+
+    def undistort(self, P):
+        if len(P) > 0 and self.dist_coefs is not None:
+            return Camera._undistort(P, self.intrinsic_camera_mx(), self.dist_coefs)
+        return P
+
+    @staticmethod
+    def _undistort(P, cam_mx, dist_coefs):
+        import cv2
+        if len(P) > 0:
+            pts = cv2.undistortPoints(P.reshape((-1, 1, 2)), cam_mx, np.array(dist_coefs), None, cam_mx)
+            return pts
+        return P
 
 
 class Asteroid(ABC):

@@ -1,8 +1,12 @@
+syntax:regex
+^[^/]*\.txt$
+
 syntax:glob
 
 # custom own stuff
 arducam/
-
+data/
+*.out
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

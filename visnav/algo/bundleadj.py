@@ -10,12 +10,16 @@ import numpy as np
 from scipy.sparse import lil_matrix
 from scipy.optimize import least_squares
 
+from visnav.algo import tools
+
 
 def bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray,
                cam_idxs: np.ndarray, pt3d_idxs: np.ndarray, K: np.ndarray,
-               max_nfev=None, skip_pose0=False):
+               max_nfev=None, skip_pose0=False, huber_coef=False):
     """
     Returns the bundle adjusted parameters, in this case the optimized rotation and translation vectors.
+
+    basepose with shape (6,) is the pose of the first frame that is used as an anchor
 
     poses with shape (n_cameras, 6) contains initial estimates of parameters for all cameras.
             First 3 components in each row form a rotation vector,
@@ -35,11 +39,11 @@ def bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray,
 
     """
     a = 1 if skip_pose0 else 0
-    assert not skip_pose0, 'some bug with skipping first pose optimization => for some reason cost stays high, maybe problem with A?'
+    #assert not skip_pose0, 'some bug with skipping first pose optimization => for some reason cost stays high, maybe problem with A?'
 
     n_cams = poses.shape[0]
     n_pts = pts3d.shape[0]
-    A = _bundle_adjustment_sparsity(n_cams-a, n_pts, cam_idxs, pt3d_idxs)
+    A = _bundle_adjustment_sparsity(n_cams-a, n_pts, cam_idxs, pt3d_idxs)   # n_cams-a or n_cams?
     x0 = np.hstack((poses[a:].ravel(), pts3d.ravel()))
     pose0 = poses[0:a].ravel()
 
@@ -50,10 +54,10 @@ def bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray,
     tmp = sys.stdout
     sys.stdout = LogWriter()
     res = least_squares(_costfun, x0, jac_sparsity=A, verbose=2, x_scale='jac', ftol=1e-4, method='trf',
-                        args=(pose0, n_cams, n_pts, cam_idxs, pt3d_idxs, pts2d, K), max_nfev=max_nfev)
+                        args=(pose0, n_cams, n_pts, cam_idxs, pt3d_idxs, pts2d, K, huber_coef), max_nfev=max_nfev)
     sys.stdout = tmp
 
-    new_poses, new_pts3d = _optimized_params(np.hstack((pose0, res.x)), n_cams, n_pts)
+    new_poses, new_pts3d = _optimized_params(res.x, n_cams-a, n_pts)
     return new_poses, new_pts3d
 
 
@@ -98,7 +102,7 @@ def _project(pts3d, poses, K):
     return pts2d_proj
 
 
-def _costfun(params, pose0, n_cams, n_pts, cam_idxs, pt3d_idxs, pts2d, K):
+def _costfun(params, pose0, n_cams, n_pts, cam_idxs, pt3d_idxs, pts2d, K, huber_coef):
     """
     Compute residuals.
     `params` contains camera parameters and 3-D coordinates.
@@ -107,7 +111,9 @@ def _costfun(params, pose0, n_cams, n_pts, cam_idxs, pt3d_idxs, pts2d, K):
     poses = params[:n_cams * 6].reshape((n_cams, 6))
     points_3d = params[n_cams * 6:].reshape((n_pts, 3))
     points_proj = _project(points_3d[pt3d_idxs], poses[cam_idxs], K)
-    return (points_proj - pts2d).ravel()
+    err = (points_proj - pts2d).ravel()
+
+    return tools.pseudo_huber_loss(huber_coef, err) if huber_coef else err
 
 
 def _bundle_adjustment_sparsity(n_cams, n_pts, cam_idxs, pt3d_idxs):
