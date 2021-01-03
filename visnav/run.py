@@ -66,11 +66,15 @@ def init():
     params = {
         'use_ba': True,
         'threaded_ba': True,
+        'max_keyframes': 8,
+        'max_ba_keyframes': 8,
+        'ba_interval': 4,
         'max_ba_fun_eval': 20,
+
         'asteroid': False,
     }
     cam = get_cam()
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.DEBUG)
     odo = VisualOdometry(cam, cam.width/2, verbose=1, pause=False,
                          use_scale_correction=False, est_cam_pose=False, **params)
     prior = Pose(np.array([0, 0, 0]), quaternion.one, np.ones((3,)) * 0.1, np.ones((3,)) * 0.01)

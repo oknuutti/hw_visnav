@@ -237,7 +237,9 @@ def angle_between_ypr(ypr1, ypr2):
     return angle_between_q(q1, q2)
 
 
-def distance_mx(A, B):
+def distance_mx(A, B=None):
+    if B is None:
+        B = A
     assert A.shape[1] == B.shape[1], 'matrices must have same amount of columns'
     k = A.shape[1]
     O = np.repeat(A.reshape((-1, 1, k)), B.shape[0], axis=1) - np.repeat(B.reshape((1, -1, k)), A.shape[0], axis=0)
