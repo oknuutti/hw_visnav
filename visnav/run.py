@@ -9,6 +9,7 @@ import numpy as np
 import quaternion
 import cv2
 
+from visnav.algo import tools
 from visnav.algo.image import ImageProc
 from visnav.algo.model import Camera
 from visnav.algo.odometry import VisualOdometry, Pose
@@ -34,6 +35,9 @@ def main():
     # run odometry
     loc = np.ones((len(img_files), 3)) * np.nan
     for i, (_, fname) in enumerate(img_files):
+        if 0 and fname == 'image155.jpg':
+            break
+
         logging.info('')
         logging.info(fname)
         img = cv2.imread(os.path.join(args.dir, fname), cv2.IMREAD_GRAYSCALE)[2:-2, :]
@@ -48,11 +52,15 @@ def main():
         if res and res[0] and res[0].post:
             prior = res[0].post
             if res[0].method == VisualOdometry.POSE_RANSAC_3D:
-                loc[i, :] = res[0].post.loc
+                loc[i, :] = tools.q_times_v(res[0].post.quat.conj(), -res[0].post.loc)
 
     logging.disable(logging.INFO)
-    plt.plot(loc[:, 0], loc[:, 2], 'x-')
+    plt.figure(2)
+    plt.plot(loc[:, 0], loc[:, 2], '+-')
     plt.gca().set_aspect('equal')
+    mrg = 3
+    plt.xlim(np.nanmin(loc[:, 0]) - mrg, np.nanmax(loc[:, 0]) + mrg)
+    plt.ylim(np.nanmin(loc[:, 2]) - mrg, np.nanmax(loc[:, 2]) + mrg)
     plt.xlabel('x')
     plt.ylabel('z')
     plt.show()
@@ -60,6 +68,7 @@ def main():
         100*(1 - np.mean(np.isnan(loc[:, 0]))),
         np.nanstd(np.linalg.norm(np.diff(loc, axis=0), axis=1)),
     ))
+    odo.quit()
 
 
 def init():
@@ -74,8 +83,8 @@ def init():
         'asteroid': False,
     }
     cam = get_cam()
-    logging.basicConfig(level=logging.DEBUG)
-    odo = VisualOdometry(cam, cam.width/2, verbose=1, pause=False,
+    logging.basicConfig(level=logging.INFO)
+    odo = VisualOdometry(cam, cam.width/2, verbose=0, pause=False,
                          use_scale_correction=False, est_cam_pose=False, **params)
     prior = Pose(np.array([0, 0, 0]), quaternion.one, np.ones((3,)) * 0.1, np.ones((3,)) * 0.01)
     time = datetime.strptime('2020-07-01 15:42:00', '%Y-%m-%d %H:%M:%S').timestamp()

@@ -13,8 +13,17 @@ from scipy.optimize import least_squares
 from visnav.algo import tools
 
 
+def mp_bundle_adj(arg_queue, log_queue, res_queue):
+    while True:
+        cmd, args, kwargs = arg_queue.get()
+        if cmd == 'ba':
+            res_queue.put(bundle_adj(*args, log_writer=LogWriter(log_queue), **kwargs))
+        else:
+            break
+
+
 def bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray,
-               cam_idxs: np.ndarray, pt3d_idxs: np.ndarray, K: np.ndarray,
+               cam_idxs: np.ndarray, pt3d_idxs: np.ndarray, K: np.ndarray, log_writer=None,
                max_nfev=None, skip_pose0=False, poses_only=False, huber_coef=False):
     """
     Returns the bundle adjusted parameters, in this case the optimized rotation and translation vectors.
@@ -65,8 +74,8 @@ def bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray,
         print('ERR: %.4e' % (np.sum(err**2)/2))
 
     tmp = sys.stdout
-    sys.stdout = LogWriter()
-    res = least_squares(_costfun, x0, jac_sparsity=A, verbose=2, x_scale='jac', ftol=1e-4, xtol=1e-6, method='trf',
+    sys.stdout = log_writer or LogWriter()
+    res = least_squares(_costfun, x0, jac_sparsity=A, verbose=2, x_scale='jac', ftol=1e-4, xtol=1e-5, method='trf',
                         # for some reason doesnt work as well as own huber loss
                         # tr_solver='lsmr', # loss='huber', f_scale=huber_coef
                         args=(pose0, fixed_pt3d, n_cams, n_pts, cam_idxs, pt3d_idxs, pts2d, K, huber_coef),
@@ -78,9 +87,15 @@ def bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray,
 
 
 class LogWriter:
+    def __init__(self, log_queue=None):
+        self.log_queue = log_queue
+
     def write(self, msg):
         if msg.strip() != '':
-            logging.info(msg)
+            if self.log_queue is None:
+                logging.info(msg)
+            else:
+                self.log_queue.put(('info', msg))
 
 
 def _rotate(points, rot_vecs):

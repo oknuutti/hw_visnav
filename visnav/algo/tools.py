@@ -128,6 +128,14 @@ def normalize_v_f8(v):
     return v / norm if norm != 0 else v
 
 
+def normalize_mx(mx):
+    norm = np.linalg.norm(mx, axis=1)
+    mx = mx.copy()
+    mx[norm > 0, :] = mx[norm > 0, :] / norm[norm > 0, None]
+    mx[norm == 0, :] = 0
+    return mx
+
+
 def generate_field_fft(shape, sd=(0.33, 0.33, 0.34), len_sc=(0.5, 0.5 / 4, 0.5 / 16)):
     from visnav.algo.image import ImageProc
     sds = sd if getattr(sd, '__len__', False) else [sd]
@@ -166,8 +174,9 @@ def vector_rejection(a, b):
 
 
 def parallax(f0, f1, pt):
-    return angle_between_v(f0-pt, f1-pt)
-
+    if len(pt.shape) == 1:
+        return angle_between_v(f0-pt, f1-pt)
+    return angle_between_mx(f0-pt, f1-pt)
 
 def angle_between_v(v1, v2):
     # Notice: only returns angles between 0 and 180 deg
@@ -362,21 +371,23 @@ def naive_triangulate_points(P, uv):
     return x
 
 
-def q_times_img_coords(q, pt2d, cam, distort=True, opengl=False):
+def q_times_img_coords(q, pts2d, cam, distort=True, opengl=False):
     # project to unit sphere
-    vo = cam.to_unit_sphere(*pt2d.flatten(), undistort=distort, opengl=opengl)
+    vo = cam.to_unit_sphere(pts2d, undistort=distort, opengl=opengl)
 
     # rotate vector
-    vn = q_times_v(q, vo)
+    vn = q_times_mx(q, vo)
 
     # project back to image space
-    if (vn[2] > 0 and not opengl) or (vn[2] < 0 and opengl):
-        # still in front of camera
-        pt2d_n = np.array(cam.calc_img_xy(*vn, distort=distort, legacy=not opengl)) - np.array([0.5, 0.5])
-    else:
-        # backside of camera
-        pt2d_n = np.array([float('nan'), float('nan')])
+    pt2d_n = np.ones((len(pts2d), 2)) * np.nan
 
+    # still in front of camera
+    if opengl:
+        mask = vn[:, 2] < 0
+    else:
+        mask = vn[:, 2] > 0
+
+    pt2d_n[mask, :] = cam.calc_img_R(vn[mask, :], distort=distort, legacy=not opengl) - 0.5
     return pt2d_n
 
 

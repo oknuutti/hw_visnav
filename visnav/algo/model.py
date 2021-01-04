@@ -1157,14 +1157,14 @@ class Camera:
     def _inv_intrinsic_camera_mx(w, h, xfov, yfov, legacy=True):
         return np.linalg.inv(Camera._intrinsic_camera_mx(w, h, xfov, yfov, legacy=legacy))
 
-    def to_unit_sphere(self, xi, yi, undistort=True, opengl=False):
+    def to_unit_sphere(self, pts2d, undistort=True, opengl=False):
         if undistort and self.dist_coefs is not None:
-            xi, yi = Camera._undistort(np.array([[xi, yi]]), self.intrinsic_camera_mx(), self.dist_coefs)[0, 0, :]
-        xh = xi + 0.5
-        yh = yi + 0.5
+            pts2d = Camera._undistort(pts2d, self.intrinsic_camera_mx(), self.dist_coefs)
+        pts2d += 0.5
+        pts2dh = np.hstack((pts2d, np.ones((len(pts2d), 1))))
         iK = self.inv_intrinsic_camera_mx(legacy=not opengl)
-        v = iK.dot(np.array([xh, yh, 1]))
-        return tools.normalize_v(v)
+        v = iK.dot(pts2dh.T).T
+        return tools.normalize_mx(v)
 
     def calc_xy(self, xi, yi, z_off, undistort=True, legacy=False):
         """ xi and yi are unaltered image coordinates, z_off is usually negative  """
@@ -1210,11 +1210,12 @@ class Camera:
         """
         R is a matrix where each row is a point in camera frame (z typically negative),
         returns a matrix where each row corresponds to points in image space """
-        R = R / R[:, 2].reshape((-1, 1))
+        R = R / R[:, 2:]
 
         # DISTORT
         if distort and self.dist_coefs is not None:
-            R = Camera.distort(R)
+            R = self.distort(R).squeeze()
+            R = np.hstack([R, np.ones((len(R), 1))])
 
         K = self.intrinsic_camera_mx(legacy=legacy)[:2, :].T
         iR = R.dot(K)
@@ -1223,7 +1224,7 @@ class Camera:
     def distort(self, P):
         if self.dist_coefs is not None:
             if 1:
-                return Camera._distort(P, self.dist_coefs)[0].flatten()
+                return Camera._distort(P, self.dist_coefs)[0]
             else:
                 dP = Camera._distort_own(P, self.dist_coefs)
                 return (dP[:, :2] / dP[:, 2:]).flatten()
@@ -1232,7 +1233,7 @@ class Camera:
     @staticmethod
     def _distort(P, dist_coefs):
         import cv2
-        return cv2.projectPoints(np.array([*P.flatten(), 1]).reshape((1, 3)),
+        return cv2.projectPoints(P.reshape((-1, 3)), #np.hstack([P, np.ones((len(P), 1))]).reshape((-1, 1, 4)),
                                  np.eye(3), np.array([[0, 0, 0]], dtype=np.float32), np.eye(3), np.array(dist_coefs),
                                  jacobian=False)
 
