@@ -1,5 +1,6 @@
 import os
 import argparse
+import pickle
 import re
 from datetime import datetime
 import logging
@@ -31,10 +32,11 @@ def main():
         if m:
             img_files.append((int(m[1]), fname))
     img_files = sorted(img_files, key=lambda x: x[0])
+    img_files = [f for _, f in img_files]
 
     # run odometry
-    loc = np.ones((len(img_files), 3)) * np.nan
-    for i, (_, fname) in enumerate(img_files):
+    results = []
+    for i, fname in enumerate(img_files):
         if 0 and fname == 'image155.jpg':
             break
 
@@ -49,26 +51,51 @@ def main():
         #img = ImageProc.adjust_gamma(img, 1.8)
 
         res = odo.process(img, datetime.fromtimestamp(time + i*1), prior, quaternion.one)
+
+        results.append(res)
         if res and res[0] and res[0].post:
             prior = res[0].post
+
+    odo.quit()
+    plot_results(results, img_files)
+
+
+def plot_results(results=None, img_files=None, file='result.pickle'):
+    if results is None:
+        with open(file, 'rb') as fh:
+            results, img_files = pickle.load(fh)
+    else:
+        with open(file, 'wb') as fh:
+            pickle.dump((results, img_files), fh)
+
+    loc = np.ones((len(img_files), 3)) * np.nan
+    for i, res in enumerate(results):
+        if res and res[0] and res[0].post:
             if res[0].method == VisualOdometry.POSE_RANSAC_3D:
                 loc[i, :] = tools.q_times_v(res[0].post.quat.conj(), -res[0].post.loc)
 
     logging.disable(logging.INFO)
-    plt.figure(2)
-    plt.plot(loc[:, 0], loc[:, 2], '+-')
-    plt.gca().set_aspect('equal')
+    fig, axs = plt.subplots(2, 1)
+    line = axs[0].plot(loc[:, 2], loc[:, 0], '+-')
+    tools.hover_annotate(fig, axs[0], line[0], img_files)
+    axs[0].set_aspect('equal')
     mrg = 3
-    plt.xlim(np.nanmin(loc[:, 0]) - mrg, np.nanmax(loc[:, 0]) + mrg)
-    plt.ylim(np.nanmin(loc[:, 2]) - mrg, np.nanmax(loc[:, 2]) + mrg)
-    plt.xlabel('x')
-    plt.ylabel('z')
+    axs[0].set_ylim(np.nanmax(loc[:, 0]) + mrg, np.nanmin(loc[:, 0]) - mrg)
+    axs[0].set_xlim(np.nanmin(loc[:, 2]) - mrg, np.nanmax(loc[:, 2]) + mrg)
+    axs[0].set_ylabel('x')
+    axs[0].set_xlabel('z')
+
+    line = axs[1].plot(np.linspace(1, 100, len(loc[:, 1])), loc[:, 1], '+-')
+    tools.hover_annotate(fig, axs[1], line[0], img_files)
+    axs[1].set_ylabel('y')
+    axs[1].set_xlabel('t/T [%]')
+
+    plt.tight_layout()
     plt.show()
     print('ok: %.1f%%, delta loc std: %.3e' % (
         100*(1 - np.mean(np.isnan(loc[:, 0]))),
         np.nanstd(np.linalg.norm(np.diff(loc, axis=0), axis=1)),
     ))
-    odo.quit()
 
 
 def init():
@@ -131,4 +158,7 @@ def get_cam():
 
 
 if __name__ == '__main__':
-    main()
+    if 1:
+        main()
+    else:
+        plot_results()

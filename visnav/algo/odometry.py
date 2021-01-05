@@ -664,7 +664,7 @@ class VisualOdometry:
                     self.state.map3d[ids[i]].inlier_time = nf.time
 
                 # calculate delta-q and delta-r
-                dq = rf.pose.post.quat.conj() * q
+                dq = q * rf.pose.post.quat.conj()
 
                 # solvePnPRansac apparently randomly gives 180deg wrong answer,
                 #  - too high translation in correct direction, why? related to delayed application of ba result?
@@ -788,7 +788,7 @@ class VisualOdometry:
             # update pose and uncertainty
             nf.pose.post = Pose(
                 tools.q_times_v(dq, rf.pose.post.loc) + dr,
-                (rf.pose.post.quat * dq).normalized(),
+                (dq * rf.pose.post.quat).normalized(),
                 self.loc_sds,
                 self.rot_sds,
                 #rf.pose.post.loc_s2 + tools.q_times_v(rf.pose.post.quat, d_r_s2),
@@ -810,8 +810,8 @@ class VisualOdometry:
                 self._draw_pts3d(nf, pause=self.pause)
 
     def _log_pose_diff(self, title, r0, q0, r1, q1):
-        dr = r1 - r0
         dq = q1 * q0.conj()
+        dr = r1 - tools.q_times_v(dq, r0)
         logging.info(title + ' dq: ' + ' '.join(['%.3fdeg' % math.degrees(a) for a in tools.q_to_ypr(dq)])
               + '   dv: ' + ' '.join(['%.3fm' % a for a in dr]))
 
