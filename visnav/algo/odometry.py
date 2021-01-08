@@ -147,6 +147,7 @@ class State:
         self.last_success_time = None
         self.first_result_given = False
         self.first_mm_done = None
+        self.tracking_failed = True
         self.scale = 1
 
 
@@ -225,6 +226,7 @@ class VisualOdometry:
     DEF_MIN_FEATURE_INTENSITY = 10      # min level of intensity required near a keypoint
     DEF_MAX_FEATURE_INTENSITY = 250     # need lower than this intensity near a keypoint
     DEF_SCALE_EST_COEF = 0.95           # scale correction estimation coefficient
+    DEF_POSE_2D2D_QUALITY_LIM = 0.1     # minimum pose result quality
 
     DEF_ASTEROID = True                 # is the target lighted against dark background?
 
@@ -295,8 +297,7 @@ class VisualOdometry:
         self._init_map_center = None  # for debug purposes
         self._3d_map_lock = threading.RLock()
         self._new_frame_lock = threading.RLock()
-        self._ba_requested_kf_id = None
-        self._ba_requested_time = None
+        self._ba_started = []
 
         if self.use_ba and self.threaded_ba:
             self._ba_max_keyframes = None
@@ -375,9 +376,16 @@ class VisualOdometry:
             if dt > self.reset_timeout:
                 # if fail for too long, reinitialize (excl if only one keyframe)
                 self.state.initialized = False
+            elif not self.state.tracking_failed:
+                # frame maybe corrupted, fail once and try again next time
+                logging.info('Image maybe corrupted, failing one frame')
+                self.state.tracking_failed = True
+                return None, None, None
             elif len(new_frame.kps_uv) < self.min_2d2d_inliers / self.inlier_ratio_2d2d:
                 # if too few keypoints tracked for E-mat estimation, reinitialize
                 self.state.initialized = False
+        else:
+            self.state.tracking_failed = False
 
         # expected bias and scale drift sds
         bias_sds, scale_sd = np.zeros((6,)), 0
@@ -694,7 +702,7 @@ class VisualOdometry:
                 inliers = None
                 dr, dq = None, None
 
-                if self.state.first_result_given:
+                if self.state.first_result_given and self.state.tracking_failed:  # give one chance with tracking_failed
                     logging.info(' => clearing all 3d points')
                     if False:
                         self.state.first_result_given = False
@@ -739,7 +747,7 @@ class VisualOdometry:
                     inliers = np.where(mask)[0]
                     e_mx_qlt = self.pose_result_quality(rf, nf, dq=quaternion.from_rotation_matrix(R),
                                                         inlier_ids=ids[inliers], plot=0)
-                    if e_mx_qlt < 0.1:
+                    if e_mx_qlt < self.pose_2d2d_quality_lim:
                         logging.info('Pose result quality too low: %.3f' % e_mx_qlt)
                         R = None
 
@@ -1066,9 +1074,11 @@ class VisualOdometry:
 
         last_idx, last_uvs = [[] for f in frames], [[] for f in frames]
         for i, id in enumerate(ids[idxs]):
-            j, uv = [(k, f.kps_uv_norm[id]) for k, f in enumerate(frames) if id in f.kps_uv_norm][-1]
-            last_idx[j].append(i)
-            last_uvs[j].append(uv)
+            tmp = [(k, f.kps_uv_norm[id]) for k, f in enumerate(frames) if id in f.kps_uv_norm]
+            if len(tmp) > 0:
+                j, uv = tmp[-1]
+                last_idx[j].append(i)
+                last_uvs[j].append(uv)
 
         for j, f in enumerate(frames):
             if len(last_idx[j]) > 0:
@@ -1080,8 +1090,11 @@ class VisualOdometry:
 
     def bundle_adjustment(self, max_keyframes=None, sync=False):
         self._ba_max_keyframes = max_keyframes
-        self._ba_requested_kf_id = self.state.keyframes[-1].id
-        self._ba_requested_time = time.time()
+        if len(self._ba_started) <= 1:
+            self._ba_started.append((self.state.keyframes[-1].id, time.time()))
+        else:
+            logging.warning('bundle adjustment in queue dropped')
+            self._ba_started[-1] = (self.state.keyframes[-1].id, time.time())
 
         if self.threaded_ba:
             logging.info('giving go-ahead for bundle adjustment')
@@ -1222,9 +1235,12 @@ class VisualOdometry:
                 for kp in new_3d_kps:
                     kp.pt3d = tools.q_times_v(dq, kp.pt3d + dr)    # TODO: or is it q_times_v(dq, kp.pt3d) + dr
 
-            c = self.state.keyframes[-1].id - self._ba_requested_kf_id
-            t = (time.time() - self._ba_requested_time)
-            logging.info('bundle adjustment complete after %d keyframes and %.2fs' % (c, t))
+            st_kf_id, st_t = self._ba_started.pop(0)
+            c = self.state.keyframes[-1].id - st_kf_id
+            t = (time.time() - st_t)
+            self._ba_started_kf_id = None
+            logging.info('bundle adjustment complete after %d keyframes and %.2fs, queue len: %d'
+                         % (c, t, len(self._ba_started)))
             if self.threaded_ba:
                 try:
                     self._ba_stop_lock.release()   # only used when running ba in synchronized mode
@@ -1324,7 +1340,7 @@ class VisualOdometry:
 
         for id, (x0, y0), (x1, y1) in zip(ids, uv0, uv1):
             self._track_image = cv2.line(self._track_image, (x1, y1), (x0, y0), self._col(id), 1)
-            img = cv2.circle(img, (x1, y1), 5, self._col(id), -1)
+            img = cv2.circle(img, (x1, y1), 5, self._col(id), 1)   # negative thickness => filled circle
         img = cv2.add(img, self._track_image)
         img_sc = 768/img.shape[0]
         cv2.imshow(label, cv2.resize(img, None, fx=img_sc, fy=img_sc, interpolation=cv2.INTER_CUBIC))

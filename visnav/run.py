@@ -1,93 +1,93 @@
-import os
 import argparse
 import pickle
-import re
 from datetime import datetime
 import logging
 
 import matplotlib.pyplot as plt
 import numpy as np
 import quaternion
-import cv2
 
 from visnav.algo import tools
-from visnav.algo.image import ImageProc
-from visnav.algo.model import Camera
-from visnav.algo.odometry import VisualOdometry, Pose
+from visnav.algo.odometry import VisualOdometry
+from visnav.missions.hwproto import HardwarePrototype
+from visnav.missions.nokia import NokiaSensor
 
 
 def main():
     # parse arguments
     parser = argparse.ArgumentParser(description='Run visual odometry on a set of images')
-    parser.add_argument('--dir', '-d', metavar='DIR', help='path to the images')
+    parser.add_argument('--data', '-d', metavar='DATA', help='path to the data folder')
+    parser.add_argument('--mission', '-m', choices=('hwproto', 'nokia'), help='select mission')
     args = parser.parse_args()
 
-    # init odometry
-    odo, prior, time = init()
-
-    # find images
-    img_files = []
-    for fname in os.listdir(args.dir):
-        m = re.search(r"(\d+)\.(png|jpg|jpeg)$", fname)
-        if m:
-            img_files.append((int(m[1]), fname))
-    img_files = sorted(img_files, key=lambda x: x[0])
-    img_files = [f for _, f in img_files]
+    # init odometry and data
+    if args.mission == 'hwproto':
+        mission = HardwarePrototype(args.data, last_frame=(155, 321, None)[2])
+    elif args.mission == 'nokia':
+        mission = NokiaSensor(args.data, first_frame=(65, 3000)[0], last_frame=(6000, None)[0])
+    else:
+        assert False, 'bad mission given: %s' % args.mission
 
     # run odometry
+    prior = mission.prior
+    frame_names = []
     results = []
-    for i, fname in enumerate(img_files):
-        if 0 and fname == 'image155.jpg':
-            break
-
+    ground_truth = []
+    for i, (img, name, gt) in enumerate(mission.data):
         logging.info('')
-        logging.info(fname)
-        img = cv2.imread(os.path.join(args.dir, fname), cv2.IMREAD_GRAYSCALE)[2:-2, :]
+        logging.info(name)
+        frame_names.append(name)
+        ground_truth.append(gt)
 
-        # normalize brightness
-        img = np.clip(img.astype(np.float) * 255 / np.percentile(img, 99.8), 0, 255).astype(np.uint8)
-
-        #img = np.clip(img.astype(np.uint16)*2, 0, 255).astype(np.uint8)
-        #img = ImageProc.adjust_gamma(img, 1.8)
-
-        res = odo.process(img, datetime.fromtimestamp(time + i*1), prior, quaternion.one)
+        res = mission.odo.process(img, datetime.fromtimestamp(mission.time0 + i*1), prior, quaternion.one)
 
         results.append(res)
         if res and res[0] and res[0].post:
             prior = res[0].post
 
-    odo.quit()
-    plot_results(results, img_files)
+    mission.odo.quit()
+    plot_results(results, frame_names, ground_truth, '%s-result.pickle' % args.mission)
 
 
-def plot_results(results=None, img_files=None, file='result.pickle'):
+def plot_results(results=None, frame_names=None, ground_truth=None, file='result.pickle'):
     if results is None:
         with open(file, 'rb') as fh:
-            results, img_files = pickle.load(fh)
+            results, frame_names, ground_truth = pickle.load(fh)
     else:
         with open(file, 'wb') as fh:
-            pickle.dump((results, img_files), fh)
+            pickle.dump((results, frame_names, ground_truth), fh)
 
-    loc = np.ones((len(img_files), 3)) * np.nan
+    loc = np.ones((len(frame_names), 3)) * np.nan
     for i, res in enumerate(results):
         if res and res[0] and res[0].post:
             if res[0].method == VisualOdometry.POSE_RANSAC_3D:
                 loc[i, :] = tools.q_times_v(res[0].post.quat.conj(), -res[0].post.loc)
 
     logging.disable(logging.INFO)
-    fig, axs = plt.subplots(2, 1)
-    line = axs[0].plot(loc[:, 2], loc[:, 0], '+-')
-    tools.hover_annotate(fig, axs[0], line[0], img_files)
-    axs[0].set_aspect('equal')
-    mrg = 3
-    axs[0].set_ylim(np.nanmax(loc[:, 0]) + mrg, np.nanmin(loc[:, 0]) - mrg)
-    axs[0].set_xlim(np.nanmin(loc[:, 2]) - mrg, np.nanmax(loc[:, 2]) + mrg)
-    axs[0].set_ylabel('x')
-    axs[0].set_xlabel('z')
 
-    line = axs[1].plot(np.linspace(1, 100, len(loc[:, 1])), loc[:, 1], '+-')
-    tools.hover_annotate(fig, axs[1], line[0], img_files)
-    axs[1].set_ylabel('y')
+    fig, axs = plt.subplots(2, 1)
+    axs[0].set_aspect('equal')
+    rng = np.nanmax(loc[:, :2], axis=0) - np.nanmin(loc[:, :2], axis=0)
+    mrg = 0.05 * np.max(rng)
+
+    if rng[0] > rng[1]:
+        line = axs[0].plot(loc[:, 0], loc[:, 1], '+-')
+        axs[0].set_xlim(np.nanmin(loc[:, 0]) - mrg, np.nanmax(loc[:, 0]) + mrg)
+        axs[0].set_ylim(np.nanmin(loc[:, 1]) - mrg, np.nanmax(loc[:, 1]) + mrg)
+        axs[0].set_xlabel('x')
+        axs[0].set_ylabel('y')
+    else:
+        line = axs[0].plot(loc[:, 1], loc[:, 0], '+-')
+        axs[0].set_xlim(np.nanmin(loc[:, 1]) - mrg, np.nanmax(loc[:, 1]) + mrg)
+        axs[0].set_ylim(np.nanmax(loc[:, 0]) + mrg, np.nanmin(loc[:, 0]) - mrg)
+        axs[0].set_xlabel('y')
+        axs[0].set_ylabel('x')
+
+    tools.hover_annotate(fig, axs[0], line[0], frame_names)
+
+    line = axs[1].plot(np.linspace(1, 100, len(loc[:, 2])), loc[:, 2], '+-')
+    tools.hover_annotate(fig, axs[1], line[0], frame_names)
+    axs[1].set_ylabel('z')
     axs[1].set_xlabel('t/T [%]')
 
     plt.tight_layout()
@@ -98,67 +98,10 @@ def plot_results(results=None, img_files=None, file='result.pickle'):
     ))
 
 
-def init():
-    params = {
-        'use_ba': True,
-        'threaded_ba': True,
-        'max_keyframes': 8,
-        'max_ba_keyframes': 8,
-        'ba_interval': 4,
-        'max_ba_fun_eval': 20,
-
-        'asteroid': False,
-    }
-    cam = get_cam()
-    logging.basicConfig(level=logging.INFO)
-    odo = VisualOdometry(cam, cam.width/2, verbose=0, pause=False,
-                         use_scale_correction=False, est_cam_pose=False, **params)
-    prior = Pose(np.array([0, 0, 0]), quaternion.one, np.ones((3,)) * 0.1, np.ones((3,)) * 0.01)
-    time = datetime.strptime('2020-07-01 15:42:00', '%Y-%m-%d %H:%M:%S').timestamp()
-    return odo, prior, time
-
-
-def get_cam():
-    w, h = 1280, 960
-    common_kwargs_worst = {
-        'sensor_size': (w * 0.00375, h * 0.00375),
-        'quantum_eff': 0.30,
-        'px_saturation_e': 2200,  # snr_max = 20*log10(sqrt(sat_e)) dB
-        'lambda_min': 350e-9, 'lambda_eff': 580e-9, 'lambda_max': 800e-9,
-        'dark_noise_mu': 40, 'dark_noise_sd': 6.32, 'readout_noise_sd': 15,
-        # dark_noise_sd should be sqrt(dark_noise_mu)
-        'emp_coef': 1,  # dynamic range = 20*log10(sat_e/readout_noise))
-        'exclusion_angle_x': 55,
-        'exclusion_angle_y': 90,
-    }
-    common_kwargs_best = dict(common_kwargs_worst)
-    common_kwargs_best.update({
-        'quantum_eff': 0.4,
-        'px_saturation_e': 3500,
-        'dark_noise_mu': 25, 'dark_noise_sd': 5, 'readout_noise_sd': 5,
-    })
-    common_kwargs = common_kwargs_best
-
-    cam = Camera(
-        w,  # width in pixels
-        h,  # height in pixels
-        43.6,  # x fov in degrees  (could be 6 & 5.695, 5.15 & 4.89, 7.7 & 7.309)
-        33.4,  # y fov in degrees
-        f_stop=5,  # TODO: put better value here
-        point_spread_fn=0.50,  # ratio of brightness in center pixel
-        scattering_coef=2e-10,  # affects strength of haze/veil when sun shines on the lens
-        dist_coefs=[-3.79489919e-01, 2.55784821e-01, 9.52433459e-04, 1.27543923e-04, -2.74301340e-01],   # by using calibrate.py
-        cam_mx=np.array([[1.60665503e+03, 0.00000000e+00, 6.12522544e+02],
-                        [0.00000000e+00, 1.60572265e+03, 4.57510418e+02],
-                        [0.00000000e+00, 0.00000000e+00, 1.00000000e+00]]),
-        **common_kwargs
-    )
-
-    return cam
-
-
 if __name__ == '__main__':
     if 1:
         main()
+    elif 1:
+        plot_results(file='hwproto-result.pickle')
     else:
-        plot_results()
+        plot_results(file='nokia-result.pickle')
