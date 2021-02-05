@@ -17,16 +17,21 @@ def main():
     # parse arguments
     parser = argparse.ArgumentParser(description='Run visual odometry on a set of images')
     parser.add_argument('--data', '-d', metavar='DATA', help='path to the data folder')
+    parser.add_argument('--out', '-o', metavar='OUT', help='path to the output folder')
     parser.add_argument('--mission', '-m', choices=('hwproto', 'nokia'), help='select mission')
+    parser.add_argument('--skip', '-s', type=int, default=1, help='use only every xth frame (default: 1)')
     args = parser.parse_args()
 
     # init odometry and data
     if args.mission == 'hwproto':
-        mission = HardwarePrototype(args.data, last_frame=(155, 321, None)[2])
+        mission = HardwarePrototype(args.data, last_frame=(155, 321, None)[0])
     elif args.mission == 'nokia':
-        mission = NokiaSensor(args.data, first_frame=(65, 3000)[0], last_frame=(6000, None)[0])
+        mission = NokiaSensor(args.data, first_frame=(65, 3000)[0], last_frame=(1000, None)[0])
     else:
         assert False, 'bad mission given: %s' % args.mission
+
+    if args.out:
+        mission.odo._track_save_path = args.out
 
     # run odometry
     prior = mission.prior
@@ -34,6 +39,9 @@ def main():
     results = []
     ground_truth = []
     for i, (img, name, gt) in enumerate(mission.data):
+        if i % args.skip != 0:
+            continue
+
         logging.info('')
         logging.info(name)
         frame_names.append(name)
@@ -69,15 +77,18 @@ def plot_results(results=None, frame_names=None, ground_truth=None, file='result
     axs[0].set_aspect('equal')
     rng = np.nanmax(loc[:, :2], axis=0) - np.nanmin(loc[:, :2], axis=0)
     mrg = 0.05 * np.max(rng)
+    fst = np.where(np.logical_not(np.isnan(loc[:, 0])))[0][0]
 
     if rng[0] > rng[1]:
-        line = axs[0].plot(loc[:, 0], loc[:, 1], '+-')
+        axs[0].plot(loc[fst, 0], loc[fst, 1], 'oC0', mfc='none')
+        line = axs[0].plot(loc[:, 0], loc[:, 1], 'C0')  #, '+-')
         axs[0].set_xlim(np.nanmin(loc[:, 0]) - mrg, np.nanmax(loc[:, 0]) + mrg)
         axs[0].set_ylim(np.nanmin(loc[:, 1]) - mrg, np.nanmax(loc[:, 1]) + mrg)
         axs[0].set_xlabel('x')
         axs[0].set_ylabel('y')
     else:
-        line = axs[0].plot(loc[:, 1], loc[:, 0], '+-')
+        axs[0].plot(loc[fst, 0], loc[fst, 1], 'oC0', mfc='none')
+        line = axs[0].plot(loc[:, 1], loc[:, 0], 'C0')  #, '+-')
         axs[0].set_xlim(np.nanmin(loc[:, 1]) - mrg, np.nanmax(loc[:, 1]) + mrg)
         axs[0].set_ylim(np.nanmax(loc[:, 0]) + mrg, np.nanmin(loc[:, 0]) - mrg)
         axs[0].set_xlabel('y')
@@ -85,7 +96,8 @@ def plot_results(results=None, frame_names=None, ground_truth=None, file='result
 
     tools.hover_annotate(fig, axs[0], line[0], frame_names)
 
-    line = axs[1].plot(np.linspace(1, 100, len(loc[:, 2])), loc[:, 2], '+-')
+    axs[1].plot(fst*100/len(loc[:, 2]), loc[fst, 2], 'oC0', mfc='none')
+    line = axs[1].plot(np.linspace(0, 100, len(loc[:, 2])), loc[:, 2], 'C0')  #, '+-')
     tools.hover_annotate(fig, axs[1], line[0], frame_names)
     axs[1].set_ylabel('z')
     axs[1].set_xlabel('t/T [%]')
@@ -101,7 +113,7 @@ def plot_results(results=None, frame_names=None, ground_truth=None, file='result
 if __name__ == '__main__':
     if 1:
         main()
-    elif 1:
+    elif 0:
         plot_results(file='hwproto-result.pickle')
     else:
         plot_results(file='nokia-result.pickle')

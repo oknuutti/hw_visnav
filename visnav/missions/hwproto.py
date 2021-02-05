@@ -20,7 +20,7 @@ class HardwarePrototype(Mission):
     def init_odo(self):
         params = {
             'use_ba': True,
-            'threaded_ba': True,
+            'threaded_ba': False,
             'max_keyframes': 8,
             'max_ba_keyframes': 8,
             'ba_interval': 4,

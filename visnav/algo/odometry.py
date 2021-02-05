@@ -15,6 +15,7 @@
 #       - https://github.com/dongjing3309/minisam
 #       - https://gtsam.org/docs/
 
+import os
 import copy
 import time
 from datetime import datetime
@@ -228,6 +229,11 @@ class VisualOdometry:
     DEF_SCALE_EST_COEF = 0.95           # scale correction estimation coefficient
     DEF_POSE_2D2D_QUALITY_LIM = 0.1     # minimum pose result quality
 
+    DEF_EST_2D2D_PROB = 0.99           # relates to max RANSAC iterations
+    DEF_EST_2D2D_METHOD = cv2.RANSAC    # cv2.LMEDS is fast but inaccurate, cv2.RANSAC is the other choice
+    DEF_EST_3D2D_ITER_COUNT = 1000      # max RANSAC iterations
+    DEF_EST_3D2D_METHOD = cv2.SOLVEPNP_AP3P  # RANSAC kernel function  # SOLVEPNP_AP3P
+
     DEF_ASTEROID = True                 # is the target lighted against dark background?
 
     DEF_USE_BA = True
@@ -289,6 +295,8 @@ class VisualOdometry:
         # current frame specific temp value cache
         self.cache = {}
         self._map_fig = None
+        self._frame_count = 0
+        self._track_save_path = None  # for debug purposes
         self._track_image = None    # for debug purposes
         self._track_colors = None   # for debug purposes
         self._map_image = None    # for debug purposes
@@ -424,6 +432,7 @@ class VisualOdometry:
 
     def initialize_frame(self, time, image, prior_pose, sc_q):
         logging.info('new frame')
+        self._frame_count += 1
 
         # maybe scale image
         img_sc = 1
@@ -631,8 +640,9 @@ class VisualOdometry:
             ok = False
             if len(pts3d) >= self.min_inliers:
                 ok, rv, r, inliers = cv2.solvePnPRansac(pts3d * self.state.scale, pts2d, self.cam_mx, None,
-                                                        iterationsCount=20000, reprojectionError=self.max_repr_err(nf),
-                                                        flags=cv2.SOLVEPNP_AP3P)
+                                                        iterationsCount=self.est_3d2d_iter_count,
+                                                        reprojectionError=self.max_repr_err(nf),
+                                                        flags=self.est_3d2d_method)
 
                 logging.info('PnP: %d/%d' % (0 if inliers is None else len(inliers), len(pts2d)))
 
@@ -736,9 +746,8 @@ class VisualOdometry:
             mask = 0
             if len(old_kp2d) >= self.min_2d2d_inliers / self.inlier_ratio_2d2d:
                 # solve pose using ransac & 5-point algo
-                E, mask2 = cv2.findEssentialMat(old_kp2d, new_kp2d, self.cam_mx,
-                                                method=cv2.RANSAC, prob=0.998, threshold=0.3)
-                                                #method=cv2.LMEDS)  # fast, but can make mistakes that are difficult to check for
+                E, mask2 = cv2.findEssentialMat(old_kp2d, new_kp2d, self.cam_mx, method=self.est_2d2d_method,
+                                                prob=self.est_2d2d_prob, threshold=self.max_repr_err(nf))
                 logging.info('E-mat: %d/%d' % (np.sum(mask2), len(old_kp2d)))
 
                 if np.sum(mask2) >= self.min_2d2d_inliers:
@@ -1342,6 +1351,10 @@ class VisualOdometry:
             self._track_image = cv2.line(self._track_image, (x1, y1), (x0, y0), self._col(id), 1)
             img = cv2.circle(img, (x1, y1), 5, self._col(id), 1)   # negative thickness => filled circle
         img = cv2.add(img, self._track_image)
+
+        if self._track_save_path:
+            cv2.imwrite(os.path.join(self._track_save_path, 'frame_%d.png' % self._frame_count), img)
+
         img_sc = 768/img.shape[0]
         cv2.imshow(label, cv2.resize(img, None, fx=img_sc, fy=img_sc, interpolation=cv2.INTER_CUBIC))
         cv2.waitKey(0 if pause else 25)
@@ -1365,21 +1378,21 @@ class VisualOdometry:
             x1, y1, z1 = pt1
             if pt0 is not None:
                 x0, y0, z0 = pt0
-                self._map_fig[1].plot((x0, x1), (z0, z1), color=self._col(id, fl=True))
-            self._map_fig[1].plot(x1, z1, 'o', color=self._col(id, fl=True), mfc='none')
+                self._map_fig[1].plot((x0, x1), (y0, y1), color=self._col(id, fl=True))
+            self._map_fig[1].plot(x1, y1, 'o', color=self._col(id, fl=True), mfc='none')
 
         # draw s/c position,
         lfp, nfp = self.state.last_frame.pose.post, new_frame.pose.post
         if lfp is not None and nfp is not None:
             x0, y0, z0 = tools.q_times_v(lfp.quat.conj(), -lfp.loc)
             x1, y1, z1 = tools.q_times_v(nfp.quat.conj(), -nfp.loc)
-            self._map_fig[1].plot((x0, x1), (z0, z1), color='r')
-            self._map_fig[1].plot(x1, z1, 'o', color='r')
+            self._map_fig[1].plot((x0, x1), (y0, y1), color='r')
+            self._map_fig[1].plot(x1, y1, 'o', color='r')
 
         # add origin
         self._map_fig[1].plot(0, 0, 'x', color='b')
-        self._map_fig[1].set_xlim(-20, 20)
-        self._map_fig[1].set_ylim(0, 100)
+        # self._map_fig[1].set_xlim(-100, 100)
+        # self._map_fig[1].set_ylim(-100, 100)
         plt.pause(0.05)
 
     def _cv_draw_pts3d(self, new_frame, pause=True, label='3d points', shape=(768, 768), m_per_px=1.3):

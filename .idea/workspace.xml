@@ -1,13 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
   <component name="ChangeListManager">
     <list default="true" id="605325bb-f302-46e4-8025-caaabf115796" name="Default Changelist" comment="">
-      <change afterPath="$PROJECT_DIR$/visnav/missions/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/visnav/missions/base.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/visnav/missions/hwproto.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/visnav/missions/nokia.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/visnav/algo/odometry.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/algo/odometry.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/visnav/missions/base.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/missions/base.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/visnav/missions/hwproto.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/missions/hwproto.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/visnav/run.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/run.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -30,7 +31,7 @@
   </component>
   <component name="PropertiesComponent">
     <property name="SHARE_PROJECT_CONFIGURATION_FILES" value="true" />
-    <property name="last_opened_file_path" value="$PROJECT_DIR$/../sispo" />
+    <property name="last_opened_file_path" value="$PROJECT_DIR$/../s100imgs/fppmap" />
     <property name="restartRequiresConfirmation" value="false" />
     <property name="settings.editor.selected.configurable" value="com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable" />
     <property name="two.files.diff.last.used.file" value="$PROJECT_DIR$/arducam/arducam_api/Windows/Python/Streaming_demo/ArduCam_Py_Demo.py" />
@@ -48,7 +49,7 @@
       <recent name="C:\projects\hw_visnav\visnav" />
     </key>
   </component>
-  <component name="RunManager" selected="Python.run nokia">
+  <component name="RunManager" selected="Python.run hwproto &quot;long trip&quot;">
     <configuration name="calibrate" type="PythonConfigurationType" factoryName="Python" nameIsGenerated="true">
       <module name="visnav" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -80,7 +81,38 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
-    <configuration name="run hwproto" type="PythonConfigurationType" factoryName="Python">
+    <configuration name="run hwproto &quot;long trip&quot;" type="PythonConfigurationType" factoryName="Python">
+      <module name="visnav" />
+      <option name="INTERPRETER_OPTIONS" value="-m cProfile -o profile.prof" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/visnav" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <EXTENSION ID="net.ashald.envfile">
+        <option name="IS_ENABLED" value="false" />
+        <option name="IS_SUBST" value="false" />
+        <option name="IS_PATH_MACRO_SUPPORTED" value="false" />
+        <option name="IS_IGNORE_MISSING_FILES" value="false" />
+        <option name="IS_ENABLE_EXPERIMENTAL_INTEGRATIONS" value="false" />
+        <ENTRIES>
+          <ENTRY IS_ENABLED="true" PARSER="runconfig" />
+        </ENTRIES>
+      </EXTENSION>
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/visnav/run.py" />
+      <option name="PARAMETERS" value="--mission hwproto --data C:\projects\hw_visnav\data\hwproto\data_20201125\images" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="run hwproto &quot;winter&quot;" type="PythonConfigurationType" factoryName="Python">
       <module name="visnav" />
       <option name="INTERPRETER_OPTIONS" value="-m cProfile -o profile.out" />
       <option name="PARENT_ENVS" value="true" />
@@ -103,7 +135,7 @@
         </ENTRIES>
       </EXTENSION>
       <option name="SCRIPT_NAME" value="$PROJECT_DIR$/visnav/run.py" />
-      <option name="PARAMETERS" value="--mission hwproto --data C:\projects\hw_visnav\data\hwproto\data_25112020\images" />
+      <option name="PARAMETERS" value="--mission hwproto --data C:\projects\hw_visnav\data\hwproto\data_20210130\images" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
       <option name="MODULE_MODE" value="false" />
@@ -134,7 +166,7 @@
         </ENTRIES>
       </EXTENSION>
       <option name="SCRIPT_NAME" value="$PROJECT_DIR$/visnav/run.py" />
-      <option name="PARAMETERS" value="--mission nokia --data C:\projects\hw_visnav\data\nokia\Flights_2020-12-17\HD_CAM_2020_12_17_14_50_40.mp4" />
+      <option name="PARAMETERS" value="--mission nokia --out C:\projects\hw_visnav\data\output --data C:\projects\hw_visnav\data\nokia\Flights_2020-12-17\HD_CAM_2020_12_17_14_50_40.mp4" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
       <option name="MODULE_MODE" value="false" />
@@ -199,7 +231,8 @@
       <method v="2" />
     </configuration>
     <list>
-      <item itemvalue="Python.run hwproto" />
+      <item itemvalue="Python.run hwproto &quot;long trip&quot;" />
+      <item itemvalue="Python.run hwproto &quot;winter&quot;" />
       <item itemvalue="Python.run nokia" />
       <item itemvalue="Python.test" />
       <item itemvalue="Python.calibrate" />
@@ -221,54 +254,58 @@
     <servers />
   </component>
   <component name="WindowStateProjectService">
-    <state x="297" y="66" key="#com.intellij.execution.impl.EditConfigurationsDialog" timestamp="1610039371194">
+    <state x="215" y="65" key="#com.intellij.execution.impl.EditConfigurationsDialog" timestamp="1612518062534">
       <screen x="0" y="0" width="1536" height="834" />
     </state>
-    <state x="297" y="66" key="#com.intellij.execution.impl.EditConfigurationsDialog/0.0.1536.834@0.0.1536.834" timestamp="1610039371194" />
+    <state x="215" y="65" key="#com.intellij.execution.impl.EditConfigurationsDialog/0.0.1536.834@0.0.1536.834" timestamp="1612518062534" />
     <state x="111" y="34" width="1337" height="680" key="DiffContextDialog" timestamp="1605272285730">
       <screen x="0" y="0" width="1536" height="834" />
     </state>
     <state x="111" y="34" width="1337" height="680" key="DiffContextDialog/0.0.1536.834@0.0.1536.834" timestamp="1605272285730" />
-    <state x="656" y="164" key="FileChooserDialogImpl" timestamp="1607940511494">
+    <state x="656" y="164" key="FileChooserDialogImpl" timestamp="1611822506180">
       <screen x="0" y="0" width="1536" height="834" />
     </state>
-    <state x="656" y="164" key="FileChooserDialogImpl/0.0.1536.834@0.0.1536.834" timestamp="1607940511494" />
-    <state width="1062" height="159" key="GridCell.Tab.0.bottom" timestamp="1610103689213">
+    <state x="656" y="164" key="FileChooserDialogImpl/0.0.1536.834@0.0.1536.834" timestamp="1611822506180" />
+    <state width="1212" height="272" key="GridCell.Tab.0.bottom" timestamp="1612522049451">
       <screen x="0" y="0" width="1536" height="834" />
     </state>
-    <state width="1062" height="159" key="GridCell.Tab.0.bottom/0.0.1536.834@0.0.1536.834" timestamp="1610103689213" />
-    <state width="1062" height="159" key="GridCell.Tab.0.center" timestamp="1610103689212">
+    <state width="1212" height="272" key="GridCell.Tab.0.bottom/0.0.1536.834@0.0.1536.834" timestamp="1612522049451" />
+    <state width="1212" height="272" key="GridCell.Tab.0.center" timestamp="1612522049451">
       <screen x="0" y="0" width="1536" height="834" />
     </state>
-    <state width="1062" height="159" key="GridCell.Tab.0.center/0.0.1536.834@0.0.1536.834" timestamp="1610103689212" />
-    <state width="1062" height="159" key="GridCell.Tab.0.left" timestamp="1610103689212">
+    <state width="1212" height="272" key="GridCell.Tab.0.center/0.0.1536.834@0.0.1536.834" timestamp="1612522049451" />
+    <state width="1212" height="272" key="GridCell.Tab.0.left" timestamp="1612522049451">
       <screen x="0" y="0" width="1536" height="834" />
     </state>
-    <state width="1062" height="159" key="GridCell.Tab.0.left/0.0.1536.834@0.0.1536.834" timestamp="1610103689212" />
-    <state width="1062" height="159" key="GridCell.Tab.0.right" timestamp="1610103689213">
+    <state width="1212" height="272" key="GridCell.Tab.0.left/0.0.1536.834@0.0.1536.834" timestamp="1612522049451" />
+    <state width="1212" height="272" key="GridCell.Tab.0.right" timestamp="1612522049451">
       <screen x="0" y="0" width="1536" height="834" />
     </state>
-    <state width="1062" height="159" key="GridCell.Tab.0.right/0.0.1536.834@0.0.1536.834" timestamp="1610103689213" />
-    <state width="1062" height="269" key="GridCell.Tab.1.bottom" timestamp="1610062254569">
+    <state width="1212" height="272" key="GridCell.Tab.0.right/0.0.1536.834@0.0.1536.834" timestamp="1612522049451" />
+    <state width="1212" height="272" key="GridCell.Tab.1.bottom" timestamp="1612522049294">
       <screen x="0" y="0" width="1536" height="834" />
     </state>
-    <state width="1062" height="269" key="GridCell.Tab.1.bottom/0.0.1536.834@0.0.1536.834" timestamp="1610062254569" />
-    <state width="1062" height="269" key="GridCell.Tab.1.center" timestamp="1610062254569">
+    <state width="1212" height="272" key="GridCell.Tab.1.bottom/0.0.1536.834@0.0.1536.834" timestamp="1612522049294" />
+    <state width="1212" height="272" key="GridCell.Tab.1.center" timestamp="1612522049294">
       <screen x="0" y="0" width="1536" height="834" />
     </state>
-    <state width="1062" height="269" key="GridCell.Tab.1.center/0.0.1536.834@0.0.1536.834" timestamp="1610062254569" />
-    <state width="1062" height="269" key="GridCell.Tab.1.left" timestamp="1610062254569">
+    <state width="1212" height="272" key="GridCell.Tab.1.center/0.0.1536.834@0.0.1536.834" timestamp="1612522049294" />
+    <state width="1212" height="272" key="GridCell.Tab.1.left" timestamp="1612522049294">
       <screen x="0" y="0" width="1536" height="834" />
     </state>
-    <state width="1062" height="269" key="GridCell.Tab.1.left/0.0.1536.834@0.0.1536.834" timestamp="1610062254569" />
-    <state width="1062" height="269" key="GridCell.Tab.1.right" timestamp="1610062254569">
+    <state width="1212" height="272" key="GridCell.Tab.1.left/0.0.1536.834@0.0.1536.834" timestamp="1612522049294" />
+    <state width="1212" height="272" key="GridCell.Tab.1.right" timestamp="1612522049294">
       <screen x="0" y="0" width="1536" height="834" />
     </state>
-    <state width="1062" height="269" key="GridCell.Tab.1.right/0.0.1536.834@0.0.1536.834" timestamp="1610062254569" />
-    <state x="410" y="155" width="672" height="678" key="search.everywhere.popup" timestamp="1609838968326">
+    <state width="1212" height="272" key="GridCell.Tab.1.right/0.0.1536.834@0.0.1536.834" timestamp="1612522049294" />
+    <state x="169" y="64" key="com.intellij.openapi.editor.actions.MultiplePasteAction$ClipboardContentChooser" timestamp="1612517277220">
       <screen x="0" y="0" width="1536" height="834" />
     </state>
-    <state x="410" y="155" width="672" height="678" key="search.everywhere.popup/0.0.1536.834@0.0.1536.834" timestamp="1609838968326" />
+    <state x="169" y="64" key="com.intellij.openapi.editor.actions.MultiplePasteAction$ClipboardContentChooser/0.0.1536.834@0.0.1536.834" timestamp="1612517277220" />
+    <state x="410" y="155" width="672" height="678" key="search.everywhere.popup" timestamp="1612516845443">
+      <screen x="0" y="0" width="1536" height="834" />
+    </state>
+    <state x="410" y="155" width="672" height="678" key="search.everywhere.popup/0.0.1536.834@0.0.1536.834" timestamp="1612516845443" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -285,8 +322,13 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/visnav/algo/odometry.py</url>
-          <line>679</line>
+          <line>689</line>
           <option name="timeStamp" value="161" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/visnav/algo/bundleadj.py</url>
+          <line>106</line>
+          <option name="timeStamp" value="163" />
         </line-breakpoint>
       </breakpoints>
       <default-breakpoints>
