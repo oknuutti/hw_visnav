@@ -5,11 +5,29 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="605325bb-f302-46e4-8025-caaabf115796" name="Default Changelist" comment="">
+      <change afterPath="$PROJECT_DIR$/tests/data/67p-16k.obj" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/render.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/visnav/iotools/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/visnav/iotools/objloader.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/visnav/missions/rosetta.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/visnav/render/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/visnav/render/extra_data.frag" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/visnav/render/extra_data.vert" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/visnav/render/render.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/visnav/render/shader_v400.frag" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/visnav/render/shader_v400.vert" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/visnav/render/shadow.frag" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/visnav/render/shadow.vert" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/visnav/render/wireframe.frag" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/visnav/render/wireframe.geom" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/visnav/render/wireframe.vert" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/visnav/render/wireframe2.geom" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.hgignore" beforeDir="false" afterPath="$PROJECT_DIR$/.hgignore" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/vcs.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/visnav/algo/odometry.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/algo/odometry.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/visnav/missions/base.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/missions/base.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/visnav/missions/hwproto.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/missions/hwproto.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/visnav/run.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/run.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/visnav/algo/orig/image.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/algo/orig/image.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/visnav/calibrate.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/calibrate.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -23,6 +41,9 @@
       </list>
     </option>
   </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$/mavlink" />
+  </component>
   <component name="ProjectId" id="1igws4gmtkEGKTtl6DDuDmyIrQb" />
   <component name="ProjectLevelVcsManager" settingsEditedManually="true" />
   <component name="ProjectViewState">
@@ -31,12 +52,19 @@
   </component>
   <component name="PropertiesComponent">
     <property name="SHARE_PROJECT_CONFIGURATION_FILES" value="true" />
-    <property name="last_opened_file_path" value="$PROJECT_DIR$/../s100imgs/fppmap" />
+    <property name="last_opened_file_path" value="$PROJECT_DIR$/visnav/render" />
     <property name="restartRequiresConfirmation" value="false" />
     <property name="settings.editor.selected.configurable" value="com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable" />
     <property name="two.files.diff.last.used.file" value="$PROJECT_DIR$/arducam/arducam_api/Windows/Python/Streaming_demo/ArduCam_Py_Demo.py" />
   </component>
   <component name="RecentsManager">
+    <key name="CopyFile.RECENT_KEYS">
+      <recent name="C:\projects\hw_visnav\visnav\render" />
+      <recent name="C:\projects\hw_visnav\visnav\missions" />
+      <recent name="C:\projects\hw_visnav\visnav\iotools" />
+      <recent name="C:\projects\hw_visnav\visnav\algo" />
+      <recent name="C:\projects\hw_visnav\visnav" />
+    </key>
     <key name="MoveFile.RECENT_KEYS">
       <recent name="C:\projects\hw_visnav\sensehat" />
       <recent name="C:\projects\hw_visnav" />
@@ -44,12 +72,8 @@
       <recent name="C:\projects\hw_visnav\visnav\algo\links" />
       <recent name="C:\projects\hw_visnav\visnav" />
     </key>
-    <key name="CopyFile.RECENT_KEYS">
-      <recent name="C:\projects\hw_visnav\visnav\algo" />
-      <recent name="C:\projects\hw_visnav\visnav" />
-    </key>
   </component>
-  <component name="RunManager" selected="Python.run hwproto &quot;long trip&quot;">
+  <component name="RunManager" selected="Python.render">
     <configuration name="calibrate" type="PythonConfigurationType" factoryName="Python" nameIsGenerated="true">
       <module name="visnav" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -74,6 +98,27 @@
       </EXTENSION>
       <option name="SCRIPT_NAME" value="$PROJECT_DIR$/visnav/calibrate.py" />
       <option name="PARAMETERS" value="--path D:\projects\hw_visnav\arducam-output\calib\cb -x 7 -y 5 -s 58" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="render" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="visnav" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/tests" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/tests/render.py" />
+      <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
       <option name="MODULE_MODE" value="false" />
@@ -231,13 +276,19 @@
       <method v="2" />
     </configuration>
     <list>
+      <item itemvalue="Python.calibrate" />
       <item itemvalue="Python.run hwproto &quot;long trip&quot;" />
       <item itemvalue="Python.run hwproto &quot;winter&quot;" />
       <item itemvalue="Python.run nokia" />
       <item itemvalue="Python.test" />
-      <item itemvalue="Python.calibrate" />
       <item itemvalue="Python tests.Unittests in odometry.py" />
+      <item itemvalue="Python.render" />
     </list>
+    <recent_temporary>
+      <list>
+        <item itemvalue="Python.render" />
+      </list>
+    </recent_temporary>
   </component>
   <component name="SpellCheckerSettings" RuntimeDictionaries="0" Folders="0" CustomDictionaries="0" DefaultDictionary="application-level" UseSingleDictionary="true" transferred="true" />
   <component name="SvnConfiguration">
@@ -253,66 +304,15 @@
     </task>
     <servers />
   </component>
-  <component name="WindowStateProjectService">
-    <state x="215" y="65" key="#com.intellij.execution.impl.EditConfigurationsDialog" timestamp="1612518062534">
-      <screen x="0" y="0" width="1536" height="834" />
-    </state>
-    <state x="215" y="65" key="#com.intellij.execution.impl.EditConfigurationsDialog/0.0.1536.834@0.0.1536.834" timestamp="1612518062534" />
-    <state x="111" y="34" width="1337" height="680" key="DiffContextDialog" timestamp="1605272285730">
-      <screen x="0" y="0" width="1536" height="834" />
-    </state>
-    <state x="111" y="34" width="1337" height="680" key="DiffContextDialog/0.0.1536.834@0.0.1536.834" timestamp="1605272285730" />
-    <state x="656" y="164" key="FileChooserDialogImpl" timestamp="1611822506180">
-      <screen x="0" y="0" width="1536" height="834" />
-    </state>
-    <state x="656" y="164" key="FileChooserDialogImpl/0.0.1536.834@0.0.1536.834" timestamp="1611822506180" />
-    <state width="1212" height="272" key="GridCell.Tab.0.bottom" timestamp="1612522049451">
-      <screen x="0" y="0" width="1536" height="834" />
-    </state>
-    <state width="1212" height="272" key="GridCell.Tab.0.bottom/0.0.1536.834@0.0.1536.834" timestamp="1612522049451" />
-    <state width="1212" height="272" key="GridCell.Tab.0.center" timestamp="1612522049451">
-      <screen x="0" y="0" width="1536" height="834" />
-    </state>
-    <state width="1212" height="272" key="GridCell.Tab.0.center/0.0.1536.834@0.0.1536.834" timestamp="1612522049451" />
-    <state width="1212" height="272" key="GridCell.Tab.0.left" timestamp="1612522049451">
-      <screen x="0" y="0" width="1536" height="834" />
-    </state>
-    <state width="1212" height="272" key="GridCell.Tab.0.left/0.0.1536.834@0.0.1536.834" timestamp="1612522049451" />
-    <state width="1212" height="272" key="GridCell.Tab.0.right" timestamp="1612522049451">
-      <screen x="0" y="0" width="1536" height="834" />
-    </state>
-    <state width="1212" height="272" key="GridCell.Tab.0.right/0.0.1536.834@0.0.1536.834" timestamp="1612522049451" />
-    <state width="1212" height="272" key="GridCell.Tab.1.bottom" timestamp="1612522049294">
-      <screen x="0" y="0" width="1536" height="834" />
-    </state>
-    <state width="1212" height="272" key="GridCell.Tab.1.bottom/0.0.1536.834@0.0.1536.834" timestamp="1612522049294" />
-    <state width="1212" height="272" key="GridCell.Tab.1.center" timestamp="1612522049294">
-      <screen x="0" y="0" width="1536" height="834" />
-    </state>
-    <state width="1212" height="272" key="GridCell.Tab.1.center/0.0.1536.834@0.0.1536.834" timestamp="1612522049294" />
-    <state width="1212" height="272" key="GridCell.Tab.1.left" timestamp="1612522049294">
-      <screen x="0" y="0" width="1536" height="834" />
-    </state>
-    <state width="1212" height="272" key="GridCell.Tab.1.left/0.0.1536.834@0.0.1536.834" timestamp="1612522049294" />
-    <state width="1212" height="272" key="GridCell.Tab.1.right" timestamp="1612522049294">
-      <screen x="0" y="0" width="1536" height="834" />
-    </state>
-    <state width="1212" height="272" key="GridCell.Tab.1.right/0.0.1536.834@0.0.1536.834" timestamp="1612522049294" />
-    <state x="169" y="64" key="com.intellij.openapi.editor.actions.MultiplePasteAction$ClipboardContentChooser" timestamp="1612517277220">
-      <screen x="0" y="0" width="1536" height="834" />
-    </state>
-    <state x="169" y="64" key="com.intellij.openapi.editor.actions.MultiplePasteAction$ClipboardContentChooser/0.0.1536.834@0.0.1536.834" timestamp="1612517277220" />
-    <state x="410" y="155" width="672" height="678" key="search.everywhere.popup" timestamp="1612516845443">
-      <screen x="0" y="0" width="1536" height="834" />
-    </state>
-    <state x="410" y="155" width="672" height="678" key="search.everywhere.popup/0.0.1536.834@0.0.1536.834" timestamp="1612516845443" />
+  <component name="UnknownFeatures">
+    <option featureType="com.intellij.fileTypeFactory" implementationName="*.csv" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
       <breakpoints>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/visnav/calibrate.py</url>
-          <line>56</line>
+          <line>52</line>
           <option name="timeStamp" value="60" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">

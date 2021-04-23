@@ -4,8 +4,6 @@ import argparse
 import numpy as np
 import cv2
 
-from visnav.run import get_cam
-
 
 def main():
     # parse arguments
@@ -52,8 +50,6 @@ def main():
             else:
                 print('cant find the corners from %s' % fname)
 
-    # cam = get_cam()
-    # cam_mx = cam.intrinsic_camera_mx(True)
     ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, gray.shape[::-1], None, None)
     print('camera mx:\n%s' % (mtx,))
     print('\ndist coefs: %s' % (dist,))

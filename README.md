@@ -11,7 +11,7 @@ Maybe with python bindings from [here](https://github.com/Edwinem/ceres_python_b
 Later on when trying to get other algorithms to work:
 ```
 apt-get install libgl1-mesa-dev libx11-dev
-pip install numba astropy moderngl
+pip install moderngl==5.5.4 moderngl-ext-obj==1.0.0
 ```
 
 ## Run a test
@@ -23,7 +23,12 @@ Then run:
 python -m unittest tests/odometry.py
 ```
 
-## TODO:
-- fix odometry.py, for some reason there's high orientation errors
+or to test rendering with profiling, run:
+```
+python -m cProfile -o profile.prof -m tests.render
+```
 
+## TODO:
+- include inertial measurements
+- test function for synthetic photometric feature algo
 

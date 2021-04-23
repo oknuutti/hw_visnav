@@ -6,8 +6,12 @@ syntax:glob
 # custom own stuff
 arducam/
 data/
+.tmp.drivedownload/
 *.out
 *.pickle
+*.prof
+mavlink/
+pymavlink/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
