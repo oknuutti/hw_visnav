@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 def main(outfile='spl-test.log', img_path='67p-imgs', config=None):
     logger.info('Setting up renderer and loading the 3d model...')
     tconfig = config or {}
-    config = {'verbose': 2, 'feat': KeypointAlgo.AKAZE, 'v16k': False, 'view_width': 384}
+    config = {'verbose': 1, 'feat': KeypointAlgo.AKAZE, 'v16k': False, 'view_width': 384}
     config.update(tconfig)
     v16k = config.pop('v16k')
     view_width = config.pop('view_width')
