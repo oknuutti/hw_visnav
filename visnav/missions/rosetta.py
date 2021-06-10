@@ -1,7 +1,6 @@
 import os
 import math
 import warnings
-import dateutil.parser as dparser
 
 import numpy as np
 
@@ -10,9 +9,7 @@ try:
     from astropy import constants as const
     from astropy import units
 except:
-    class Time:
-        def __init__(self, datestr, **kwargs):
-            self.unix = dparser.parse(datestr).timestamp()
+    from visnav.algo.tools import Time
 
 from visnav.settings import *
 from visnav.algo import tools
@@ -22,7 +19,7 @@ from visnav.iotools import objloader
 
 class RosettaSystemModel(SystemModel):
     def __init__(self, hi_res_shape_model=False, rosetta_batch='mtp006', focused_attenuated=True, res_mult=1.0,
-                 skip_obj_load=False):
+                 view_width=VIEW_WIDTH, skip_obj_load=False):
         # gives some unnecessary warning about "dubious year" even when trying to ignore it
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -30,6 +27,7 @@ class RosettaSystemModel(SystemModel):
 
         fa = focused_attenuated   # else defocused not attenuated
         super(RosettaSystemModel, self).__init__(
+            view_width=view_width,
             asteroid=ChuryumovGerasimenko(hi_res_shape_model=hi_res_shape_model, rosetta_batch=rosetta_batch,
                                           skip_obj_load=skip_obj_load),
 
@@ -202,7 +200,7 @@ class ChuryumovGerasimenko(Asteroid):
         # #   - 12.4304h (19 May 2015)
         # #   - 12.305h (10 Aug 2015)
         # self.rot_epoch = Time('J2000')
-        self.rot_epoch = Time('2000-01-01 12:00:00')
+        self.rot_epoch = Time(946727935.816)  # unix timestamp of J2000: 946727935.816, got using Time('J2000').unix
 
         # self.rotation_velocity = 2*math.pi/12.4043/3600 # prograde, in rad/s
         # --- above seems incorrect based on the pics, own estimate

@@ -7,11 +7,15 @@ from math import degrees as deg, radians as rad
 
 import numpy as np
 import quaternion  # adds to numpy  # noqa # pylint: disable=unused-import
-# from astropy.time import Time
-# from astropy import constants as const
-# from astropy import units
-# from astropy.coordinates import SkyCoord, spherical_to_cartesian
-#import scipy.integrate as integrate
+try:
+    from astropy.time import Time
+    from astropy import constants as const
+    from astropy import units
+    from astropy.coordinates import SkyCoord, spherical_to_cartesian
+except:
+    from visnav.algo.tools import Time
+
+import scipy.integrate as integrate
 import configparser
 
 from visnav.algo.image import ImageProc
@@ -149,7 +153,7 @@ class SystemModel(ABC):
             self.min_distance, self.asteroid.max_radius)
 
         self.mission_id = None  # overridden by particular missions
-        self.view_width = VIEW_WIDTH
+        self.view_width = kwargs.get('view_width', VIEW_WIDTH)
 
         # spacecraft position relative to asteroid, z towards spacecraft,
         #   x towards right when looking out from s/c camera, y up
@@ -251,14 +255,14 @@ class SystemModel(ABC):
     def spacecraft_altitude(self):
         sc_ast_v = tools.normalize_v(np.array(self.spacecraft_pos))
         ast_vx = self.sc_asteroid_vertices()
-        min_distance = np.min(sc_ast_v.dot(ast_vx.T))
+        min_distance = np.min(sc_ast_v.dot(ast_vx.T)) if ast_vx is not None else None
         return min_distance
 
     @property
     def real_spacecraft_altitude(self):
         sc_ast_v = tools.normalize_v(np.array(self.real_spacecraft_pos))
         ast_vx = self.sc_asteroid_vertices(real=True)
-        min_distance = np.min(sc_ast_v.dot(ast_vx.T))
+        min_distance = np.min(sc_ast_v.dot(ast_vx.T)) if ast_vx is not None else None
         return min_distance
 
     def asteroid_rotation_from_model(self):
@@ -302,7 +306,7 @@ class SystemModel(ABC):
 
     @property
     def spacecraft_q(self):
-        return tools.ypr_to_q(*list(map(
+        return tools.lat_lon_roll_to_q(*list(map(
             math.radians,
             (self.x_rot.value, self.y_rot.value, self.z_rot.value)
         )))
@@ -310,11 +314,11 @@ class SystemModel(ABC):
     @spacecraft_q.setter
     def spacecraft_q(self, new_q):
         self.x_rot.value, self.y_rot.value, self.z_rot.value = \
-            list(map(math.degrees, tools.q_to_ypr(new_q)))
+            list(map(math.degrees, tools.q_to_lat_lon_roll(new_q)))
 
     @property
     def real_spacecraft_q(self):
-        return tools.ypr_to_q(*list(map(
+        return tools.lat_lon_roll_to_q(*list(map(
             math.radians,
             (self.x_rot.real_value, self.y_rot.real_value, self.z_rot.real_value)
         )))
@@ -322,7 +326,7 @@ class SystemModel(ABC):
     @real_spacecraft_q.setter
     def real_spacecraft_q(self, new_q):
         self.x_rot.real_value, self.y_rot.real_value, self.z_rot.real_value = \
-            list(map(math.degrees, tools.q_to_ypr(new_q)))
+            list(map(math.degrees, tools.q_to_lat_lon_roll(new_q)))
 
     @property
     def asteroid_q(self):
@@ -333,7 +337,7 @@ class SystemModel(ABC):
         ast = self.asteroid
         sc2ast_q = SystemModel.frm_conv_q(SystemModel.SPACECRAFT_FRAME, SystemModel.ASTEROID_FRAME, ast=ast)
 
-        ast.axis_latitude, ast.axis_longitude, new_theta = tools.q_to_ypr(new_q * sc2ast_q)
+        ast.axis_latitude, ast.axis_longitude, new_theta = tools.q_to_lat_lon_roll(new_q * sc2ast_q)
 
         old_theta = ast.rotation_theta(self.time.value)
         ast.rotation_pm = tools.wrap_rads(ast.rotation_pm + new_theta - old_theta)
@@ -392,7 +396,7 @@ class SystemModel(ABC):
     def rotate_spacecraft(self, q):
         new_q = self.spacecraft_q * q
         self.x_rot.value, self.y_rot.value, self.z_rot.value = \
-            list(map(math.degrees, tools.q_to_ypr(new_q)))
+            list(map(math.degrees, tools.q_to_lat_lon_roll(new_q)))
 
     def rotate_asteroid(self, q):
         """ rotate asteroid in spacecraft frame """
@@ -425,7 +429,11 @@ class SystemModel(ABC):
         self.swap_values_with_real_vals()
         target_vertices = self.sc_asteroid_vertices()
         self.swap_values_with_real_vals()
-        return tools.sc_asteroid_max_shift_error(est_vertices, target_vertices)
+
+        sh_err = float('nan')
+        if est_vertices is not None and target_vertices is not None:
+            sh_err = tools.sc_asteroid_max_shift_error(est_vertices, target_vertices)
+        return sh_err
 
     def sc_asteroid_vertices(self, real=False):
         """ asteroid vertices rotated and translated to spacecraft frame """
@@ -587,7 +595,7 @@ class SystemModel(ABC):
             # px are on a curved surface
             dx = ((tx + tw / 2) - ow // 2) / ow * math.radians(self.cam.x_fov)
             dy = ((ty + th / 2) - oh // 2) / oh * math.radians(self.cam.y_fov)
-        dq = tools.ypr_to_q(-dy, -dx, 0)
+        dq = tools.lat_lon_roll_to_q(-dy, -dx, 0)
 
         return sc, dq
 
@@ -634,16 +642,16 @@ class SystemModel(ABC):
                 sco_lat = tools.wrap_rads(-sc_lat)
                 sco_lon = tools.wrap_rads(math.pi + sc_lon)
                 sco_rot = np.random.uniform(-math.pi, math.pi)  # rotation around camera axis
-                sco_q = tools.ypr_to_q(sco_lat, sco_lon, sco_rot)
+                sco_q = tools.lat_lon_roll_to_q(sco_lat, sco_lon, sco_rot)
 
                 ast_ang_r = math.atan(
                     self.asteroid.mean_radius / 1000 / sc_r)  # if asteroid close, allow s/c to look at limb
                 dx = max(rad(self.cam.x_fov / 2), ast_ang_r)
                 dy = max(rad(self.cam.y_fov / 2), ast_ang_r)
-                disturbance_q = tools.ypr_to_q(np.random.uniform(-dy, dy), np.random.uniform(-dx, dx), 0)
-                sco_lat, sco_lon, sco_rot = tools.q_to_ypr(sco_q * disturbance_q)
+                disturbance_q = tools.lat_lon_roll_to_q(np.random.uniform(-dy, dy), np.random.uniform(-dx, dx), 0)
+                sco_lat, sco_lon, sco_rot = tools.q_to_lat_lon_roll(sco_q * disturbance_q)
 
-            sco_q = tools.ypr_to_q(sco_lat, sco_lon, sco_rot)
+            sco_q = tools.lat_lon_roll_to_q(sco_lat, sco_lon, sco_rot)
 
             # sc_ast_p ecliptic => sc_ast_p open gl -z aligned view
             sc_pos = tools.q_times_v((sco_q * self.sc2gl_q).conj(), sc_ast_v)
@@ -1384,7 +1392,7 @@ class Asteroid(ABC):
         # TODO: use precession info
 
         # orient z axis correctly, rotate around it
-        return tools.ypr_to_q(self.axis_latitude, self.axis_longitude, theta) \
+        return tools.lat_lon_roll_to_q(self.axis_latitude, self.axis_longitude, theta) \
                * self.ast2sc_q
 
     def position(self, timestamp):

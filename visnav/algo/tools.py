@@ -1,5 +1,6 @@
 import math
 import time
+import dateutil.parser as dparser
 
 import numpy as np
 #import numba as nb
@@ -58,6 +59,18 @@ class Stopwatch:
         self.stop()
 
 
+class Time:
+    def __init__(self, datestr, **kwargs):
+        self.unix = dparser.parse(datestr).timestamp() if isinstance(datestr, str) else float(datestr)
+
+    @property
+    def sec(self):
+        return self.unix
+
+    def __sub__(self, other: 'Time'):
+        return Time(self.unix - other.unix)
+
+
 def sphere_angle_radius(loc, r):
     return np.arcsin(r / np.linalg.norm(loc, axis=1))
 
@@ -65,7 +78,7 @@ def sphere_angle_radius(loc, r):
 def dist_across_and_along_vect(A, b):
     """ A: array of vectors, b: axis vector """
     lat, lon, r = cartesian2spherical(*b)
-    q = ypr_to_q(lat, lon, 0).conj()
+    q = lat_lon_roll_to_q(lat, lon, 0).conj()
     R = quaternion.as_rotation_matrix(q)
     Ab = R.dot(A.T).T
     d = Ab[:, 0:1]
@@ -178,6 +191,14 @@ def parallax(f0, f1, pt):
         return angle_between_v(f0-pt, f1-pt)
     return angle_between_mx(f0-pt, f1-pt)
 
+
+def to_cartesian(lat, lon, alt, lat0, lon0, alt0):
+    from pygeodesy.ltp import LocalCartesian
+    lc = LocalCartesian(lat0, lon0, alt0)
+    xyz = lc.forward(lat, lon, alt)
+    return np.array(xyz.xyz)
+
+
 def angle_between_v(v1, v2):
     # Notice: only returns angles between 0 and 180 deg
 
@@ -240,9 +261,9 @@ def angle_between_q_arr(q1, q2):
     return np.abs(wrap_rads(2 * np.arccos(qd[:, 0])))
 
 
-def angle_between_ypr(ypr1, ypr2):
-    q1 = ypr_to_q(*ypr1)
-    q2 = ypr_to_q(*ypr2)
+def angle_between_lat_lon_roll(llr1, llr2):
+    q1 = lat_lon_roll_to_q(*llr1)
+    q2 = lat_lon_roll_to_q(*llr2)
     return angle_between_q(q1, q2)
 
 
@@ -294,12 +315,21 @@ def angleaxis_to_q(rv):
     return np.quaternion(w, *v).normalized()
 
 
-def ypr_to_q(lat, lon, roll):
-    # Tait-Bryan angles, aka yaw-pitch-roll, nautical angles, cardan angles
-    # intrinsic euler rotations z-y'-x'', pitch=-lat, yaw=lon
+def lat_lon_roll_to_q(lat, lon, roll):
+    # intrinsic euler rotations z-y'-x'' for lat lon and roll
     return (
             np.quaternion(math.cos(lon / 2), 0, 0, math.sin(lon / 2))
             * np.quaternion(math.cos(-lat / 2), 0, math.sin(-lat / 2), 0)
+            * np.quaternion(math.cos(roll / 2), math.sin(roll / 2), 0, 0)
+    )
+
+
+def ypr_to_q(yaw, pitch, roll):
+    # Tait-Bryan angles, aka yaw-pitch-roll, nautical angles, cardan angles
+    # intrinsic euler rotations z-y'-x'', pitch=-lat, yaw=lon
+    return (
+            np.quaternion(math.cos(yaw / 2), 0, 0, math.sin(yaw / 2))
+            * np.quaternion(math.cos(pitch / 2), 0, math.sin(pitch / 2), 0)
             * np.quaternion(math.cos(roll / 2), math.sin(roll / 2), 0, 0)
     )
 
@@ -317,13 +347,30 @@ def eul_to_q(angles, order='xyz', reverse=False):
     return q
 
 
-def q_to_ypr(q):
+def q_to_lat_lon_roll(q):
     # from https://math.stackexchange.com/questions/687964/getting-euler-tait-bryan-angles-from-quaternion-representation
     q0, q1, q2, q3 = quaternion.as_float_array(q)
     roll = np.arctan2(q2 * q3 + q0 * q1, .5 - q1 ** 2 - q2 ** 2)
     lat = -np.arcsin(np.clip(-2 * (q1 * q3 - q0 * q2), -1, 1))
     lon = np.arctan2(q1 * q2 + q0 * q3, .5 - q2 ** 2 - q3 ** 2)
     return lat, lon, roll
+
+
+def q_to_ypr(q):
+    # from https://math.stackexchange.com/questions/687964/getting-euler-tait-bryan-angles-from-quaternion-representation
+    q0, q1, q2, q3 = quaternion.as_float_array(q)
+    roll = np.arctan2(q2 * q3 + q0 * q1, .5 - q1 ** 2 - q2 ** 2)
+    pitch = np.arcsin(np.clip(-2 * (q1 * q3 - q0 * q2), -1, 1))
+    yaw = np.arctan2(q1 * q2 + q0 * q3, .5 - q2 ** 2 - q3 ** 2)
+    return yaw, pitch, roll
+
+
+def qarr_to_ypr(qarr):
+    # from https://math.stackexchange.com/questions/687964/getting-euler-tait-bryan-angles-from-quaternion-representation
+    roll = np.arctan2(qarr[:, 2] * qarr[:, 3] + qarr[:, 0] * qarr[:, 1], .5 - qarr[:, 1] ** 2 - qarr[:, 2] ** 2)
+    pitch = np.arcsin(np.clip(-2 * (qarr[:, 1] * qarr[:, 3] - qarr[:, 0] * qarr[:, 2]), -1, 1))
+    yaw = np.arctan2(qarr[:, 1] * qarr[:, 2] + qarr[:, 0] * qarr[:, 3], .5 - qarr[:, 2] ** 2 - qarr[:, 3] ** 2)
+    return np.stack((yaw, pitch, roll), axis=1)
 
 
 def mean_q(qs, ws=None):
@@ -435,11 +482,15 @@ def solar_elongation(ast_v, sc_q):
     sco_x, sco_y, sco_z = q_to_unitbase(sc_q)
 
     if USE_ICRS:
-        sc = SkyCoord(x=ast_v[0], y=ast_v[1], z=ast_v[2], frame='icrs',
-                      unit='m', representation_type='cartesian', obstime='J2000') \
-            .transform_to('hcrs') \
-            .represent_as('cartesian')
-        ast_v = np.array([sc.x.value, sc.y.value, sc.z.value])
+        try:
+            sc = SkyCoord(x=ast_v[0], y=ast_v[1], z=ast_v[2], frame='icrs',
+                          unit='m', representation_type='cartesian', obstime='J2000') \
+                .transform_to('hcrs') \
+                .represent_as('cartesian')
+            ast_v = np.array([sc.x.value, sc.y.value, sc.z.value])
+        except NameError:
+            # if SkyCoord not present, do not correct solar system barycenter -> center of the sun
+            pass
 
     # angle between camera axis and the sun, 0: right ahead, pi: behind
     elong = angle_between_v(-ast_v, sco_x)
@@ -561,14 +612,14 @@ def discretize_q(q, tol=None, lat_range=(-math.pi / 2, math.pi / 2), points=None
     elif tol is not None:
         points = bf2_lat_lon(tol, lat_range=lat_range)
 
-    lat, lon, roll = q_to_ypr(q)
+    lat, lon, roll = q_to_lat_lon_roll(q)
     (nlat, nroll), idx = find_nearest_arr(
         points,
         np.array((lat, roll)),
         ord=2,
         fun=wrap_rads,
     )
-    nq0 = ypr_to_q(nlat, 0, nroll)
+    nq0 = lat_lon_roll_to_q(nlat, 0, nroll)
     return nq0, idx
 
 
@@ -1011,7 +1062,7 @@ def plot_quats(quats, conseq=True, wait=True):
         ax.set_prop_cycle('color', map(lambda c: '%f' % c, np.linspace(1, 0, len(quats))))
     for i, q in enumerate(quats):
         if q is not None:
-            lat, lon, _ = q_to_ypr(q)
+            lat, lon, _ = q_to_lat_lon_roll(q)
             v1 = spherical2cartesian(lat, lon, 1)
             v2 = (v1 + normalize_v(np.cross(np.cross(v1, np.array([0, 0, 1])), v1)) * 0.1) * 0.85
             v2 = q_times_v(q, v2)
@@ -1036,7 +1087,7 @@ def plot_poses(poses, conseq=True, wait=True, arrow_len=1):
     for i, pose in enumerate(poses):
         if pose is not None:
             q = np.quaternion(*pose[3:])
-            lat, lon, _ = q_to_ypr(q)
+            lat, lon, _ = q_to_lat_lon_roll(q)
             v1 = spherical2cartesian(lat, lon, 1) * arrow_len
             v2 = (v1 + normalize_v(np.cross(np.cross(v1, np.array([0, 0, 1])), v1)) * 0.1 * arrow_len) * 0.85
             v2 = q_times_v(q, v2)
