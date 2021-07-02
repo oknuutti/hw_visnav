@@ -201,17 +201,17 @@ def write_log_entry(logfile, i, rtime, sm_noise, params, noise, pos, alt, rel_ro
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     config = [
-        ('spl-akaze-4k-384.log', {
-            'feat': KeypointAlgo.ORB,
-            'v16k': False,
-            'view_width': 384,
-        }),
         ('spl-orb-4k-384.log', {
+            'feat': KeypointAlgo.ORB,
+            'v16k': False,
+            'view_width': 384,
+        }),
+        ('spl-akaze-4k-384.log', {
             'feat': KeypointAlgo.AKAZE,
             'v16k': False,
             'view_width': 384,
         }),
-        ('spl-akaze-4k-512.log', {
+        ('spl-orb-4k-512.log', {
             'feat': KeypointAlgo.ORB,
             'v16k': False,
             'view_width': 512,
@@ -221,14 +221,14 @@ if __name__ == '__main__':
             'v16k': False,
             'view_width': 512,
         }),
-        ('spl-akaze-16k-512.log', {
+        ('spl-orb-16k-512.log', {
             'feat': KeypointAlgo.ORB,
-            'v16k': False,
+            'v16k': True,
             'view_width': 512,
         }),
         ('spl-akaze-16k-512.log', {
             'feat': KeypointAlgo.AKAZE,
-            'v16k': False,
+            'v16k': True,
             'view_width': 512,
         }),
     ]
