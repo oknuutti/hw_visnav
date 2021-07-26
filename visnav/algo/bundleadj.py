@@ -17,14 +17,14 @@ def mp_bundle_adj(arg_queue, log_queue, res_queue):
     while True:
         cmd, args, kwargs = arg_queue.get()
         if cmd == 'ba':
-            res_queue.put(bundle_adj(*args, log_writer=LogWriter(log_queue), **kwargs))
+            res_queue.put(vis_bundle_adj(*args, log_writer=LogWriter(log_queue), **kwargs))
         else:
             break
 
 
-def bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray,
-               cam_idxs: np.ndarray, pt3d_idxs: np.ndarray, K: np.ndarray, log_writer=None,
-               max_nfev=None, skip_pose0=False, poses_only=False, huber_coef=False):
+def vis_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray,
+                   cam_idxs: np.ndarray, pt3d_idxs: np.ndarray, K: np.ndarray, log_writer=None,
+                   max_nfev=None, skip_pose0=False, poses_only=False, huber_coef=False):
     """
     Returns the bundle adjusted parameters, in this case the optimized rotation and translation vectors.
 

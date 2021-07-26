@@ -25,10 +25,14 @@ python -m unittest tests/odometry.py
 
 or to test rendering with profiling, run:
 ```
-python -m cProfile -o profile.prof -m tests.render
+xvfb-run --server-args="-screen 0 1024x768x24" python -m cProfile -o profile.prof -m tests.render
+```
+
+or to test synthetic photometric feature algo with config set "1", run:
+```
+xvfb-run --server-args="-screen 0 1024x768x24" python -m cProfile -o profile1.prof tests/splnav.py 1
 ```
 
 ## TODO:
 - include inertial measurements
-- test function for synthetic photometric feature algo
 

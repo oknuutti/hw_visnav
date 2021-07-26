@@ -237,5 +237,5 @@ if __name__ == '__main__':
     if len(sys.argv) != 2 or sys.argv[1] not in test_ids:
         logger.error('USAGE: %s %s' % (sys.argv[0], '|'.join(test_ids)))
 
-    test_id = int(sys.argv[1])
+    test_id = int(sys.argv[1]) - 1
     main(config[test_id][0], config=config[test_id][1])

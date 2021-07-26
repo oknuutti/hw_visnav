@@ -26,7 +26,7 @@ import quaternion   # adds to numpy  # noqa # pylint: disable=unused-import
 import cv2
 
 from visnav.algo import tools
-from visnav.algo.bundleadj import bundle_adj
+from visnav.algo.bundleadj import vis_bundle_adj
 from visnav.algo.image import ImageProc
 from visnav.algo.model import SystemModel, Asteroid
 
@@ -539,10 +539,10 @@ class VisualOdometry:
                     self.state.map3d[ids[i]].inlier_time = nf.time
 
                 # solvePnPRansac has some bug that apparently randomly gives 180deg wrong answer
-                # if abs(tools.q_to_ypr(q)[2]) > math.pi * 0.9:
+                # if abs(tools.q_to_lat_lon_roll(q)[2]) > math.pi * 0.9:
                 #     if self.verbose:
                 #         print('rotated pnp-ransac solution by 180deg around x-axis')
-                #     q = q * tools.ypr_to_q(0, 0, math.pi)
+                #     q = q * tools.lat_lon_roll_to_q(0, 0, math.pi)
                 #     r = -r
 
                 # calculate delta-q and delta-r
@@ -639,7 +639,7 @@ class VisualOdometry:
     def _log_pose_diff(self, title, r0, q0, r1, q1):
         dr = r1 - r0
         dq = q1 * q0.conj()
-        logging.info(title + ' dq: ' + ' '.join(['%.3fdeg' % math.degrees(a) for a in tools.q_to_ypr(dq)])
+        logging.info(title + ' dq: ' + ' '.join(['%.3fdeg' % math.degrees(a) for a in tools.q_to_lat_lon_roll(dq)])
               + '   dv: ' + ' '.join(['%.3fm' % a for a in dr]))
 
     def is_new_keyframe(self, new_frame):
@@ -829,7 +829,7 @@ class VisualOdometry:
         map_br0 = np.median(np.array(pts3d), axis=0)
         norm0 = np.median(np.linalg.norm(np.array(pts3d) - map_br0, axis=1))
 
-        poses, pts3d = bundle_adj(poses_mx, np.array(pts3d), pts2d, cam_idxs, pt3d_idxs, self.cam_mx, max_nfev=self.max_ba_fun_eval)
+        poses, pts3d = vis_bundle_adj(poses_mx, np.array(pts3d), pts2d, cam_idxs, pt3d_idxs, self.cam_mx, max_nfev=self.max_ba_fun_eval)
 
         map_br1 = np.median(np.array(pts3d), axis=0)
         norm1 = np.median(np.linalg.norm(np.array(pts3d) - map_br1, axis=1))
@@ -1061,11 +1061,11 @@ if __name__ == '__main__':
             err_v = est_v - ast_v
 
             #print('\n')
-            # print('rea ypr: %s' % ' '.join('%.1fdeg' % math.degrees(a) for a in tools.q_to_ypr(cam_q)))
-            # print('est ypr: %s' % ' '.join('%.1fdeg' % math.degrees(a) for a in tools.q_to_ypr(res_q)))
-            print('rea ypr: %s' % ' '.join('%.1fdeg' % math.degrees(a) for a in tools.q_to_ypr(ast_q)))
-            print('est ypr: %s' % ' '.join('%.1fdeg' % math.degrees(a) for a in tools.q_to_ypr(est_q)))
-            # print('err ypr: %s' % ' '.join('%.2fdeg' % math.degrees(a) for a in tools.q_to_ypr(err_q)))
+            # print('rea ypr: %s' % ' '.join('%.1fdeg' % math.degrees(a) for a in tools.q_to_lat_lon_roll(cam_q)))
+            # print('est ypr: %s' % ' '.join('%.1fdeg' % math.degrees(a) for a in tools.q_to_lat_lon_roll(res_q)))
+            print('rea ypr: %s' % ' '.join('%.1fdeg' % math.degrees(a) for a in tools.q_to_lat_lon_roll(ast_q)))
+            print('est ypr: %s' % ' '.join('%.1fdeg' % math.degrees(a) for a in tools.q_to_lat_lon_roll(est_q)))
+            # print('err ypr: %s' % ' '.join('%.2fdeg' % math.degrees(a) for a in tools.q_to_lat_lon_roll(err_q)))
             print('err angle: %.2fdeg' % math.degrees(err_angle))
             # print('rea v: %s' % ' '.join('%.1fm' % a for a in cam_v*1000))
             # print('est v: %s' % ' '.join('%.1fm' % a for a in res_v*1000))

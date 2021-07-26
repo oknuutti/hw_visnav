@@ -10,8 +10,7 @@ data/
 *.out
 *.pickle
 *.prof
-mavlink/
-pymavlink/
+3rdparty/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

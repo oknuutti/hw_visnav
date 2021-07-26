@@ -1232,18 +1232,23 @@ class Camera:
     def distort(self, P):
         if self.dist_coefs is not None:
             if 1:
-                return Camera._distort(P, self.dist_coefs)[0]
+                assert False, 'doesnt work'
+                return Camera._distort(P, self.intrinsic_camera_mx(), self.dist_coefs)[0]
             else:
                 dP = Camera._distort_own(P, self.dist_coefs)
                 return (dP[:, :2] / dP[:, 2:]).flatten()
         return P
 
+    def project(self, pts3d):
+        return self._project(pts3d, self.intrinsic_camera_mx(), self.dist_coefs)
+
     @staticmethod
-    def _distort(P, dist_coefs):
+    def _project(P, K, dist_coefs):
         import cv2
         return cv2.projectPoints(P.reshape((-1, 3)), #np.hstack([P, np.ones((len(P), 1))]).reshape((-1, 1, 4)),
-                                 np.eye(3), np.array([[0, 0, 0]], dtype=np.float32), np.eye(3), np.array(dist_coefs),
-                                 jacobian=False)
+                                 np.array([0, 0, 0], dtype=np.float32), np.array([0, 0, 0], dtype=np.float32),
+                                 K, np.array(dist_coefs),
+                                 jacobian=False)[0].squeeze()
 
     @staticmethod
     def _distort_own(P, dist_coefs, cam_mx=None, inv_cam_mx=None):

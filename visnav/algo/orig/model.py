@@ -303,7 +303,7 @@ class SystemModel(ABC):
 
     @property
     def spacecraft_q(self):
-        return tools.ypr_to_q(*list(map(
+        return tools.lat_lon_roll_to_q(*list(map(
             math.radians,
             (self.x_rot.value, self.y_rot.value, self.z_rot.value)
         )))
@@ -311,11 +311,11 @@ class SystemModel(ABC):
     @spacecraft_q.setter
     def spacecraft_q(self, new_q):
         self.x_rot.value, self.y_rot.value, self.z_rot.value = \
-            list(map(math.degrees, tools.q_to_ypr(new_q)))
+            list(map(math.degrees, tools.q_to_lat_lon_roll(new_q)))
 
     @property
     def real_spacecraft_q(self):
-        return tools.ypr_to_q(*list(map(
+        return tools.lat_lon_roll_to_q(*list(map(
             math.radians,
             (self.x_rot.real_value, self.y_rot.real_value, self.z_rot.real_value)
         )))
@@ -323,7 +323,7 @@ class SystemModel(ABC):
     @real_spacecraft_q.setter
     def real_spacecraft_q(self, new_q):
         self.x_rot.real_value, self.y_rot.real_value, self.z_rot.real_value = \
-            list(map(math.degrees, tools.q_to_ypr(new_q)))
+            list(map(math.degrees, tools.q_to_lat_lon_roll(new_q)))
 
     @property
     def asteroid_q(self):
@@ -334,7 +334,7 @@ class SystemModel(ABC):
         ast = self.asteroid
         sc2ast_q = SystemModel.frm_conv_q(SystemModel.SPACECRAFT_FRAME, SystemModel.ASTEROID_FRAME, ast=ast)
 
-        ast.axis_latitude, ast.axis_longitude, new_theta = tools.q_to_ypr(new_q * sc2ast_q)
+        ast.axis_latitude, ast.axis_longitude, new_theta = tools.q_to_lat_lon_roll(new_q * sc2ast_q)
 
         old_theta = ast.rotation_theta(self.time.value)
         ast.rotation_pm = tools.wrap_rads(ast.rotation_pm + new_theta - old_theta)
@@ -393,7 +393,7 @@ class SystemModel(ABC):
     def rotate_spacecraft(self, q):
         new_q = self.spacecraft_q * q
         self.x_rot.value, self.y_rot.value, self.z_rot.value = \
-            list(map(math.degrees, tools.q_to_ypr(new_q)))
+            list(map(math.degrees, tools.q_to_lat_lon_roll(new_q)))
 
     def rotate_asteroid(self, q):
         """ rotate asteroid in spacecraft frame """
@@ -588,7 +588,7 @@ class SystemModel(ABC):
             # px are on a curved surface
             dx = ((tx + tw / 2) - ow // 2) / ow * math.radians(self.cam.x_fov)
             dy = ((ty + th / 2) - oh // 2) / oh * math.radians(self.cam.y_fov)
-        dq = tools.ypr_to_q(-dy, -dx, 0)
+        dq = tools.lat_lon_roll_to_q(-dy, -dx, 0)
 
         return sc, dq
 
@@ -635,16 +635,16 @@ class SystemModel(ABC):
                 sco_lat = tools.wrap_rads(-sc_lat)
                 sco_lon = tools.wrap_rads(math.pi + sc_lon)
                 sco_rot = np.random.uniform(-math.pi, math.pi)  # rotation around camera axis
-                sco_q = tools.ypr_to_q(sco_lat, sco_lon, sco_rot)
+                sco_q = tools.lat_lon_roll_to_q(sco_lat, sco_lon, sco_rot)
 
                 ast_ang_r = math.atan(
                     self.asteroid.mean_radius / 1000 / sc_r)  # if asteroid close, allow s/c to look at limb
                 dx = max(rad(self.cam.x_fov / 2), ast_ang_r)
                 dy = max(rad(self.cam.y_fov / 2), ast_ang_r)
-                disturbance_q = tools.ypr_to_q(np.random.uniform(-dy, dy), np.random.uniform(-dx, dx), 0)
-                sco_lat, sco_lon, sco_rot = tools.q_to_ypr(sco_q * disturbance_q)
+                disturbance_q = tools.lat_lon_roll_to_q(np.random.uniform(-dy, dy), np.random.uniform(-dx, dx), 0)
+                sco_lat, sco_lon, sco_rot = tools.q_to_lat_lon_roll(sco_q * disturbance_q)
 
-            sco_q = tools.ypr_to_q(sco_lat, sco_lon, sco_rot)
+            sco_q = tools.lat_lon_roll_to_q(sco_lat, sco_lon, sco_rot)
 
             # sc_ast_p ecliptic => sc_ast_p open gl -z aligned view
             sc_pos = tools.q_times_v((sco_q * self.sc2gl_q).conj(), sc_ast_v)
@@ -1328,7 +1328,7 @@ class Asteroid(ABC):
         # TODO: use precession info
 
         # orient z axis correctly, rotate around it
-        return tools.ypr_to_q(self.axis_latitude, self.axis_longitude, theta) \
+        return tools.lat_lon_roll_to_q(self.axis_latitude, self.axis_longitude, theta) \
                * self.ast2sc_q
 
     def position(self, timestamp):

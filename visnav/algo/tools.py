@@ -1072,7 +1072,7 @@ def plot_quats(quats, conseq=True, wait=True):
         pass
 
 
-def plot_poses(poses, conseq=True, wait=True, arrow_len=1):
+def plot_poses(poses, conseq=True, wait=True, arrow_len=1, axis=(1, 0, 0), up=(0, 0, 1)):
     import matplotlib.pyplot as plt
     from mpl_toolkits.mplot3d import Axes3D
 
@@ -1082,15 +1082,16 @@ def plot_poses(poses, conseq=True, wait=True, arrow_len=1):
     ax.set_ylabel('y')
     ax.set_zlabel('z')
     if conseq:
-        plt.hsv()
-        # ax.set_prop_cycle('color', map(lambda c: '%f' % c, np.linspace(.7, 0, len(poses))))
+        #plt.hsv()
+        ax.set_prop_cycle('color', map(lambda c: '%f' % c, np.linspace(.7, 0, len(poses))))
     for i, pose in enumerate(poses):
         if pose is not None:
             q = np.quaternion(*pose[3:])
-            lat, lon, _ = q_to_lat_lon_roll(q)
-            v1 = spherical2cartesian(lat, lon, 1) * arrow_len
-            v2 = (v1 + normalize_v(np.cross(np.cross(v1, np.array([0, 0, 1])), v1)) * 0.1 * arrow_len) * 0.85
+            v1 = q_times_v(q, np.array(axis)) * arrow_len
+            v2 = (v1 + normalize_v(np.cross(np.cross(v1, np.array(up)), v1)) * 0.1 * arrow_len) * 0.85
             v2 = q_times_v(q, v2)
+            v1 += pose[:3]
+            v2 += pose[:3]
             ax.plot((pose[0], v1[0], v2[0]), (pose[1], v1[1], v2[1]), (pose[2], v1[2], v2[2]))
 
     while (wait and not plt.waitforbuttonpress()):

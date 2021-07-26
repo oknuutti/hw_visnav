@@ -28,7 +28,7 @@ def main():
     imgs = []
 
     for fname in os.listdir(args.path):
-        if fname[-4:] in ('.bmp', '.jpg', '.jpeg', 'png'):
+        if fname[-4:] in ('.bmp', '.jpg', '.jpeg', '.png'):
             img = cv2.imread(os.path.join(args.path, fname))
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
@@ -45,10 +45,15 @@ def main():
                 img_show = img.copy()
                 corners2 = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
                 cv2.drawChessboardCorners(img_show, (args.nx, args.ny), corners2, ret)
-                cv2.imshow('calibration', img_show)
+                sc = 1024/np.max(img_show.shape)
+                cv2.imshow('calibration', cv2.resize(img_show, None, fx=sc, fy=sc))
                 cv2.waitKey(500)
             else:
                 print('cant find the corners from %s' % fname)
+
+    if len(imgs) == 0:
+        print('too few images found at %s (%d)' % (args.path, len(imgs)))
+        return
 
     ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, gray.shape[::-1], None, None)
     print('camera mx:\n%s' % (mtx,))
