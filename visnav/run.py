@@ -32,7 +32,7 @@ def main():
         mission = HardwarePrototype(args.data, last_frame=(155, 321, None)[0])
     elif args.mission == 'nokia':
         mission = NokiaSensor(args.data, data_path=args.meta, video_toff=args.video_toff,
-                              first_frame=(350, 1650)[0], last_frame=(450, 1850)[0])
+                              first_frame=(350, 1650)[0], last_frame=(500, 1850)[0])
     else:
         assert False, 'bad mission given: %s' % args.mission
 
@@ -46,6 +46,8 @@ def main():
     results0 = []
     ground_truth0 = []
     kfid2img = {}
+    started = datetime.now()
+    ax = None
 
     for i, (img, t, name, meta, meta_name, gt) in enumerate(mission.data):
         if i % args.skip != 0:
@@ -59,8 +61,26 @@ def main():
 
         try:
             nf, *_ = mission.odo.process(img, datetime.fromtimestamp(mission.time0 + t), measure=meta)
-            if nf is not None and nf.id is not None:
+
+            if 1 and nf is not None and nf.id is not None:
                 kfid2img[nf.id] = i
+
+                w2c_q = NokiaSensor.w2b_q * NokiaSensor.b2c_q
+                post = np.zeros((len(mission.odo.state.keyframes), 7))
+                k, prior = 0, np.zeros((len(mission.odo.state.keyframes), 7))
+                for j, kf in enumerate([kf for kf in mission.odo.state.keyframes if kf.pose.post]):
+                    post[j, :3] = tools.q_times_v(w2c_q * kf.pose.post.quat.conj(), -kf.pose.post.loc)
+                    post[j, 3:] = quaternion.as_float_array(w2c_q.conj() * kf.pose.post.quat.conj() * w2c_q)
+                    if kf.measure is not None:
+                        prior[k, :3] = tools.q_times_v(w2c_q * kf.pose.prior.quat.conj(), -kf.pose.prior.loc)
+                        prior[k, 3:] = quaternion.as_float_array(w2c_q.conj() * kf.pose.prior.quat.conj() * w2c_q)
+                        k += 1
+                if ax is not None:
+                    ax.clear()
+                ax = tools.plot_poses(post, axis=(0, 1, 0), up=(0, 0, 1), ax=ax, wait=False)
+                tools.plot_poses(prior[:k, :], axis=(0, 1, 0), up=(0, 0, 1), ax=ax, wait=False,
+                                 colors=map(lambda c: (c, 0, 0, 0.5), np.linspace(.3, 1.0, k)))
+
         except TypeError as e:
             if 0:
                 nf, *_ = mission.odo.process(img, datetime.fromtimestamp(mission.time0 + t), prior, quaternion.one)
@@ -87,9 +107,11 @@ def main():
             raise e
 
     mission.odo.quit()
-    if 1:
+    if 0:
+        # show results as given by the online version of the algorithm
         results, frame_names, meta_names, ground_truth = results0, frame_names0, meta_names0, ground_truth0
 
+    logging.info('time spent: %.0fs' % (datetime.now() - started).total_seconds())
     plot_results(results, map3d, frame_names, meta_names, ground_truth, '%s-result.pickle' % args.mission)
 
 

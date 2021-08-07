@@ -1032,6 +1032,11 @@ def numeric(s):
 
 
 def pseudo_huber_loss(a, delta):
+    """
+    :param a: the error
+    :param delta: config param
+    :return:
+    """
     # from https://en.wikipedia.org/wiki/Huber_loss
     # first +1e-15 is to avoid divide by zero, second to avoid loss becoming zero if delta > 1e7 due to float precision
     return delta ** 2 * (np.sqrt(1 + a ** 2 / (delta ** 2 + 1e-15)) - 1 + 1e-15)
@@ -1072,18 +1077,22 @@ def plot_quats(quats, conseq=True, wait=True):
         pass
 
 
-def plot_poses(poses, conseq=True, wait=True, arrow_len=1, axis=(1, 0, 0), up=(0, 0, 1)):
+def plot_poses(poses, conseq=True, ax=None, colors=None, wait=True, arrow_len=1, axis=(1, 0, 0), up=(0, 0, 1)):
     import matplotlib.pyplot as plt
     from mpl_toolkits.mplot3d import Axes3D
 
-    fig = plt.figure()
-    ax = Axes3D(fig)
-    ax.set_xlabel('x')
-    ax.set_ylabel('y')
-    ax.set_zlabel('z')
+    if ax is None:
+        fig = plt.figure(3)
+        ax = Axes3D(fig)
+        ax.set_xlabel('x')
+        ax.set_ylabel('y')
+        ax.set_zlabel('z')
+
     if conseq:
-        #plt.hsv()
-        ax.set_prop_cycle('color', map(lambda c: '%f' % c, np.linspace(.7, 0, len(poses))))
+        if colors is None:
+            colors = map(lambda c: '%f' % c, np.linspace(.7, 0, len(poses)))
+        ax.set_prop_cycle('color', colors)
+
     for i, pose in enumerate(poses):
         if pose is not None:
             q = np.quaternion(*pose[3:])
@@ -1097,6 +1106,7 @@ def plot_poses(poses, conseq=True, wait=True, arrow_len=1, axis=(1, 0, 0), up=(0
     while (wait and not plt.waitforbuttonpress()):
         pass
 
+    return ax
 
 def show_progress(tot, i):
     digits = int(math.ceil(math.log10(tot + 1)))

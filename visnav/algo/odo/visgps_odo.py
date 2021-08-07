@@ -70,44 +70,68 @@ class VisualGPSNav(VisualOdometry):
             return True
         return super(VisualGPSNav, self).is_new_keyframe(new_frame)
 
-    def initialization(self, ref_frame, new_frame, use_prior=False):
+    def solve_2d2d(self, ref_frame, new_frame, use_prior=False):
         if ref_frame.measure is None or new_frame.measure is None:
-            return None, None
+            return False
         elif use_prior:  # TODO: useless?
             dq = new_frame.pose.prior.quat * ref_frame.pose.prior.quat.conj()
             dr = new_frame.pose.prior.loc - tools.q_times_v(dq, ref_frame.pose.post.loc)
-            return dr, dq
+            new_frame.pose.post = ref_frame.pose.post.new(dr, dq)
+            return True
 
-        dr, dq = super(VisualGPSNav, self).initialization(ref_frame, new_frame)
-        if dr is None or dq is None:
-            return None, None
+        ok = super(VisualGPSNav, self).solve_2d2d(ref_frame, new_frame)
+        if not ok:
+            return False
 
+        dq = new_frame.pose.post.quat * ref_frame.pose.post.quat.conj()
+        dr = new_frame.pose.post.loc.flatten() - tools.q_times_v(dq, ref_frame.pose.post.loc)
         dr = dr * np.linalg.norm(new_frame.pose.prior.loc - ref_frame.pose.prior.loc)/np.linalg.norm(dr)
-        return dr, dq
+        new_frame.pose.post = ref_frame.pose.post.new(dr, dq)
+        return True
 
-    def _bundle_adjustment(self, current_only=False):
+    def _bundle_adjustment(self, keyframes=None, current_only=False, same_thread=False):
         logging.info('starting bundle adjustment')
         skip_meas = False
 
+        if keyframes is None and current_only:
+            with self._3d_map_lock:
+                keyframes = self.state.keyframes[-1:]
+
         # TODO: when drone rotates, estimate goes off the rails
-        #       => maybe problem at BA as optimized 3d points move far away when rotating
+        #       /=> maybe problem at BA as optimized 3d points move far away when rotating
         #          - also, points at the top of the image are estimated to be farther away than points at the bottom
         #          - jumpy ransac poses as points stupidly far
         #          - however, optimized poses barely move at all
-        #       => why does optimization make a pose in the middle "lag", i.e. yaws: 146, 154, *152* (id=14), 163, 168 (id=16)
-        #          => because corresponding yaw measure (145) drags it down?
-        #       => why points triangulated on a non-horizontal plane?
+        #       /=> why does optimization make a pose in the middle "lag", i.e. yaws: 146, 154, *152* (id=14), 163, 168 (id=16)
+        #          => because corresponding yaw measure (145) drags it down
+        #       /=> why points triangulated on a non-horizontal plane?
         #          => because movement of points gets explained by tilt rather than movement, why?
         #             => too slack reprojection error given for ransac
-        #       => why reprojection error gets high during rotation, same as before with the "lag"?
+        #       /=> why reprojection error gets high during rotation, same as before with the "lag"?
         #           => disabling time-difference optimization helped
-        #           => optical flow less accurate during rotation?
-        #       => NEXT: get rid of ransac, optimize instead
+        #           => optical flow less accurate during rotation
+        #       /=> don't converge always, why? => because starting pose from meas, which is too far from solution
+        #       => NEXT: meas and 3d-pt scales dont start to match (see trajectory plot), why?
+        #           => doesnt even start from the same location
+        #           => even global scale and location offset doesnt work, why?
+        #       => Why drifts sideways when rotating along z-axis?
+        #           => something wrong with rotation transformations ???
+        #       => if meas fixed:
+        #           - try ransac again with loose repr err param values
+        #           - try time-diff optimization
         #  - other ideas:
-        #     - calculate ba cost-function gradient
+        #     - use a toy problem
+        #     - inverse distance formulation, project covariance also (see vins)
+        #     - calculate cost function jacobian as in vins
+        #     ?- speed and angular speed priors that limit them to reasonably low values
+        #     ?- outlier rejection for features using ransac and F-matrix
+        #     - initialization where keyframes are added even though can't estimate poses yet,
+        #       later (30 feats, 20px parallax, E-matrix (or H-matrix if planar scene detected), triangulation),
+        #       use 3d-2d ransac to estimate all the previous poses and top it off with ba
         #    ?- constrain scale in ba by forcing the norm between first transition (or fixing second keyframe loc?)
 
-        keyframes, ids, poses_mx, pts3d, pts2d, v_pts2d, cam_idxs, pt3d_idxs = self._get_visual_ba_args(current_only)
+        keyframes, ids, poses_mx, pts3d, pts2d, v_pts2d, cam_idxs, pt3d_idxs = \
+                self._get_visual_ba_args(keyframes, current_only)
         skip_pose_n = (1 if skip_meas else 0) if not current_only else 0
 
         if not skip_meas:
@@ -123,15 +147,15 @@ class VisualGPSNav(VisualOdometry):
         meas_r = meas_r.reshape((-1, 3))
         meas_aa = meas_aa.reshape((-1, 3))
 
-        px_err_sd = 1.0 * self.max_repr_err(keyframes[-1])
+        px_err_sd = 2.0 * self.repr_err(keyframes[-1])
 
         args = (poses_mx, pts3d, pts2d, v_pts2d, cam_idxs, pt3d_idxs, self.cam_mx, px_err_sd, meas_r, meas_aa, t_off,
                 meas_idxs, self.loc_err_sd, self.ori_err_sd)
-        kwargs = dict(max_nfev=self.max_ba_fun_eval, skip_pose_n=skip_pose_n, huber_coef=(1, 3, 0.2), poses_only=current_only)
+        kwargs = dict(max_nfev=self.max_ba_fun_eval, skip_pose_n=skip_pose_n, huber_coef=(2, 5, 0.5), poses_only=current_only)
 
-        poses_ba, pts3d_ba, t_off_ba = self._call_ba(vis_gps_bundle_adj, args, kwargs)
+        poses_ba, pts3d_ba, t_off = self._call_ba(vis_gps_bundle_adj, args, kwargs, parallize=not same_thread)
 
-        for i, dt in zip(meas_idxs, t_off_ba):
+        for i, dt in zip(meas_idxs, t_off):
             keyframes[i].measure.time_adj = dt - keyframes[i].measure.time_off
 
-        self._update_poses(keyframes, ids, poses_ba, pts3d_ba, skip_pose_n=skip_pose_n, pop_ba_queue=not current_only)
+        self._update_poses(keyframes, ids, poses_ba, pts3d_ba, skip_pose_n=skip_pose_n, pop_ba_queue=not same_thread)

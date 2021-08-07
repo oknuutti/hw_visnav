@@ -144,7 +144,7 @@ def _costfun(params, pose0, fixed_pt3d, n_cams, n_pts, cam_idxs, pt3d_idxs, pts2
     points_proj = _project(points_3d[pt3d_idxs], poses[cam_idxs], K)
     err = (points_proj - pts2d).ravel()
 
-    return tools.pseudo_huber_loss(huber_coef, err) if huber_coef else err
+    return tools.pseudo_huber_loss(err, huber_coef) if huber_coef else (err ** 2)
 
 
 def _bundle_adjustment_sparsity(n_cams, n_pts, cam_idxs, pt3d_idxs, poses_only):

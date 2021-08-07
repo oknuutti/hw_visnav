@@ -58,6 +58,12 @@ class Pose:
             self.so3_s2 - pose.so3_s2
         )
 
+    def new(self, dr, dq):
+        return Pose(
+            tools.q_times_v(dq, self.loc) + dr,
+            (dq * self.quat).normalized(),
+        )
+
     @staticmethod
     def initial():
         return Pose(np.array([0, 0, 0]), quaternion.one, np.ones((3,)) * 0.1, np.ones((3,)) * 0.01)
@@ -72,6 +78,10 @@ class PoseEstimate:
         self.prior = prior
         self.post = post
         self.method = method
+
+    @property
+    def any(self):
+        return self.post or self.prior
 
 
 class Measure:
@@ -169,7 +179,7 @@ class VisualOdometry:
     #  - keyframe addition logic
     #  - map maintainer (remove and/or adjust keyframes and/or features)
     #  - loop closer or absolute pose estimator
-    POSE_2D2D, POSE_2D3D = range(2)
+    POSE_2D2D, POSE_2D3D, POSE_2D3D_OPT = range(3)
 
     DEF_MIN_KEYPOINT_DIST = 15
     DEF_MAX_KEYPOINTS = 315
@@ -353,7 +363,7 @@ class VisualOdometry:
         self.prune_map3d()
 
         # maybe do failure recovery
-        if new_frame.pose.post is None:
+        if new_frame.pose.post is None and self.state.first_result_given:
             dt = (new_frame.time - self.state.last_success_time).total_seconds()
             if dt > self.reset_timeout:
                 # if fail for too long, reinitialize (excl if only one keyframe)
@@ -378,13 +388,18 @@ class VisualOdometry:
             bias_sds = self.kf_bias_sds
             logging.info('new keyframe (ID=%s) added' % new_frame.id)
 
-            # maybe do map maintenance    # TODO: (3) run in yet another thread
-            if self.is_maintenance_time():
+            if not self.state.first_result_given and new_frame.pose.post and len(self.state.map2d) > 0 \
+                    and len(self.triangulation_kps(new_frame)) > self.ini_kf_triangulation_trigger:
+                # triangulate, solve pnp for all keyframes, ba
+                self.initialize_first_keyframes()
+
+            elif self.is_maintenance_time():
+                # maybe do map maintenance    # TODO: (3) run in yet another thread
                 self.maintain_map()
                 bias_sds = self.mm_bias_sds
                 self.state.first_mm_done = self.state.first_mm_done or self.state.keyframes[-1].id
 
-        elif new_frame.pose.method == VisualOdometry.POSE_2D2D:
+        if new_frame.pose.method == VisualOdometry.POSE_2D2D:
             # 2d-2d match result only usable for the first added keyframe,
             # i.e. for the first frames after init that are not keyframes, dont return pose
             new_frame.pose.post = None
@@ -414,7 +429,7 @@ class VisualOdometry:
             img_sc = self.img_width / image.shape[1]
             image = cv2.resize(image, None, fx=img_sc, fy=img_sc)
 
-        lp = self.state.last_frame.pose.post if self.state.last_frame else Pose.initial()
+        lp = self.state.last_frame.pose.any if self.state.last_frame else Pose.initial()
         nf = Frame(time, image, img_sc, PoseEstimate(prior=lp, post=None, method=None), measure=measure)
         nf.ini_kp_count = self.state.keyframes[-1] if len(self.state.keyframes) > 0 else None
         return nf
@@ -437,6 +452,22 @@ class VisualOdometry:
             self.state.last_frame = new_frame
             self.state.last_success_time = new_frame.time
             self.state.initialized = True
+
+    def initialize_first_keyframes(self):
+        self.triangulate(self.state.keyframes[-1])
+
+        keyframes = []
+        for kf in self.state.keyframes:
+            ok = True
+            if not kf.pose.post:
+                ok = self.solve_pnp(kf, use_3d2d_ransac=True, min_inliers=12)
+            elif kf.pose.method == VisualOdometry.POSE_2D2D:
+                kf.pose.method = VisualOdometry.POSE_2D3D
+            if ok:
+                keyframes.append(kf)
+
+        self.state.keyframes = keyframes
+        self._bundle_adjustment(same_thread=True)
 
     def check_features(self, image, in_kp2d):
         # check that not too close to image border
@@ -533,7 +564,7 @@ class VisualOdometry:
 
         logging.info('Tracking: %d/%d' % (len(new_kp2d), len(old_kp2d)))
 
-    def initialization(self, ref_frame, new_frame):
+    def solve_2d2d(self, ref_frame, new_frame):
         rf, nf = ref_frame, new_frame
 
         # include all tracked keypoints, i.e. also 3d points
@@ -543,7 +574,7 @@ class VisualOdometry:
                if id in rf.kps_uv_norm]
         ids, new_kp2d, old_kp2d = list(map(np.array, zip(*tmp) if len(tmp) > 0 else ([], [], [])))
 
-        R = None
+        R, dr, dq = None, None, None
         mask = 0
         if len(old_kp2d) >= self.min_2d2d_inliers / self.inlier_ratio_2d2d:
             # solve pose using ransac & 5-point algo
@@ -574,38 +605,45 @@ class VisualOdometry:
 
             dq = quaternion.from_rotation_matrix(R)
             dr = ur.flatten()
-            return dr, dq
-        return None, None
 
-    def estimate_pose(self, new_frame):
-        rf, lf, nf = self.state.keyframes[-1], self.state.last_frame, new_frame
-        dr, dq = None, None
+        ok = dr is not None and dq is not None and not np.isclose(dq.norm(), 0)
+
+        if ok:
+            nf.pose.post = rf.pose.post.new(dr, dq)
+            nf.pose.method = VisualOdometry.POSE_2D2D
+
+        return ok
+
+    def solve_pnp(self, kf, use_3d2d_ransac, min_inliers=None):
+        min_inliers = min_inliers or self.min_inliers
         inliers = None
-        method = None
-
-        # solve pose using ransac & ap3p based on 3d-2d matches
 
         tmp = [(id, pt2d, self.state.map3d[id].pt3d)
-               for id, pt2d in nf.kps_uv_norm.items()
+               for id, pt2d in kf.kps_uv_norm.items()
                if id in self.state.map3d and self.state.map3d[id].active]
         ids, pts2d, pts3d = list(map(np.array, zip(*tmp) if len(tmp) else ([], [], [])))
-        logging.info('Tracked 3D-points: %d/%d' % (len(pts3d), len(nf.kps_uv)))
+        logging.info('Tracked 3D-points: %d/%d' % (len(pts3d), len(kf.kps_uv)))
 
         ok = False
-        if len(pts3d) >= self.min_inliers:
-            if self.use_3d2d_ransac:
+        if len(pts3d) >= min_inliers:
+            if use_3d2d_ransac:
                 ok, rv, r, inliers = cv2.solvePnPRansac(pts3d, pts2d, self.cam_mx, None,
                                                         iterationsCount=self.est_3d2d_iter_count,
-                                                        reprojectionError=self.repr_err(nf),
+                                                        reprojectionError=self.repr_err(kf),
                                                         flags=self.est_3d2d_method)
 
                 logging.info('PnP: %d/%d' % (0 if inliers is None else len(inliers), len(pts2d)))
             else:
-                self._call_ba()
+                kf.pose.post = copy.deepcopy(kf.pose.prior)
 
-                logging.info('BA-1: %d' % (len(pts2d),))
+                self._bundle_adjustment([kf], current_only=True, same_thread=True)
 
-        if ok and len(inliers) >= self.min_inliers and len(inliers)/len(pts3d) > self.min_inlier_ratio:
+                inliers, _, _ = self.sanity_check_pt3d(ids, pts3d, [kf], repr_err_only=True)
+                rv = tools.q_to_angleaxis(kf.pose.post.quat, True)
+                r, ok = kf.pose.post.loc, True
+                logging.info('OPT: %d/%d' % (len(inliers), len(pts2d)))
+
+        if ok and len(inliers) >= min_inliers and len(inliers)/len(pts3d) > self.min_inlier_ratio:
             q = tools.angleaxis_to_q(rv)
 
             if 0:
@@ -630,10 +668,10 @@ class VisualOdometry:
                 self.state.map3d[id].total_count += 1
             for i in inliers.flatten():
                 self.state.map3d[ids[i]].inlier_count += 1
-                self.state.map3d[ids[i]].inlier_time = nf.time
+                self.state.map3d[ids[i]].inlier_time = kf.time
 
             # calculate delta-q and delta-r
-            dq = q * rf.pose.post.quat.conj()
+            dq = q * kf.pose.prior.quat.conj()
 
             # solvePnPRansac apparently randomly gives 180deg wrong answer,
             #  - too high translation in correct direction, why? related to delayed application of ba result?
@@ -641,52 +679,46 @@ class VisualOdometry:
                 logging.warning('rotated pnp-ransac solution by 180deg around z-axis')
                 q_fix = tools.ypr_to_q(math.pi, 0, 0)
                 dq = dq * q_fix
-                q = dq * rf.pose.post.quat
+                q = dq * kf.pose.prior.quat
                 r = tools.q_times_v(q_fix, r)
 
-            dr = r.flatten() - tools.q_times_v(dq, rf.pose.post.loc)
-            method = VisualOdometry.POSE_2D3D
+            dr = r.flatten() - tools.q_times_v(dq, kf.pose.prior.loc)
+
+            kf.pose.post = kf.pose.prior.new(dr, dq)
+            kf.pose.method = VisualOdometry.POSE_2D3D
+
+            return True
+
         else:
             if inliers is None:
                 logging.info(' => Too few 3D points matched for reliable pose estimation')
-            elif len(inliers) < self.min_inliers:
+            elif len(inliers) < min_inliers:
                 logging.info(' => PnP was left with too few inliers')
             elif len(inliers)/len(pts3d) < self.min_inlier_ratio:
                 logging.info(' => PnP too few inliers compared to total matches')
             else:
                 logging.info(' => PnP Failed')
 
-            dr, dq = None, None
+            return False
 
-            if self.state.first_result_given and self.state.tracking_failed:  # give one chance with tracking_failed
-                logging.info(' => clearing all 3d points')
-                self.state.initialized = False
+    def estimate_pose(self, new_frame):
+        nf = new_frame
 
-        if not self.state.first_result_given and dr is None:
-            dr, dq = self.initialization(rf, nf)
-            method = VisualOdometry.POSE_2D2D
+        ok = self.solve_pnp(nf, self.use_3d2d_ransac)
 
-        if dr is None or dq is None or np.isclose(dq.norm(), 0):
-            nf.pose.post = None
-        else:
-            # TODO: (2) calculate uncertainty / error var
-            # d_r_s2 = np.ones(3) * 0.1
-            # d_so3_s2 = np.ones(3) * 0.01
+        if not ok and self.state.first_result_given and self.state.tracking_failed:  # give one chance with tracking_failed
+            logging.info(' => clearing all 3d points')
+            self.state.initialized = False
 
-            # update pose and uncertainty
-            nf.pose.post = Pose(
-                tools.q_times_v(dq, rf.pose.post.loc) + dr,
-                (dq * rf.pose.post.quat).normalized(),
-                self.loc_sds,
-                self.rot_sds,
-                #rf.pose.post.loc_s2 + tools.q_times_v(rf.pose.post.quat, d_r_s2),
-                #rf.pose.post.so3_s2 + tools.q_times_v(rf.pose.post.quat, d_so3_s2),
-            )
-            nf.pose.method = method
+        if not ok and not self.state.first_result_given:
+            rf = [kf for kf in self.state.keyframes if kf.pose.post][-1]
+            ok = self.solve_2d2d(rf, nf)
+
+        if ok:
             self.state.last_success_time = nf.time
-
-        if dr is not None and dq is not None:
             self._log_pose_diff('prior->post', nf.pose.prior.loc, nf.pose.prior.quat, nf.pose.post.loc, nf.pose.post.quat)
+        else:
+            nf.pose.post = None
 
         if self.verbose:
             self._draw_tracks(nf, pause=self.pause)
@@ -740,14 +772,10 @@ class VisualOdometry:
 
         rf, nf = self.state.keyframes[-1], new_frame
 
-        # pose solution available
-        if nf.pose.post is None:
-            return False
-
-        # if no kp triangulated yet
-        if not self.state.first_result_given:
-            return len(self.state.map2d) > 0 \
-               and len(self.triangulation_kps(nf)) > self.ini_kf_triangulation_trigger
+        # # if no kp triangulated yet
+        # if not self.state.first_result_given:
+        #     return len(self.state.map2d) > 0 \
+        #        and len(self.triangulation_kps(nf)) > self.ini_kf_triangulation_trigger
 
         #   a) should detect new feats as old ones don't work
         if len(nf.kps_uv)/rf.ini_kp_count < self.new_kf_min_inlier_ratio:
@@ -755,13 +783,9 @@ class VisualOdometry:
             return True
 
         #   b) orientation changed significantly
-        if tools.angle_between_q(nf.pose.post.quat, rf.pose.post.quat) > self.new_kf_rot_angle:
+        if tools.angle_between_q(nf.pose.any.quat, rf.pose.any.quat) > self.new_kf_rot_angle:
             logging.debug('new kf: orientation change')
             return True
-
-        # #   c) sc orientation changed significantly
-        # if tools.angle_between_q(nf.sc_q, rf.sc_q) > self.new_sc_rot_angle:
-        #     return True
 
         #   d) viewpoint changed for many 3d points
         if self.use_ba \
@@ -771,7 +795,7 @@ class VisualOdometry:
             return True
 
         #   e) can triangulate many 2d points
-        if len(self.state.map2d) > 0:
+        if len(self.state.map2d) > 0 and self.state.first_result_given:
             k, n = len(self.triangulation_kps(nf)), len(self.state.map2d)
             actives = len([pt for pt in self.state.map3d.values() if pt.inlier_count > 0 and pt.active])
             if k > 0 and (k / n > self.new_kf_triangulation_trigger_ratio or actives < self.min_inliers * 2):
@@ -788,12 +812,13 @@ class VisualOdometry:
             # poses = np.zeros((2, 7))
             # poses[0, :3] = tools.q_times_v(new_frame.pose.post.quat.conj(), -new_frame.pose.post.loc)
             # poses[0, 3:] = quaternion.as_float_array(new_frame.pose.post.quat.conj())
-            self._bundle_adjustment(current_only=True)
+            self._bundle_adjustment(current_only=True, same_thread=True)
             # poses[1, :3] = tools.q_times_v(new_frame.pose.post.quat.conj(), -new_frame.pose.post.loc)
             # poses[1, 3:] = quaternion.as_float_array(new_frame.pose.post.quat.conj())
             # tools.plot_poses(poses, axis=(0, 0, 1), up=(0, -1, 0))
         self.detect_features(new_frame)
-        self.triangulate(new_frame)
+        if self.state.first_result_given:
+            self.triangulate(new_frame)
 
     def triangulation_kps(self, new_frame):
         """
@@ -818,9 +843,9 @@ class VisualOdometry:
         D = np.ones((k, n)) * np.nan
         for j, f in enumerate(self.state.keyframes):
             idxs = np.where(np.logical_not(np.isnan(r_uv_arr[:, j, 0])))[0]
-            if len(idxs) > 0:
-                p_uvs = tools.q_times_img_coords(new_frame.pose.post.quat * f.pose.post.quat.conj(),
-                                                 r_uv_arr[idxs, j, :], self.cam, opengl=False, distort=False)
+            if len(idxs) > 0 and f.pose.post:
+                p_uvs = tools.q_times_img_coords(new_frame.pose.any.quat * f.pose.post.quat.conj(), r_uv_arr[idxs, j, :],
+                                                 self.cam, opengl=False, distort=False)
                 D[idxs, j] = np.linalg.norm(p_uvs - n_uv_arr[idxs, :], axis=1)
 
         # return dict(kp_id => ref_frame)
@@ -851,7 +876,7 @@ class VisualOdometry:
                if id in self.state.map3d]
         ids, pts3d = list(map(np.array, zip(*tmp) if len(tmp) > 0 else ([], [])))
         #pts3d = np.array(pts3d).reshape(-1, 3)
-        dloc = (new_frame.pose.post.loc - ref_frame.pose.post.loc).reshape(1, 3)
+        dloc = (new_frame.pose.any.loc - ref_frame.pose.any.loc).reshape(1, 3)
         da = tools.angle_between_rows(pts3d, pts3d + dloc)
         kpset = set(ids[da > self.new_kf_trans_kp3d_angle])
 
@@ -909,24 +934,18 @@ class VisualOdometry:
 
         logging.info('%d/%d keypoints successfully triangulated' % (added_count, len(tr_kps)))
 
-    def sanity_check_pt3d(self, ids, pts3d, frames, max_dist_coef=2):
+    def sanity_check_pt3d(self, ids, pts3d, frames, max_dist_coef=2, repr_err_only=False):
         if len(ids) == 0:
             return [], [], []
 
         ids = np.array(ids)
         mask = np.zeros((len(ids),), dtype=np.uint8)
 
-        #  check that at least two frames has point in front, if not, discard
-        pts3d_fs = np.array([f.to_rel(pts3d) for f in frames])
-        mask[np.sum(pts3d_fs[:, :, 2] > 0, axis=0) < 2] = 1
-
-        #  check that distance to the point is not too much, parallax should be high enough
-        fov_d_rad = math.radians(np.linalg.norm(np.array([self.cam.x_fov, self.cam.y_fov])))
-        idx = np.argmax(tools.distance_mx(np.array([f.pose.post.loc for f in frames])))
-        i, j = np.unravel_index(idx, (len(frames),)*2)
-        sep = tools.parallax(frames[i].pose.post.loc, frames[j].pose.post.loc, pts3d[mask == 0])
-        idxs = np.where(mask == 0)[0]
-        mask[idxs[sep / fov_d_rad * max_dist_coef < self.max_repr_err_fov_ratio]] = 1
+        if not repr_err_only:
+            #  check that point is in front of each frame its observed in
+            for f in frames:
+                in_frame = [id in f.kps_uv for id in ids]
+                mask[in_frame] = (f.to_rel(pts3d[in_frame])[:, 2] < 0).astype(np.uint8)
 
         # check that reprojection error is not too large
         idxs = np.where(mask == 0)[0]
@@ -942,6 +961,15 @@ class VisualOdometry:
                 mask[idxs[kp_idxs]] = np.bitwise_or.reduce((mask[idxs[kp_idxs]],
                                                             1*(err > norm_err).astype(np.int),
                                                             2*(err > max_err).astype(np.int)))
+
+        if not repr_err_only:
+            #  check that distance to the point is not too much, parallax should be high enough
+            fov_d_rad = math.radians(np.linalg.norm(np.array([self.cam.x_fov, self.cam.y_fov])))
+            idx = np.argmax(tools.distance_mx(np.array([f.pose.post.loc for f in frames])))
+            i, j = np.unravel_index(idx, (len(frames),)*2)
+            sep = tools.parallax(frames[i].pose.post.loc, frames[j].pose.post.loc, pts3d[mask == 0])
+            idxs = np.where(mask == 0)[0]
+            mask[idxs[sep / fov_d_rad * max_dist_coef < self.max_repr_err_fov_ratio]] = 1
 
         good = np.where(mask == 0)[0]
         wait = np.where(mask == 1)[0]
@@ -970,23 +998,20 @@ class VisualOdometry:
         else:
             self._bundle_adjustment()
 
-    def _get_visual_ba_args(self, current_only=False):
-        with self._3d_map_lock:
-            if current_only:
-                max_keyframes = 1
-            else:
+    def _get_visual_ba_args(self, keyframes=None, active_kp_only=False):
+        if keyframes is None:
+            with self._3d_map_lock:
                 max_keyframes = len(self.state.keyframes)
                 max_keyframes = max_keyframes if self._ba_max_keyframes is None else (self._ba_max_keyframes + 1)
+                keyframes = self.state.keyframes[-max_keyframes:]
 
-            keyframes = self.state.keyframes[-max_keyframes:]
-            tmp = [
-                (pt.id, pt.pt3d)
-                for pt in self.state.map3d.values()
-                if pt.inlier_count > 0  # only include if been an inlier
-            ]
+        ids = set(pt_id for kf in keyframes for pt_id in kf.kps_uv.keys()
+                  if pt_id in self.state.map3d and (not active_kp_only or self.state.map3d[pt_id].active))
 
-        if len(tmp) == 0:
+        if len(ids) == 0:
             return
+
+        tmp = [(id, self.state.map3d[id].pt3d) for id in ids]
         ids, pts3d = map(np.array, zip(*tmp))
         idmap = dict(zip(ids, np.arange(len(ids))))
 
@@ -1015,8 +1040,8 @@ class VisualOdometry:
 
         return keyframes, ids, poses_mx, pts3d, pts2d, v_pts2d, cam_idxs, pt3d_idxs
 
-    def _call_ba(self, ba_fun, args, kwargs):
-        if not self.threaded_ba or self._ba_arg_queue is None:
+    def _call_ba(self, ba_fun, args, kwargs, parallize=True):
+        if not self.threaded_ba or self._ba_arg_queue is None or not parallize:
             res = ba_fun(*args, **kwargs)
         else:
             self._ba_arg_queue.put(('ba', ba_fun, args, kwargs))
@@ -1029,19 +1054,25 @@ class VisualOdometry:
                 pass
         return res
 
-    def _bundle_adjustment(self, current_only=False):
+    def _bundle_adjustment(self, keyframes=None, current_only=False, same_thread=False):
         logging.info('starting bundle adjustment')
+        if keyframes is None and current_only:
+            with self._3d_map_lock:
+                keyframes = self.state.keyframes[-1:]
 
-        keyframes, ids, poses_mx, pts3d, pts2d, v_pts2d, cam_idxs, pt3d_idxs = self._get_visual_ba_args(current_only)
-        skip_pose_n = 1 if not current_only else 0
+        keyframes, ids, poses_mx, pts3d, pts2d, v_pts2d, cam_idxs, pt3d_idxs = \
+                self._get_visual_ba_args(keyframes, current_only)
+
+        skip_pose_n = 0 if current_only else 1
 
         args = (poses_mx, pts3d, pts2d, cam_idxs, pt3d_idxs, self.cam_mx)
         kwargs = dict(max_nfev=self.max_ba_fun_eval, skip_pose_n=skip_pose_n, poses_only=current_only,
                       huber_coef=self.repr_err(keyframes[-1]))
 
-        poses_ba, pts3d_ba = self._call_ba(vis_bundle_adj, args, kwargs)
+        poses_ba, pts3d_ba = self._call_ba(vis_bundle_adj, args, kwargs, parallize=not same_thread)
 
-        self._update_poses(keyframes, ids, poses_ba, pts3d_ba, skip_pose_n=skip_pose_n, pop_ba_queue=not current_only)
+        self._update_poses(keyframes, ids, poses_ba, pts3d_ba, skip_pose_n=skip_pose_n,
+                           pop_ba_queue=not same_thread)
 
     def _update_poses(self, keyframes, ids, poses_ba, pts3d_ba, skip_pose_n=1, pop_ba_queue=True):
         if np.any(np.isnan(poses_ba)) or np.any(np.isnan(pts3d_ba)):
@@ -1085,8 +1116,11 @@ class VisualOdometry:
 
             # update keyframes that are newer than those included in the bundle adjustment run
             #   - also update recently triangulated new 3d points
-            new_keyframes = [kf for kf in self.state.keyframes if kf.id > keyframes[-1].id]
-            new_3d_kps = [kp for kp in self.state.map3d.values() if kp.pt3d_added_frame_id > keyframes[-1].id]
+            if keyframes[-1].id is None:
+                new_keyframes, new_3d_kps = [], []
+            else:
+                new_keyframes = [kf for kf in self.state.keyframes if kf.id > keyframes[-1].id]
+                new_3d_kps = [kp for kp in self.state.map3d.values() if kp.pt3d_added_frame_id > keyframes[-1].id]
 
             if len(new_keyframes) > 0:
                 for f in new_keyframes:

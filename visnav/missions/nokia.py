@@ -55,6 +55,10 @@ class NokiaSensor(Mission):
                     t_id = np.where(t_time > f_t + 0.5 / fps)[0][0] - 1
                     t_t = t_time[t_id]
                     lat, lon, alt, roll, pitch, yaw, gimbal_roll, gimbal_pitch, gimbal_yaw = t_data[t_id]
+
+                    if 0:
+                        roll, pitch = 0, 0
+
                     meas = Measure(data=np.array([lat, lon, alt, roll, pitch, yaw]), time_off=t_t - f_t)
 
                     if t_id >= len(t_time):
@@ -122,22 +126,22 @@ class NokiaSensor(Mission):
             'min_keypoint_dist': round(50 * sc),
             'min_tracking_quality': 0.0002,      # def 0.0001, was 0.0003
 
-            'repr_err_fov_ratio': 0.0005,
-            'max_repr_err_fov_ratio': 0.003,
+            'repr_err_fov_ratio': 0.004,        # was 0.004
+            'max_repr_err_fov_ratio': 0.006,    # was 0.006
             'est_2d2d_prob': 0.9999,
             'pose_2d2d_quality_lim': 0.04,
 
-            'use_3d2d_ransac': True,
-            'est_3d2d_iter_count': 10000,
+            'use_3d2d_ransac': False,
+            # 'est_3d2d_iter_count': 10000,
             'new_kf_min_displ_fov_ratio': 0.016,
-            'ini_kf_triangulation_trigger': 20,
+            'ini_kf_triangulation_trigger': 40,
 
-            'max_keyframes': 64,
-            'max_ba_keyframes': 64,
+            'max_keyframes': 100,
+            'max_ba_keyframes': 100,
             'ba_interval': 8,
-            'max_ba_fun_eval': 20,
-            'loc_err_sd': 1.0,
-            'ori_err_sd': math.radians(30.0),
+            'max_ba_fun_eval': 25 * 2,
+            'loc_err_sd': 100.0,
+            'ori_err_sd': math.radians(900.0),
         }
 
         logging.basicConfig(level=logging.INFO)
