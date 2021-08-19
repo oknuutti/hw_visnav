@@ -56,8 +56,8 @@ def main():
         return
 
     ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, gray.shape[::-1], None, None)
-    print('camera mx:\n%s' % (mtx,))
-    print('\ndist coefs: %s' % (dist,))
+    print('camera mx (K):\n%s' % (mtx,))
+    print('\ndist coefs (D): %s' % (dist,))
 
     for i in range(len(objpoints)):
         imgpoints2, _ = cv2.projectPoints(objpoints[i], rvecs[i], tvecs[i], mtx, dist)
@@ -68,6 +68,7 @@ def main():
     if 1:
         h, w = imgs[0].shape[:2]
         newcameramtx, roi = cv2.getOptimalNewCameraMatrix(mtx, dist, (w, h), 1, (w, h))
+        print('new camera mx (P):\n%s' % (newcameramtx,))
         for img in imgs:
             dst = cv2.undistort(img, mtx, dist, None, newcameramtx)
             # crop the image

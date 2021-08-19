@@ -797,7 +797,7 @@ class Camera:
                  quantum_eff=None, qeff_coefs=None, px_saturation_e=None, emp_coef=1,
                  lambda_min=None, lambda_eff=None, lambda_max=None,
                  dark_noise_mu=None, dark_noise_sd=None, readout_noise_sd=None,
-                 point_spread_fn=None, scattering_coef=None, cam_mx=None,
+                 point_spread_fn=None, scattering_coef=None, cam_mx=None, undist_proj_mx=None,
                  exclusion_angle_x=90, exclusion_angle_y=90):
         self.width = width      # in pixels
         self.height = height    # in pixels
@@ -809,8 +809,9 @@ class Camera:
         self.sensor_height = None
         self.f_stop = None
         self.aperture = None
-        self.dist_coefs = dist_coefs  # np.zeros(12) if dist_coefs is None else dist_coefs
+        self.dist_coefs = ([0.]*5) if dist_coefs is None else dist_coefs
         self.cam_mx = cam_mx  # camera matrix estimated using cv2.calibrateCamera
+        self.undist_proj_mx = undist_proj_mx  # new camera matrix estimated using cv2.getOptimalNewCameraMatrix
 
         self.emp_coef = emp_coef
         self.px_saturation_e = px_saturation_e
@@ -1150,12 +1151,12 @@ class Camera:
         fl_y = y / math.tan(math.radians(y_fov) / 2)
         return np.array([[fl_x * (1 if legacy else -1), 0, x],
                          [0, fl_y, y],
-                         [0, 0, 1]], dtype="float")
+                         [0, 0, 1]], dtype=np.float32)
 
     @staticmethod
     @lru_cache(maxsize=3)
     def _intrinsic_camera_mx_2(cam_mx, inverse=False, legacy=True):
-        cam_mx = np.array(cam_mx).reshape((3, 3))
+        cam_mx = np.array(cam_mx, dtype=np.float32).reshape((3, 3))
         if not legacy:
             cam_mx[0, 0] = -cam_mx[0, 0]
         return np.linalg.inv(cam_mx) if inverse else cam_mx
@@ -1167,7 +1168,7 @@ class Camera:
 
     def to_unit_sphere(self, pts2d, undistort=True, opengl=False):
         if undistort and self.dist_coefs is not None:
-            pts2d = Camera._undistort(pts2d, self.intrinsic_camera_mx(), self.dist_coefs)
+            pts2d = Camera._undistort(pts2d, self.intrinsic_camera_mx(), self.dist_coefs, self.undist_proj_mx)
         pts2d += 0.5
         pts2dh = np.hstack((pts2d, np.ones((len(pts2d), 1))))
         iK = self.inv_intrinsic_camera_mx(legacy=not opengl)
@@ -1178,7 +1179,8 @@ class Camera:
         """ xi and yi are unaltered image coordinates, z_off is usually negative  """
 
         if undistort and self.dist_coefs is not None:
-            xi, yi = Camera._undistort(np.array([[xi, yi]]), self.intrinsic_camera_mx(), self.dist_coefs)[0, 0, :]
+            xi, yi = Camera._undistort(np.array([[xi, yi]]), self.intrinsic_camera_mx(),
+                                       self.dist_coefs, self.undist_proj_mx)[0, 0, :]
 
         xh = xi + 0.5
         # yh = height - (yi+0.5)
@@ -1231,12 +1233,13 @@ class Camera:
 
     def distort(self, P):
         if self.dist_coefs is not None:
-            if 1:
+            if 0:
                 assert False, 'doesnt work'
                 return Camera._distort(P, self.intrinsic_camera_mx(), self.dist_coefs)[0]
             else:
-                dP = Camera._distort_own(P, self.dist_coefs)
-                return (dP[:, :2] / dP[:, 2:]).flatten()
+                dP = Camera._distort_own(P, self.dist_coefs, cam_mx=self.intrinsic_camera_mx(),
+                                         inv_cam_mx=None if P.shape[1] == 3 else self.inv_intrinsic_camera_mx())
+                return dP[:, :2] / dP[:, 2:] if dP.shape[1] == 3 else dP
         return P
 
     def project(self, pts3d):
@@ -1262,13 +1265,15 @@ class Camera:
         #         https://docs.opencv.org/master/d9/d0c/group__calib3d.html#ga27865b1d26bac9ce91efaee83e94d4dd
 
         if inv_cam_mx is not None:
-            P = np.hstack((P, np.ones((len(P), 1)))).dot(inv_cam_mx[:2, :].T)
+            P = np.hstack((P, np.ones((len(P), 1), dtype=P.dtype))).dot(inv_cam_mx[:2, :].T)
+        else:
+            P = P[:, :2] / P[:, 2:]
 
         k1, k2, p1, p2, k3, k4, k5, k6, s1, s2, s3, s4 = np.pad(dist_coefs, (0, 12 - len(dist_coefs)), 'constant')
 
         R2 = np.sum(P[:, 0:2] ** 2, axis=1).reshape((-1, 1))
         R4 = R2 ** 2
-        R6 = R4 ** 2 if k3 or k6 else 0
+        R6 = R4 * R2 if k3 or k6 else 0
         XY = np.prod(P, axis=1).reshape((-1, 1))
         KR = (1 + k1 * R2 + k2 * R4 + k3 * R6) / (1 + k4 * R2 + k5 * R4 + k6 * R6)
 
@@ -1284,21 +1289,28 @@ class Camera:
               + (s1 * R2 if s1 else 0) \
               + (s2 * R4 if s2 else 0)
 
-        img_P = np.hstack((Xdd, Ydd, np.ones((len(Xdd), 1))))
+        img_P = np.hstack((Xdd, Ydd, np.ones((len(Xdd), 1), dtype=P.dtype)))
         if cam_mx is not None:
             img_P = img_P.dot(cam_mx[:2, :].T)
         return img_P
 
     def undistort(self, P):
         if len(P) > 0 and self.dist_coefs is not None:
-            return Camera._undistort(P, self.intrinsic_camera_mx(), self.dist_coefs)
+            return Camera._undistort(P, self.intrinsic_camera_mx(), self.dist_coefs, self.undist_proj_mx)
         return P
 
     @staticmethod
-    def _undistort(P, cam_mx, dist_coefs):
+    def _undistort(P, cam_mx, dist_coefs, old_cam_mx=None):
         import cv2
         if len(P) > 0:
-            pts = cv2.undistortPoints(P.reshape((-1, 1, 2)), cam_mx, np.array(dist_coefs), None, cam_mx)
+            if 0:
+                # with this can tweak stopping criteria, the other version stops after 5 iterations
+                pts = cv2.undistortPointsIter(P.reshape((-1, 1, 2)), cam_mx if old_cam_mx is None else old_cam_mx,
+                                              np.array(dist_coefs), None, cam_mx,
+                                              (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.001))
+            else:
+                pts = cv2.undistortPoints(P.reshape((-1, 1, 2)), cam_mx if old_cam_mx is None else old_cam_mx,
+                                          np.array(dist_coefs), None, cam_mx)
             return pts
         return P
 

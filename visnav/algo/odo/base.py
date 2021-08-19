@@ -58,6 +58,12 @@ class Pose:
             self.so3_s2 - pose.so3_s2
         )
 
+    def __neg__(self):
+        return Pose(tools.q_times_v(self.quat.conj(), -self.loc), self.quat.conj())
+
+    def __repr__(self):
+        return 'q: %s\nv: %s' % (self.quat, self.loc)
+
     def new(self, dr, dq):
         return Pose(
             tools.q_times_v(dq, self.loc) + dr,
@@ -90,11 +96,12 @@ class Measure:
         self.time_off = time_off
         self.time_adj = time_adj
 
+
 class Frame:
     _NEXT_ID = 1
 
     def __init__(self, time, image, img_sc, pose: PoseEstimate, measure: Measure=None,
-                 kps_uv: dict=None, kps_uv_norm: dict=None, kps_uv_vel: dict=None, id=None):
+                 kps_uv: dict=None, kps_uv_norm: dict=None, kps_uv_vel: dict=None, repr_err: dict=None, id=None):
         self._id = id
         if id is not None:
             Frame._NEXT_ID = max(id + 1, Frame._NEXT_ID)
@@ -106,7 +113,18 @@ class Frame:
         self.kps_uv = kps_uv or {}              # dict of keypoints with keypoint img coords in this frame
         self.kps_uv_norm = kps_uv_norm or {}    # dict of keypoints with undistorted img coords in this frame
         self.kps_uv_vel = kps_uv_vel or {}
+        self.repr_err = repr_err or {}
         self.ini_kp_count = len(self.kps_uv)
+
+    @property
+    def repr_err_sd(self):
+        return self._calc_repr_err_sd(tuple(tuple(err) for err in self.repr_err.values()))
+
+    @staticmethod
+    @lru_cache(maxsize=1)
+    def _calc_repr_err_sd(errs):
+        errs = np.array(errs)
+        return None if len(errs) <= 1 else np.median(np.linalg.norm(errs, axis=1))
 
     def set_id(self):
         assert self._id is None, 'id already given, cant set it twice'
@@ -125,7 +143,7 @@ class Frame:
     @staticmethod
     @lru_cache(maxsize=4)
     def _to_mx(q, v):
-        return np.hstack((quaternion.as_rotation_matrix(np.quaternion(*q)), np.array(v).reshape((-1, 1))))
+        return np.hstack((quaternion.as_rotation_matrix(np.quaternion(*q)), np.array(v).reshape((-1, 1)))).astype(np.float32)
 
     @property
     def id(self):
@@ -160,7 +178,8 @@ class State:
     def __init__(self):
         self.initialized = False
         self.keyframes = []
-        self.map2d = {}  # id => Keypoint, all keypoints with only uv coordinates (still no 3d coords)
+        self.map2d = {}         # id => Keypoint, all keypoints with only uv coordinates (still no 3d coords)
+        self.feat_dscr = {}     # id => descriptor, populated if using ORB features for tracking
         self.map3d = {}
         self.last_frame = None
         self.last_success_time = None
@@ -181,10 +200,19 @@ class VisualOdometry:
     #  - loop closer or absolute pose estimator
     POSE_2D2D, POSE_2D3D, POSE_2D3D_OPT = range(3)
 
+    # keypoint detection and tracking
+    DEF_ORB_FEATURE_TRACKING = False        # use orb features instead of optical flow
+    DEF_VERIFY_FEATURE_TRACKS = False       # used regardless if orb features used
     DEF_MIN_KEYPOINT_DIST = 15
+    DEF_NO_KP_BORDER = 10
     DEF_MAX_KEYPOINTS = 315
     DEF_DETECTION_GRID = (3, 3)
-    DEF_MIN_TRACKING_QUALITY = 0.0001
+    DEF_MIN_TRACKING_QUALITY = 0.0001       # optical flow only
+    DEF_REPR_REFINE_KP_UV = False           #
+    DEF_REPR_REFINE_COEF = 0.2              # move tracked uv point by this ratio towards reprojected point
+    DEF_REFINE_KP_UV = False
+    DEF_MAX_KP_REFINE_DIST = 7              # max distance in px that will still refine kp (as opposed to discarding)
+    DEF_ORB_SEARCH_DIST = 0.03              # orb feats only, in fov ratio
 
     DEF_INIT_BIAS_SDS = np.ones(6) * 5e-3   # bias drift sds, x, y, z, then so3
     DEF_INIT_LOC_SDS = np.ones(3) * 3e-2
@@ -199,8 +227,7 @@ class VisualOdometry:
     DEF_INI_KF_TRIANGULATION_TRIGGER = 20          # need at least this qty of 2d points that can be tri. for first kf
     DEF_NEW_KF_TRANS_KP3D_ANGLE = math.radians(3)  # change in viewpoint relative to a 3d point
     DEF_NEW_KF_TRANS_KP3D_RATIO = 0.15             # ratio of 3d points with significant viewpoint change
-    DEF_NEW_KF_ROT_ANGLE = math.radians(7)         # new keyframe if orientation changed by this much
-    DEF_NEW_SC_ROT_ANGLE = math.radians(7)         # new keyframe if s/c orientation changed by this much
+    DEF_NEW_KF_ROT_ANGLE = math.radians(5)        # new keyframe if orientation changed by this much
     DEF_REPR_ERR_FOV_RATIO = 0.0005                # expected reprojection error (related to DEF_NEW_KF_MIN_DISPL_FOV_RATIO)
     DEF_MAX_REPR_ERR_FOV_RATIO = 0.003             # max tolerable reprojection error (related to DEF_NEW_KF_MIN_DISPL_FOV_RATIO)
     DEF_KF_BIAS_SDS = np.ones(6) * 5e-4            # bias drift sds, x, y, z, then so3
@@ -225,6 +252,7 @@ class VisualOdometry:
     DEF_EST_2D2D_PROB = 0.99           # relates to max RANSAC iterations
     DEF_EST_2D2D_METHOD = cv2.RANSAC    # cv2.LMEDS is fast but inaccurate, cv2.RANSAC is the other choice
 
+    DEF_OPT_INIT_RANSAC = False         # run pnp ransac before motion-only-ba to get better initial pose
     DEF_USE_3D2D_RANSAC = True
     DEF_EST_3D2D_ITER_COUNT = 1000      # max RANSAC iterations
     DEF_EST_3D2D_METHOD = cv2.SOLVEPNP_AP3P  # RANSAC kernel function  # SOLVEPNP_AP3P
@@ -244,7 +272,7 @@ class VisualOdometry:
         if verbose:
             logging.basicConfig(level=logging.DEBUG)
         self.pause = pause
-        self.cam_mx = cam.intrinsic_camera_mx(legacy=True)
+        self.cam_mx = cam.intrinsic_camera_mx(legacy=True).astype(np.float32)
         self.wf_body_q = wf_body_q or quaternion.one
         self.bf_cam_pose = bf_cam_pose or Pose(np.array([0, 0, 0]), quaternion.one)
 
@@ -256,9 +284,9 @@ class VisualOdometry:
         assert len(kwargs) == 0, 'extra keyword arguments given: %s' % (kwargs,)
 
         self.lk_params = {
-            'winSize': (32, 32),
-            'maxLevel': 4,
-            'criteria': (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.05),
+            'winSize': (16, 16),    # was (32, 32)
+            'maxLevel': 4,          # was 4
+            'criteria': (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 5, 0.2),  # was: ..., 10, 0.05)
             'minEigThreshold': self.min_tracking_quality,
         }
         self.kp_params = {
@@ -266,6 +294,16 @@ class VisualOdometry:
             'qualityLevel': 0.05,  # default around 0.05?
             'minDistance': self.min_keypoint_dist,
             'blockSize': 4,
+        }
+        self.orb_params = {
+            'edgeThreshold': 11,         # default: 31
+            'fastThreshold': 7,          # default: 20
+            'firstLevel': 0,             # always 0
+            'nlevels': 8,                # default: 8
+            'patchSize': 31,             # default: 31
+            'scaleFactor': 1.2,          # default: 1.2
+            'scoreType': cv2.ORB_FAST_SCORE,  # default ORB_HARRIS_SCORE, other: ORB_FAST_SCORE
+            'WTA_K': 2,                  # default: 2
         }
 
         # state
@@ -279,11 +317,14 @@ class VisualOdometry:
         self.cache = {}
         self._map_fig = None
         self._frame_count = 0
-        self._track_save_path = None  # for debug purposes
+        self._track_save_path = None     # for debug purposes
+        self._track_image_height = 1200 if verbose <= 1 else 400  # for debug purposes
         self._track_image = None    # for debug purposes
         self._track_colors = None   # for debug purposes
         self._map_image = None    # for debug purposes
         self._map_colors = None   # for debug purposes
+        self._bottom_bar_img = None  # for debug purposes
+        self._z_range = (-25, 300)  # for debug purposes, in meters
         self._prev_map3d = {}     # for debug purposes
         self._init_map_center = None  # for debug purposes
         self._3d_map_lock = threading.RLock()
@@ -331,11 +372,17 @@ class VisualOdometry:
             self._ba_proc.join()
             self._ba_arg_queue = None
 
-    def repr_err(self, frame):
-        return self.repr_err_fov_ratio * np.linalg.norm(np.array(frame.image.shape) / frame.img_sc)
+    def repr_err(self, frame, adaptive=True):
+        norm_err = self.repr_err_fov_ratio * np.linalg.norm(np.array(frame.image.shape) / frame.img_sc)
+        if adaptive and frame.repr_err_sd:
+            norm_err = max(frame.repr_err_sd * 2, norm_err)
+        return norm_err
 
-    def max_repr_err(self, frame):
-        return self.max_repr_err_fov_ratio * np.linalg.norm(np.array(frame.image.shape) / frame.img_sc)
+    def max_repr_err(self, frame, adaptive=True):
+        max_err = self.max_repr_err_fov_ratio * np.linalg.norm(np.array(frame.image.shape) / frame.img_sc)
+        if adaptive and frame.repr_err_sd:
+            max_err = max(frame.repr_err_sd * 3, max_err)
+        return max_err
 
     def process(self, new_img, new_time, measure=None) -> (PoseEstimate, np.ndarray, float):
         with self._new_frame_lock:
@@ -363,12 +410,12 @@ class VisualOdometry:
         self.prune_map3d()
 
         # maybe do failure recovery
-        if new_frame.pose.post is None and self.state.first_result_given:
+        if new_frame.pose.post is None:
             dt = (new_frame.time - self.state.last_success_time).total_seconds()
             if dt > self.reset_timeout:
                 # if fail for too long, reinitialize (excl if only one keyframe)
                 self.state.initialized = False
-            elif not self.state.tracking_failed:
+            elif self.state.first_result_given and not self.state.tracking_failed:
                 # frame maybe corrupted, fail once and try again next time
                 logging.info('Image maybe corrupted, failing one frame')
                 self.state.tracking_failed = True
@@ -398,6 +445,12 @@ class VisualOdometry:
                 self.maintain_map()
                 bias_sds = self.mm_bias_sds
                 self.state.first_mm_done = self.state.first_mm_done or self.state.keyframes[-1].id
+
+            if self.verbose > 0:
+                # self._draw_pts3d(new_frame, pause=self.pause, plt3d=True)
+                self._cv_draw_pts3d(new_frame, label=None, shape=(self._track_image_height,) * 2)
+                if 1:
+                    self._draw_bottom_bar()
 
         if new_frame.pose.method == VisualOdometry.POSE_2D2D:
             # 2d-2d match result only usable for the first added keyframe,
@@ -429,14 +482,13 @@ class VisualOdometry:
             img_sc = self.img_width / image.shape[1]
             image = cv2.resize(image, None, fx=img_sc, fy=img_sc)
 
-        lp = self.state.last_frame.pose.any if self.state.last_frame else Pose.initial()
+        lp = copy.deepcopy(self.state.last_frame.pose.any) if self.state.last_frame else Pose.initial()
         nf = Frame(time, image, img_sc, PoseEstimate(prior=lp, post=None, method=None), measure=measure)
-        nf.ini_kp_count = self.state.keyframes[-1] if len(self.state.keyframes) > 0 else None
         return nf
 
     def flush_state(self):
         self.removed_keyframes.extend(self.state.keyframes)
-        self.removed_keypoints.extend(self.state.map3d)
+        self.removed_keypoints.extend(self.state.map3d.values())
 
     def initialize_track(self, new_frame):
         if self.state is not None:
@@ -444,7 +496,7 @@ class VisualOdometry:
 
         logging.info('initializing tracking')
         self.state = State()
-        new_frame.pose.post = new_frame.pose.prior
+        new_frame.pose.post = copy.deepcopy(new_frame.pose.prior)
         self.add_new_keyframe(new_frame)
 
         # check that init ok and enough features found
@@ -459,40 +511,68 @@ class VisualOdometry:
         keyframes = []
         for kf in self.state.keyframes:
             ok = True
-            if not kf.pose.post:
+            if not kf.pose.post or kf.pose.method == VisualOdometry.POSE_2D2D:
                 ok = self.solve_pnp(kf, use_3d2d_ransac=True, min_inliers=12)
-            elif kf.pose.method == VisualOdometry.POSE_2D2D:
-                kf.pose.method = VisualOdometry.POSE_2D3D
+            # elif kf.pose.method == VisualOdometry.POSE_2D2D:
+            #     kf.pose.method = VisualOdometry.POSE_2D3D
             if ok:
                 keyframes.append(kf)
 
         self.state.keyframes = keyframes
         self._bundle_adjustment(same_thread=True)
 
-    def check_features(self, image, in_kp2d):
+    def check_features(self, new_frame, old_kp2d, old_kp2d_norm, new_kp2d, new_kp2d_norm, mask):
+        mask = mask.flatten()
+        if self.verify_feature_tracks or self.orb_feature_tracking:
+            if 1:
+                E, mask2 = cv2.findEssentialMat(old_kp2d_norm, new_kp2d_norm, self.cam_mx,
+                                                threshold=2 if self.refine_kp_uv else 1,
+                                                method=self.est_2d2d_method, prob=self.est_2d2d_prob)
+            else:
+                F, mask2 = cv2.findFundamentalMat(old_kp2d_norm, new_kp2d_norm, cv2.FM_RANSAC, 1, #self.repr_err(new_frame),
+                                                  self.est_2d2d_prob)
+            mask = np.logical_and(mask, mask2.flatten())
+
         # check that not too close to image border
-        w, h = self.img_width, round(image.shape[0] * self.img_width / image.shape[1])
-        mask = np.logical_and.reduce((in_kp2d[:, 0, 0] >= self.min_keypoint_dist,
-                                      in_kp2d[:, 0, 1] >= self.min_keypoint_dist,
-                                      in_kp2d[:, 0, 0] <= w - self.min_keypoint_dist,
-                                      in_kp2d[:, 0, 1] <= h - self.min_keypoint_dist))
-        return mask
+        w, h = self.img_width, round(new_frame.image.shape[0] * self.img_width / new_frame.image.shape[1])
+        mask = np.logical_and.reduce((mask,
+                                      new_kp2d[:, 0, 0] >= self.no_kp_border,
+                                      new_kp2d[:, 0, 1] >= self.no_kp_border,
+                                      new_kp2d[:, 0, 0] <= w - self.no_kp_border,
+                                      new_kp2d[:, 0, 1] <= h - self.no_kp_border))
+
+        if not self.orb_feature_tracking:
+            # check that not too close to each other
+            idxs = np.where(mask)[0]
+            D = tools.distance_mx(new_kp2d[idxs].squeeze())
+            for i, k in enumerate(idxs):
+                mask[k] = np.all(D[i, :i] > self.min_keypoint_dist * 0.5)
+
+        return mask.astype(bool)
 
     def detect_features(self, new_frame):
-        kp2d = self._detect_features(new_frame.image, new_frame.kps_uv.values())
-        pt2d_norm = self.cam.undistort(np.array(kp2d) / new_frame.img_sc)
+        kp2d, dscr = self._detect_features(new_frame.image, new_frame.kps_uv.values())
+        kp2d = np.array(kp2d)
+        kp2d_norm = self.cam.undistort(kp2d / new_frame.img_sc)
 
-        for i, pt in enumerate(kp2d):
+        for i in range(len(kp2d)):
             kp = Keypoint()  # Keypoint({new_frame.id: pt})
-            new_frame.kps_uv[kp.id] = pt
-            new_frame.kps_uv_norm[kp.id] = pt2d_norm[i]
+            new_frame.kps_uv[kp.id] = kp2d[i, :]
+            new_frame.kps_uv_norm[kp.id] = kp2d_norm[i]
             self.state.map2d[kp.id] = kp
+            if dscr is not None:
+                self.state.feat_dscr[kp.id] = dscr[i]
         new_frame.ini_kp_count = len(new_frame.kps_uv)
 
         logging.info('%d new keypoints detected' % len(kp2d))
 
     def _feature_detection_mask(self, image):
-        return 255 * np.ones(image.shape, dtype=np.uint8)
+        mask = 255 * np.ones(image.shape, dtype=np.uint8)
+        mask[:self.no_kp_border, :] = 0
+        mask[-self.no_kp_border:, :] = 0
+        mask[:, :self.no_kp_border] = 0
+        mask[:, -self.no_kp_border:] = 0
+        return mask
 
     def _detect_features(self, image, kp2d, existing=False):
         # TODO: (3) project non-active 3d points to current image plane before detecting new features?
@@ -519,13 +599,15 @@ class VisualOdometry:
             return []
 
         # detect Shi-Tomasi keypoints
-        det = cv2.GFTTDetector_create(**self.kp_params)
+        if self.orb_feature_tracking:
+            det = cv2.ORB_create(**self.orb_params)
+        else:
+            det = cv2.GFTTDetector_create(**self.kp_params)
 
         # detect features in a grid so that features are spread out
         kp2d = detect_gridded(det, image, mask, *self.detection_grid, self.max_keypoints)
-        kp2d = self.kp2arr(kp2d)
-
-        return [] if kp2d is None else kp2d
+        kp2d, dscr = det.compute(image, kp2d) if self.orb_feature_tracking else (kp2d, None)
+        return ([], None) if kp2d is None else (self.kp2arr(kp2d), dscr)
 
     def is_active_kp(self, id):
         return id in self.state.map2d or id in self.state.map3d and self.state.map3d[id].active
@@ -536,33 +618,145 @@ class VisualOdometry:
         if len(lf.kps_uv) == 0:
             return
 
-        # track keypoints using Lukas-Kanade method
-        tmp = [(id, uv) for id, uv in lf.kps_uv.items() if self.is_active_kp(id)]
-        ids, old_kp2d = list(map(np.array, zip(*tmp) if len(tmp) > 0 else ([], [])))
-        new_kp2d, mask, err = cv2.calcOpticalFlowPyrLK(lf.image, nf.image, old_kp2d, None, **self.lk_params)
+        if self.orb_feature_tracking:
+            ids, dt_arr, old_kp2d, new_kp2d, mask = self.track_orb_features(nf)
+            assert False, 'add old_kp2d_norm'
+        else:
+            # track keypoints using Lukas-Kanade method
+            tmp = [(id, uv, lf.kps_uv_norm[id]) for id, uv in lf.kps_uv.items() if self.is_active_kp(id)]
+            ids, old_kp2d, old_kp2d_norm = list(map(np.array, zip(*tmp) if len(tmp) > 0 else ([], [], [])))
+            dt_arr = np.ones((len(ids),)) * (nf.time - lf.time).total_seconds()
+
+            new_kp2d, mask, err = cv2.calcOpticalFlowPyrLK(lf.image, nf.image, old_kp2d, None, **self.lk_params)
+
+            if self.refine_kp_uv and np.sum(mask) > 0:
+                new_kp2d, mask = self.refine_gftt(new_frame, new_kp2d, mask)
+
+        new_kp2d_norm = self.cam.undistort(np.array(new_kp2d) / nf.img_sc)
 
         # extra sanity check on tracked points, set mask to false if keypoint quality too poor
-        mask2 = self.check_features(nf.image, new_kp2d)
-        if mask2 is not None:
-            mask = np.logical_and(mask.astype(np.bool).flatten(), mask2)
-        else:
-            mask = mask.astype(np.bool).flatten()
+        mask = self.check_features(nf, old_kp2d, old_kp2d_norm, new_kp2d, new_kp2d_norm, mask)
+        if 0:
+            self._plot_tracks(nf.image, old_kp2d, new_kp2d, mask)
 
-        new_kp2d = new_kp2d[mask, :, :]
-
-        # mark non-tracked 3d-keypoints belonging to at least two keyframes as non-active, otherwise delete
-        with self._3d_map_lock:
-            for id in ids[np.logical_not(mask)]:
-                self.del_keypoint(id, kf_lim=2)
+        if not self.orb_feature_tracking:
+            # mark non-tracked 3d-keypoints belonging to at least two keyframes as non-active, otherwise delete
+            with self._3d_map_lock:
+                for id in ids[np.logical_not(mask)]:
+                    self.del_keypoint(id, kf_lim=2)
 
         ids = ids[mask]
-        dt = (nf.time - lf.time).total_seconds()
+        new_kp2d = new_kp2d[mask]
+        new_kp2d_norm = new_kp2d_norm[mask]
+        old_kp2d_norm = old_kp2d_norm[mask]
+        dt_arr = dt_arr[mask]
 
         nf.kps_uv = {id: uv for id, uv in zip(ids, new_kp2d)}
-        nf.kps_uv_norm = {id: uv for id, uv in zip(ids, self.cam.undistort(np.array(new_kp2d) / nf.img_sc))}
-        nf.kps_uv_vel = {id: (uv - lf.kps_uv_norm[id]) / dt for id, uv in nf.kps_uv_norm.items()}
+        nf.kps_uv_norm = {id: uv for id, uv in zip(ids, new_kp2d_norm)}
+        nf.kps_uv_vel = {id: (uv1 - uv0) / dt
+                         for id, dt, uv0, uv1 in zip(ids, dt_arr, old_kp2d_norm, new_kp2d_norm)}
 
         logging.info('Tracking: %d/%d' % (len(new_kp2d), len(old_kp2d)))
+
+    def refine_gftt(self, new_frame, new_kp2d, mask):
+        # detect all corners that pass the criteria
+        kp_params = self.kp_params.copy()
+        kp_params['maxCorners'] = self.max_keypoints * 10
+        kp_params['minDistance'] = 1
+        kp_params['qualityLevel'] *= 1.0
+        det = cv2.GFTTDetector_create(**kp_params)
+        if 0:
+            refined_kp2d = det.detect(new_frame.image)
+        else:
+            refined_kp2d = detect_gridded(det, new_frame.image, None, *self.detection_grid, kp_params['maxCorners'])
+        refined_kp2d = self.kp2arr(refined_kp2d)
+
+        # refine previously tracked keypoint uv coords
+        D = tools.distance_mx(new_kp2d.squeeze(), refined_kp2d.squeeze())
+        idxs = np.argmin(D, axis=1)
+        cross_idxs = np.argmin(D, axis=0)
+        mask = np.logical_and(mask.squeeze(), D[np.arange(len(idxs)), idxs] < self.max_kp_refine_dist)
+
+        # set new uv-coords
+        old, new = [], []
+        for i, idx in zip(np.where(mask)[0], idxs[mask]):
+            if i == cross_idxs[idx]:
+                # if two mapped to same, pick the closest one and discard the other(s)
+                old.append(new_kp2d[i].flatten())
+                new.append(refined_kp2d[idx].flatten())
+                new_kp2d[i] = refined_kp2d[idx]
+            else:
+                mask[i] = 0
+
+        if 0:
+            import matplotlib.pyplot as plt
+            plt.figure(10, figsize=(14, 10))
+            plt.gcf().clear()
+            plt.imshow(new_frame.image)
+            # old, new = np.array(old), np.array(new)
+            for o, n in zip(old, new):
+                plt.plot([o[0], n[0]], [o[1], n[1]], 'b')
+                plt.plot([n[0]], [n[1]], 'bo', mfc='none')
+            plt.pause(0.05)
+
+        # # add as new keypoints those that are farther than min_keypoint_dist from existing ones
+        # add_I = D[cross_idxs, np.arange(len(cross_idxs))] >= self.min_keypoint_dist
+        # kp2d, kp2d_norm = kp2d[add_I], kp2d_norm[add_I]
+        return new_kp2d, mask.astype(np.uint8)
+
+    def track_orb_features(self, new_frame, propagate=True):
+        nf, lf = new_frame, self.state.last_frame
+
+        # take all successfully tracked features from last frame
+        if propagate:
+            # propagate by estimated keypoint velocity
+            tmp = [(id, (nf.time - lf.time).total_seconds(), uv, lf.kps_uv_vel.get(id, [[0, 0]]),
+                    self.state.feat_dscr.get(id, None)) for id, uv in lf.kps_uv_norm.items()]
+            ids, dt_arr, old_kp2d, old_kp2d_vel, old_dscr = list(
+                map(np.array, zip(*tmp) if len(tmp) > 0 else ([],) * 5))
+            old_kp2d = old_kp2d + old_kp2d_vel * dt_arr[:, None, None]
+            old_kp2d = (self.cam.distort(old_kp2d.squeeze())[:, None, :] * lf.img_sc + 0.5).astype(int)
+        else:
+            # use previous keypoint location as the best guess
+            tmp = [(id, (nf.time - lf.time).total_seconds(), uv, self.state.feat_dscr.get(id, None))
+                   for id, uv in lf.kps_uv_norm.items()]
+            ids, dt_arr, old_kp2d, old_dscr = list(
+                map(np.array, zip(*tmp) if len(tmp) > 0 else ([],) * 5))
+
+        # # add triangulated features from last n keyframes
+        # tmp = [(id, (nf.time - rf.time).total_seconds(), uv, uv_vel, self.state.feat_dscr.get(id, None))
+        #        for id, uv in lf.kps_uv.items()]
+
+        # ids, dt_arr, old_kp2d, old_dscr = list(map(np.array, zip(*tmp) if len(tmp) > 0 else ([], [])))
+
+        det = cv2.ORB_create(**self.orb_params)
+        kp2d = detect_gridded(det, nf.image, None, *self.detection_grid, self.max_keypoints * 4)
+        kp2d, dscr = det.compute(nf.image, kp2d)
+
+        kp2d = self.kp2arr(kp2d)
+        D = tools.distance_mx(old_kp2d.reshape((-1, 2)), kp2d.reshape((-1, 2)))
+        search_mask = (D < self.orb_search_dist * np.linalg.norm(np.array(nf.image.shape))).astype(np.uint8)
+        matcher = cv2.BFMatcher(det.defaultNorm(), False)  # doesn't support crosscheck if mask given
+        matches = matcher.match(old_dscr, dscr, search_mask)
+
+        new_kp2d = np.ones_like(old_kp2d) * -1
+        new_kp2d[[m.queryIdx for m in matches], :, :] = kp2d[[m.trainIdx for m in matches], :, :]
+        mask = (new_kp2d[:, 0, 0] >= 0).astype(np.uint8)
+
+        if 1:
+            self._plot_tracks(nf.image, old_kp2d, new_kp2d, mask)
+
+        return ids, dt_arr, old_kp2d, new_kp2d, mask
+
+    def _plot_tracks(self, image, old_kp2d, new_kp2d, mask, pause=True):
+        img = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+        for (x0, y0), (x1, y1) in zip(old_kp2d[mask.astype(bool), 0, :],
+                                      new_kp2d[mask.astype(bool), 0, :]):
+            img = cv2.line(img, (x1, y1), (x0, y0), (0, 255, 0), 1)
+            img = cv2.circle(img, (x1, y1), 5, (0, 255, 0), 1)
+        img_sc = 768 / img.shape[0]
+        cv2.imshow('track debug', cv2.resize(img, None, fx=img_sc, fy=img_sc, interpolation=cv2.INTER_AREA))
+        cv2.waitKey(0 if pause else 25)
 
     def solve_2d2d(self, ref_frame, new_frame):
         rf, nf = ref_frame, new_frame
@@ -614,7 +808,7 @@ class VisualOdometry:
 
         return ok
 
-    def solve_pnp(self, kf, use_3d2d_ransac, min_inliers=None):
+    def solve_pnp(self, kf, use_3d2d_ransac, min_inliers=None, lf=None):
         min_inliers = min_inliers or self.min_inliers
         inliers = None
 
@@ -626,42 +820,62 @@ class VisualOdometry:
 
         ok = False
         if len(pts3d) >= min_inliers:
-            if use_3d2d_ransac:
+            old_err_sd = (lf and lf.repr_err_sd or 0)
+
+            if self.opt_init_ransac or use_3d2d_ransac:
                 ok, rv, r, inliers = cv2.solvePnPRansac(pts3d, pts2d, self.cam_mx, None,
                                                         iterationsCount=self.est_3d2d_iter_count,
                                                         reprojectionError=self.repr_err(kf),
                                                         flags=self.est_3d2d_method)
 
-                logging.info('PnP: %d/%d' % (0 if inliers is None else len(inliers), len(pts2d)))
-            else:
-                kf.pose.post = copy.deepcopy(kf.pose.prior)
+                # calculate delta-q and delta-r
+                dq = tools.angleaxis_to_q(rv) * kf.pose.prior.quat.conj()
+
+                # solvePnPRansac apparently randomly gives 180deg wrong answer,
+                #  - too high translation in correct direction, why? related to delayed application of ba result?
+                if abs(tools.q_to_ypr(dq)[0]) > math.pi * 0.9:
+                    logging.warning('rotated pnp-ransac solution by 180deg around z-axis')
+                    q_fix = tools.ypr_to_q(math.pi, 0, 0)
+                    dq = dq * q_fix
+                    r = tools.q_times_v(q_fix, r)
+
+                dr = r.flatten() - tools.q_times_v(dq, kf.pose.prior.loc)
+                kf_repr_err = None
+
+            if not use_3d2d_ransac:
+                if self.opt_init_ransac and ok and len(inliers) > min_inliers and len(inliers)/len(pts3d) > self.min_inlier_ratio:
+                    kf.pose.post = kf.pose.prior.new(dr, dq)
+                else:
+                    kf.pose.post = copy.deepcopy(lf and lf.pose.post or kf.pose.prior)
+
+                if lf:
+                    kf.repr_err = lf.repr_err.copy()
 
                 self._bundle_adjustment([kf], current_only=True, same_thread=True)
 
-                inliers, _, _ = self.sanity_check_pt3d(ids, pts3d, [kf], repr_err_only=True)
-                rv = tools.q_to_angleaxis(kf.pose.post.quat, True)
-                r, ok = kf.pose.post.loc, True
-                logging.info('OPT: %d/%d' % (len(inliers), len(pts2d)))
+                inliers, _, _, kf_repr_err = self.sanity_check_pt3d(ids, pts3d, [kf], repr_err_only=True)
+                ok = True
 
         if ok and len(inliers) >= min_inliers and len(inliers)/len(pts3d) > self.min_inlier_ratio:
-            q = tools.angleaxis_to_q(rv)
+            if use_3d2d_ransac:
+                kf.pose.post = kf.pose.prior.new(dr, dq)
 
-            if 0:
-                import matplotlib.pyplot as plt
-                a = np.array([nf.kps_uv[id] for id in ids]).squeeze()
-                b = self.cam.calc_img_R(nf.to_rel(pts3d, post=False), distort=True, legacy=True)*nf.img_sc
-                nf.pose.post = Pose(r, q)
-                c = self.cam.calc_img_R(nf.to_rel(pts3d, post=True), distort=True, legacy=True)*nf.img_sc
-                plt.figure(1, figsize=(8, 6))
-                plt.imshow(nf.image)
-                plt.plot(a[:, 0], a[:, 1], 'bx')
-                plt.plot(b[:, 0], b[:, 1], 'rx')
-                plt.plot(c[:, 0], c[:, 1], 'gx')
-                plt.plot(c[inliers, 0], c[inliers, 1], 'go', mfc='none')
-                plt.tight_layout()
-                plt.xlim(-50, nf.image.shape[1] + 50)
-                plt.ylim(nf.image.shape[0] + 50, -50)
-                plt.show()
+            # if 0:
+            #     import matplotlib.pyplot as plt
+            #     a = np.array([nf.kps_uv[id] for id in ids]).squeeze()
+            #     b = self.cam.calc_img_R(nf.to_rel(pts3d, post=False), distort=True, legacy=True)*nf.img_sc
+            #     nf.pose.post = Pose(r, q)
+            #     c = self.cam.calc_img_R(nf.to_rel(pts3d, post=True), distort=True, legacy=True)*nf.img_sc
+            #     plt.figure(1, figsize=(8, 6))
+            #     plt.imshow(nf.image)
+            #     plt.plot(a[:, 0], a[:, 1], 'bx')
+            #     plt.plot(b[:, 0], b[:, 1], 'rx')
+            #     plt.plot(c[:, 0], c[:, 1], 'gx')
+            #     plt.plot(c[inliers, 0], c[inliers, 1], 'go', mfc='none')
+            #     plt.tight_layout()
+            #     plt.xlim(-50, nf.image.shape[1] + 50)
+            #     plt.ylim(nf.image.shape[0] + 50, -50)
+            #     plt.show()
 
             # record keypoint stats
             for id in ids:
@@ -670,22 +884,27 @@ class VisualOdometry:
                 self.state.map3d[ids[i]].inlier_count += 1
                 self.state.map3d[ids[i]].inlier_time = kf.time
 
-            # calculate delta-q and delta-r
-            dq = q * kf.pose.prior.quat.conj()
+            if kf_repr_err is None:
+                _, _, _, kf_repr_err = self.sanity_check_pt3d(ids, pts3d, [kf], repr_err_only=True)
 
-            # solvePnPRansac apparently randomly gives 180deg wrong answer,
-            #  - too high translation in correct direction, why? related to delayed application of ba result?
-            if abs(tools.q_to_ypr(dq)[0]) > math.pi * 0.9:
-                logging.warning('rotated pnp-ransac solution by 180deg around z-axis')
-                q_fix = tools.ypr_to_q(math.pi, 0, 0)
-                dq = dq * q_fix
-                q = dq * kf.pose.prior.quat
-                r = tools.q_times_v(q_fix, r)
+            for id, err in kf_repr_err[0].items():
+                kf.repr_err[id] = err
 
-            dr = r.flatten() - tools.q_times_v(dq, kf.pose.prior.loc)
-
-            kf.pose.post = kf.pose.prior.new(dr, dq)
             kf.pose.method = VisualOdometry.POSE_2D3D
+            if self.repr_refine_kp_uv and kf.repr_err_sd > self.repr_err(kf, adaptive=False):
+                tmp = [(id, kf.kps_uv_norm[id], err) for id, err in kf_repr_err[0].items()]
+                ids, kps_uv_norm_, err = map(np.array, zip(*tmp))
+                kps_uv_norm = kps_uv_norm_ - self.repr_refine_coef * err[:, None, :]
+                kps_uv = self.cam.distort(kps_uv_norm.squeeze())[:, None, :] * kf.img_sc
+                for i, id in enumerate(ids):
+                    kf.kps_uv_norm[id] = kps_uv_norm[i]
+                    kf.kps_uv[id] = kps_uv[i]
+                    kf.repr_err[id] = (1 - self.repr_refine_coef) * err[i, :]
+
+            logging.info('%s: %d/%d, px err sd: %.1f => %.1f' % (
+                'PnP' if use_3d2d_ransac else 'OPT',
+                0 if inliers is None else len(inliers),
+                len(pts2d), old_err_sd, kf.repr_err_sd))
 
             return True
 
@@ -704,7 +923,7 @@ class VisualOdometry:
     def estimate_pose(self, new_frame):
         nf = new_frame
 
-        ok = self.solve_pnp(nf, self.use_3d2d_ransac)
+        ok = self.solve_pnp(nf, self.use_3d2d_ransac, lf=self.state.last_frame)
 
         if not ok and self.state.first_result_given and self.state.tracking_failed:  # give one chance with tracking_failed
             logging.info(' => clearing all 3d points')
@@ -722,8 +941,6 @@ class VisualOdometry:
 
         if self.verbose:
             self._draw_tracks(nf, pause=self.pause)
-            if self.verbose > 1:
-                self._draw_pts3d(nf, pause=self.pause, plt3d=True)
 
     def _log_pose_diff(self, title, r0, q0, r1, q1):
         dq = q1 * q0.conj()
@@ -763,6 +980,9 @@ class VisualOdometry:
         return qlt
 
     def is_new_keyframe(self, new_frame):
+        if not self.state.initialized:
+            return False
+
         # check if
         #   a) should detect new feats as old ones don't work,
         #   b) can triangulate many 2d points,
@@ -829,6 +1049,9 @@ class VisualOdometry:
         if kpset is not None:
             return kpset
 
+        if (new_frame.repr_err_sd or 0) > self.repr_err(new_frame, adaptive=False) * 2:
+            return {}
+
         n = len(self.state.keyframes)
         ids = [kp_id for kp_id in new_frame.kps_uv_norm.keys() if kp_id in self.state.map2d]
         k = len(ids)
@@ -843,7 +1066,7 @@ class VisualOdometry:
         D = np.ones((k, n)) * np.nan
         for j, f in enumerate(self.state.keyframes):
             idxs = np.where(np.logical_not(np.isnan(r_uv_arr[:, j, 0])))[0]
-            if len(idxs) > 0 and f.pose.post:
+            if len(idxs) > 0 and f.pose.post and (f.repr_err_sd or 0) < self.repr_err(f, adaptive=False) * 3:
                 p_uvs = tools.q_times_img_coords(new_frame.pose.any.quat * f.pose.post.quat.conj(), r_uv_arr[idxs, j, :],
                                                  self.cam, opengl=False, distort=False)
                 D[idxs, j] = np.linalg.norm(p_uvs - n_uv_arr[idxs, :], axis=1)
@@ -916,7 +1139,7 @@ class VisualOdometry:
             if not f_pts3d[rf_id]:
                 continue
             ids, pts3d = map(np.array, zip(*f_pts3d[rf_id]))
-            inl, _, rem = self.sanity_check_pt3d(ids, pts3d, [ref_frame, new_frame])
+            inl, _, rem, kf_repr_err = self.sanity_check_pt3d(ids, pts3d, [ref_frame, new_frame])
             inl_ids.extend(ids[inl])
             inl_pts3d.extend(pts3d[inl])
             removals.extend(ids[rem])
@@ -949,18 +1172,37 @@ class VisualOdometry:
 
         # check that reprojection error is not too large
         idxs = np.where(mask == 0)[0]
-        kps4d = np.hstack((pts3d[idxs], np.ones((len(idxs), 1))))
+        kps4d = np.hstack((pts3d[idxs], np.ones((len(idxs), 1), dtype=np.float32)))
 
-        for f in frames[-3:]:   # TODO: for now only 3 latest frames used, somehow got too many rejections after ba
+        kf_repr_err = []
+        for j, f in enumerate(frames):
             norm_err, max_err = self.repr_err(f), self.max_repr_err(f)
             tmp = np.array([[i, f.kps_uv_norm[id]] for i, id in enumerate(ids[idxs]) if id in f.kps_uv_norm]).T
+            err = []
             if len(tmp) > 0:
                 kp_idxs, uvs = tmp[0].astype(int), np.concatenate(tmp[1, :])
                 proj_pts2d = self.cam_mx.dot(f.to_mx()).dot(kps4d[kp_idxs, :].T).T
-                err = np.linalg.norm(uvs - proj_pts2d[:, :2]/proj_pts2d[:, 2:], axis=1)
-                mask[idxs[kp_idxs]] = np.bitwise_or.reduce((mask[idxs[kp_idxs]],
-                                                            1*(err > norm_err).astype(np.int),
-                                                            2*(err > max_err).astype(np.int)))
+                uvp = proj_pts2d[:, :2]/proj_pts2d[:, 2:]
+                err = uvs - uvp
+                errn = np.linalg.norm(err, axis=1)
+                err_sd = np.mean(np.std(err, axis=0))
+                if 1:
+                    norm_err = max(norm_err, err_sd * 2)
+                    max_err = max(max_err, err_sd * 3)
+
+                if len(frames) - j < 3:
+                    # TODO: check if necessary to limit to three last frames, earlier got too many rejections after BA
+                    mask[idxs[kp_idxs]] = np.bitwise_or.reduce((mask[idxs[kp_idxs]],
+                                                                1*(errn > norm_err).astype(np.int),
+                                                                2*(errn > max_err).astype(np.int)))
+                    if 0 and (np.sum(errn > max_err) > 50 or len(frames) == 1 and np.sum(errn < norm_err) < 20):
+                        import matplotlib.pyplot as plt
+                        plt.figure(4)
+                        plt.scatter(uvs[:, 0], uvs[:, 1])
+                        plt.scatter(uvp[:, 0], uvp[:, 1])
+                        plt.gca().invert_yaxis()
+                        plt.show()
+            kf_repr_err.append(dict(zip(ids[idxs], err)))
 
         if not repr_err_only:
             #  check that distance to the point is not too much, parallax should be high enough
@@ -974,7 +1216,7 @@ class VisualOdometry:
         good = np.where(mask == 0)[0]
         wait = np.where(mask == 1)[0]
         remove = np.where(mask > 1)[0]
-        return good, wait, remove
+        return good, wait, remove, kf_repr_err
 
     def bundle_adjustment(self, max_keyframes=None, sync=False):
         self._ba_max_keyframes = max_keyframes
@@ -1000,10 +1242,9 @@ class VisualOdometry:
 
     def _get_visual_ba_args(self, keyframes=None, active_kp_only=False):
         if keyframes is None:
-            with self._3d_map_lock:
-                max_keyframes = len(self.state.keyframes)
-                max_keyframes = max_keyframes if self._ba_max_keyframes is None else (self._ba_max_keyframes + 1)
-                keyframes = self.state.keyframes[-max_keyframes:]
+            max_keyframes = len(self.state.keyframes)
+            max_keyframes = max_keyframes if self._ba_max_keyframes is None else (self._ba_max_keyframes + 1)
+            keyframes = self.state.keyframes[-max_keyframes:]
 
         ids = set(pt_id for kf in keyframes for pt_id in kf.kps_uv.keys()
                   if pt_id in self.state.map3d and (not active_kp_only or self.state.map3d[pt_id].active))
@@ -1015,30 +1256,39 @@ class VisualOdometry:
         ids, pts3d = map(np.array, zip(*tmp))
         idmap = dict(zip(ids, np.arange(len(ids))))
 
-        # poses_mx = np.array([
-        #     np.hstack((
-        #         tools.q_to_angleaxis(f.pose.post.quat, compact=True),            # already in cam -> world
-        #         f.pose.post.loc.flatten()
-        #     ))
-        #     for f in keyframes
-        # ])
+        if 0:
+            # flip to world -> cam
+            poses_mx = np.array([
+                np.hstack((
+                    tools.q_to_angleaxis(f.pose.post.quat.conj(), compact=True),
+                    tools.q_times_v(f.pose.post.quat.conj(), -f.pose.post.loc).flatten()
+                ))
+                for f in keyframes
+            ])
+        else:
+            # already in cam -> world
+            poses_mx = np.array([
+                np.hstack((
+                    tools.q_to_angleaxis(f.pose.post.quat, compact=True),
+                    f.pose.post.loc.flatten()
+                ))
+                for f in keyframes
+            ], dtype=np.float32)
 
-        # flip to world -> cam
-        poses_mx = np.array([
-            np.hstack((
-                tools.q_to_angleaxis(f.pose.post.quat.conj(), compact=True),
-                tools.q_times_v(f.pose.post.quat.conj(), -f.pose.post.loc).flatten()
-            ))
-            for f in keyframes
-        ])
-
-        cam_idxs, pt3d_idxs, pts2d, v_pts2d = list(map(np.array, zip(*[
-            (i, idmap[id], uv.flatten(), f.kps_uv_vel.get(id, np.array([0, 0])).flatten())
+        cam_idxs, pt3d_idxs, pts2d, v_pts2d, err_sd = list(map(np.array, zip(*[
+            (i, idmap[id], uv.flatten(),
+                f.kps_uv_vel.get(id, np.array([0, 0])).flatten(),
+                # np.linalg.norm(f.repr_err.get(id, 0)) or self.repr_err(f)
+                # np.sqrt(np.linalg.norm(f.repr_err.get(id, 0))**2 + self.repr_err(f)**2)
+                # self.repr_err(f)
+                # np.sqrt(self.repr_err(f)**2 + self.repr_err(f, adaptive=False)**2)
+                self.repr_err(f, adaptive=False)
+            )
             for i, f in enumerate(keyframes)
                 for id, uv in f.kps_uv_norm.items() if id in idmap
         ])))
 
-        return keyframes, ids, poses_mx, pts3d, pts2d, v_pts2d, cam_idxs, pt3d_idxs
+        return keyframes, ids, poses_mx, pts3d, pts2d, v_pts2d.astype(np.float32), err_sd.astype(np.float32), cam_idxs, pt3d_idxs
 
     def _call_ba(self, ba_fun, args, kwargs, parallize=True):
         if not self.threaded_ba or self._ba_arg_queue is None or not parallize:
@@ -1056,11 +1306,11 @@ class VisualOdometry:
 
     def _bundle_adjustment(self, keyframes=None, current_only=False, same_thread=False):
         logging.info('starting bundle adjustment')
-        if keyframes is None and current_only:
-            with self._3d_map_lock:
+        with self._3d_map_lock:
+            if keyframes is None and current_only:
                 keyframes = self.state.keyframes[-1:]
 
-        keyframes, ids, poses_mx, pts3d, pts2d, v_pts2d, cam_idxs, pt3d_idxs = \
+            keyframes, ids, poses_mx, pts3d, pts2d, v_pts2d, px_err_sd, cam_idxs, pt3d_idxs = \
                 self._get_visual_ba_args(keyframes, current_only)
 
         skip_pose_n = 0 if current_only else 1
@@ -1071,78 +1321,84 @@ class VisualOdometry:
 
         poses_ba, pts3d_ba = self._call_ba(vis_bundle_adj, args, kwargs, parallize=not same_thread)
 
-        self._update_poses(keyframes, ids, poses_ba, pts3d_ba, skip_pose_n=skip_pose_n,
-                           pop_ba_queue=not same_thread)
+        with self._new_frame_lock:
+            self._update_poses(keyframes, ids, poses_ba, pts3d_ba, skip_pose_n=skip_pose_n,
+                               pop_ba_queue=not same_thread)
 
     def _update_poses(self, keyframes, ids, poses_ba, pts3d_ba, skip_pose_n=1, pop_ba_queue=True):
         if np.any(np.isnan(poses_ba)) or np.any(np.isnan(pts3d_ba)):
             logging.warning('bundle adjustment results in invalid 3d points')
             return
 
-        with self._new_frame_lock:
-            for i, p in enumerate(poses_ba):
-                f = keyframes[i + skip_pose_n]
-                rn, qn = p[3:], tools.angleaxis_to_q(p[:3])
+        for i, p in enumerate(poses_ba):
+            f = keyframes[i + skip_pose_n]
+            rn, qn = p[3:], tools.angleaxis_to_q(p[:3])
 
-                # flip from world -> cam into cam -> world
+            # flip from world -> cam into cam -> world
+            if 0:
                 rn = tools.q_times_v(qn.conj(), -rn)
                 qn = qn.conj()
 
-                if i == len(poses_ba) - 1:
-                    # last frame adjusted by this rotation and translation
-                    ro, qo = f.pose.post.loc, f.pose.post.quat
-                    dr, dq = rn - ro, qn * qo.conj()        # TODO: or is it qo.conj() * qn
-                f.pose.post.loc, f.pose.post.quat = rn, qn
+            if i == len(poses_ba) - 1:
+                # last frame adjusted by this rotation and translation
+                ro, qo = f.pose.post.loc, f.pose.post.quat
+                dq = qn * qo.conj()
+                dr = rn - tools.q_times_v(dq, ro)
+            f.pose.post.loc, f.pose.post.quat = rn, qn
 
-            # sanity check for pts3d_ba:
-            #  - active 3d keypoints are in front of at least two keyframes
-            #  - reprojection error is acceptable
-            #  - parallax is enough
-            if len(pts3d_ba) > 0:
-                good, borderline, rem_idxs = self.sanity_check_pt3d(ids, pts3d_ba, keyframes, max_dist_coef=3)
-                inliers = np.concatenate((good, borderline))
-                rem_ids, good_ids, good_pts3d = ids[rem_idxs], ids[inliers], pts3d_ba[inliers]
-            else:
-                rem_ids, good_ids, good_pts3d = [[]] * 3
+        # sanity check for pts3d_ba:
+        #  - active 3d keypoints are in front of at least two keyframes
+        #  - reprojection error is acceptable
+        #  - parallax is enough
+        if len(pts3d_ba) > 0:
+            good, borderline, rem_idxs, kf_repr_err = self.sanity_check_pt3d(ids, pts3d_ba, keyframes, max_dist_coef=3)
+            inliers = np.concatenate((good, borderline))
+            rem_ids, good_ids, good_pts3d = ids[rem_idxs], ids[inliers], pts3d_ba[inliers]
+        else:
+            rem_ids, good_ids, good_pts3d, kf_repr_err = [[]] * 4
 
-            for kp_id in rem_ids:
-                if kp_id in self.state.map3d:
-                    self.del_keypoint(kp_id)
+        if len(kf_repr_err) > 0:
+            for i, kf in enumerate(keyframes):
+                for id, err in kf_repr_err[i].items():
+                    kf.repr_err[id] = err
 
-            # transform 3d map so that consistent with first frame being unchanged
-            for kp_id, pt3d in zip(good_ids, good_pts3d):
-                if kp_id in self.state.map3d:
-                    self.state.map3d[kp_id].pt3d = pt3d
+        for kp_id in rem_ids:
+            if kp_id in self.state.map3d:
+                self.del_keypoint(kp_id)
 
-            # update keyframes that are newer than those included in the bundle adjustment run
-            #   - also update recently triangulated new 3d points
-            if keyframes[-1].id is None:
-                new_keyframes, new_3d_kps = [], []
-            else:
-                new_keyframes = [kf for kf in self.state.keyframes if kf.id > keyframes[-1].id]
-                new_3d_kps = [kp for kp in self.state.map3d.values() if kp.pt3d_added_frame_id > keyframes[-1].id]
+        # transform 3d map so that consistent with first frame being unchanged
+        for kp_id, pt3d in zip(good_ids, good_pts3d):
+            if kp_id in self.state.map3d:
+                self.state.map3d[kp_id].pt3d = pt3d
 
-            if len(new_keyframes) > 0:
-                for f in new_keyframes:
-                    f.pose.post.quat = dq * f.pose.post.quat       # TODO: or is it f.pose.post.quat * dq
-                    cnr = f.pose.post.loc + dr
-                    f.pose.post.loc = cnr
-                for kp in new_3d_kps:
-                    kp.pt3d = tools.q_times_v(dq, kp.pt3d + dr)    # TODO: or is it q_times_v(dq, kp.pt3d) + dr
+        # update keyframes that are newer than those included in the bundle adjustment run
+        #   - also update recently triangulated new 3d points
+        if keyframes[-1].id is None:
+            new_keyframes, new_3d_kps = [], []
+        else:
+            new_keyframes = [kf for kf in self.state.keyframes if kf.id > keyframes[-1].id]
+            new_3d_kps = [kp for kp in self.state.map3d.values() if kp.pt3d_added_frame_id > keyframes[-1].id]
 
-            if pop_ba_queue:
-                st_kf_id, st_t = self._ba_started.pop(0)
-                c = self.state.keyframes[-1].id - st_kf_id
-                t = (time.time() - st_t)
-                self._ba_started_kf_id = None
-                logging.info('bundle adjustment complete after %d keyframes and %.2fs, queue len: %d'
-                             % (c, t, len(self._ba_started)))
+        if len(new_keyframes) > 0:
+            for f in new_keyframes:
+                f.pose.post = f.pose.post.new(dr, dq)
+            for kp in new_3d_kps:
+                assert False, 'doesnt work!!'
+                kp.pt3d = tools.q_times_v(dq, kp.pt3d) + tools.q_times_v(qn.conj(), dr)   # TODO: debug this!!
 
-            if self.threaded_ba:
-                try:
-                    self._ba_stop_lock.release()   # only used when running ba in synchronized mode
-                except RuntimeError:
-                    pass  # can't happen if in synchronized mode
+        if pop_ba_queue:
+            st_kf_id, st_t = self._ba_started.pop(0)
+            c = self.state.keyframes[-1].id - st_kf_id
+            t = (time.time() - st_t)
+            self._ba_started_kf_id = None
+            logging.info('bundle adjustment complete after %d keyframes and %.2fs, queue len: %d'
+                         % (c, t, len(self._ba_started)))
+
+        if self.threaded_ba:
+            try:
+                self._ba_stop_lock.release()   # only used when running ba in synchronized mode
+            except RuntimeError:
+                pass  # can't happen if in synchronized mode
 
     def is_maintenance_time(self):
         return (self.state.keyframes[-1].id - self.state.keyframes[0].id + 1) % self.ba_interval == 0
@@ -1198,6 +1454,7 @@ class VisualOdometry:
             self.removed_keypoints.append(self.state.map3d[id])
             # TODO: (*) save f.kps_uv, f.kps_uv_norm
 
+        self.state.feat_dscr.pop(id, False)
         self.state.map2d.pop(id, False)
         self.state.map3d.pop(id, False)
         for f in self.state.keyframes:
@@ -1215,8 +1472,8 @@ class VisualOdometry:
     def kp2arr(self, kp):
         return np.array([k.pt for k in kp], dtype='f4').reshape((-1, 1, 2))
 
-    def get_3d_map_pts(self):
-        return np.array([pt.pt3d for pt in self.state.map3d.values()]).reshape((-1, 3))
+    def get_3d_map_pts(self, all=False):
+        return np.array([pt.pt3d for pt in (list(self.state.map3d.values()) + (self.removed_keypoints if all else []))]).reshape((-1, 3))
 
     @staticmethod
     def get_2d_pts(frame):
@@ -1226,7 +1483,17 @@ class VisualOdometry:
         n = 1000
         if self._track_colors is None:
             self._track_colors = np.hstack((np.random.randint(0, 179, (n, 1)), np.random.randint(0, 255, (n, 1))))
-        h, s = self._track_colors[id % n]
+        (h, s), v = self._track_colors[id % n], 255
+
+        if id in self.state.map3d:
+            wf_cam_q = self.wf_body_q * self.bf_cam_pose.quat
+            x, y, z = tools.q_times_v(wf_cam_q.conj(), self.state.map3d[id].pt3d)
+            z_sc = self._z_range[1] - self._z_range[0]
+            h = 179 - int(min(179, max(0, 179 * (z + self._z_range[0]) / z_sc + 179 // 2)))
+            s = 255
+        else:
+            s = int(s * 0.5)
+
         v = min(255, 255 * ((self.state.map3d[id].inlier_count if id in self.state.map3d else 0) + 1) / 4)
         col = cv2.cvtColor(np.array([h, s, v], dtype=np.uint8).reshape((1, 1, 3)),
                            cv2.COLOR_HSV2BGR if bgr else cv2.COLOR_HSV2RGB).flatten()
@@ -1237,8 +1504,9 @@ class VisualOdometry:
 
     def _draw_tracks(self, new_frame, pause=True, label='tracks'):
         f0, f1 = self.state.last_frame, new_frame
-        ids, uv1 = zip(*[(id, uv.flatten()) for id, uv in f1.kps_uv.items()]) if len(f1.kps_uv) > 0 else ([], [])
-        uv0 = [f0.kps_uv[id].flatten() for id in ids]
+        tmp = [(id, (uv.flatten() + 0.5).astype(int)) for id, uv in f1.kps_uv.items() if id in f0.kps_uv]
+        ids, uv1 = zip(*tmp) if len(tmp) > 0 else ([], [])
+        uv0 = [(f0.kps_uv[id].flatten() + 0.5).astype(int) for id in ids]
 
         id2proj = {}
         pts3d = np.array([self.state.map3d[id].pt3d for id in ids if id in self.state.map3d]).reshape((-1, 3))
@@ -1266,22 +1534,37 @@ class VisualOdometry:
             self._track_image = np.zeros((*f1.image.shape, 3), dtype=np.uint8)
         else:
             self._track_image = (self._track_image * 0.8).astype(np.uint8)
-        img = cv2.cvtColor(f1.image, cv2.COLOR_GRAY2RGB)
+        track_img = cv2.cvtColor(f1.image, cv2.COLOR_GRAY2RGB)
 
         for id, (x0, y0), (x1, y1) in zip(ids, uv0, uv1):
             self._track_image = cv2.line(self._track_image, (x1, y1), (x0, y0), self._col(id), 1)
-            img = cv2.circle(img, (x1, y1), 5, self._col(id), 1)   # negative thickness => filled circle
+            c_diam = (math.ceil(np.linalg.norm(new_frame.repr_err.get(id, [0.1, 0.1]))*0.5) + 1) * 2 + 1
+            track_img = cv2.circle(track_img, (x1, y1), c_diam, self._col(id), 1)   # negative thickness => filled circle
             if id in id2proj:
                 xp, yp = np.array(uvp[id2proj[id]]).astype(int)
                 # img = cv2.circle(img, (xp, yp), 5, self._col(id), 1)
-                img = cv2.rectangle(img, (xp-2, yp-2), (xp+2, yp+2), self._col(id), 1)
-                img = cv2.line(img, (xp, yp), (x1, y1), self._col(id), 1)
-        img = cv2.add(img, self._track_image)
+                track_img = cv2.rectangle(track_img, (xp-2, yp-2), (xp+2, yp+2), self._col(id), 1)
+                track_img = cv2.line(track_img, (xp, yp), (x1, y1), self._col(id), 1)
+        track_img = cv2.add(track_img, self._track_image)
+
+        if self._map_image is not None:
+            s = self._track_image_height
+            sc = s / track_img.shape[0]
+            track_img = cv2.resize(track_img, None, fx=sc, fy=sc)
+            img = np.zeros((s, track_img.shape[1] + s, 3), dtype=np.uint8)
+            img[:s, :track_img.shape[1]] = track_img
+            img[:s, track_img.shape[1]:track_img.shape[1] + s] = self._map_image
+        else:
+            img = track_img
+
+        if self._bottom_bar_img is not None:
+            sc = img.shape[1] / self._bottom_bar_img.shape[1]
+            img = np.concatenate((img, cv2.resize(self._bottom_bar_img, None, fx=sc, fy=sc)), axis=0)
 
         if self._track_save_path:
             cv2.imwrite(os.path.join(self._track_save_path, 'frame_%d.png' % self._frame_count), img)
 
-        img_sc = 768/img.shape[0]
+        img_sc = self._track_image_height/img.shape[0]
         cv2.imshow(label, cv2.resize(img, None, fx=img_sc, fy=img_sc, interpolation=cv2.INTER_CUBIC))
         cv2.waitKey(0 if pause else 25)
 
@@ -1347,58 +1630,118 @@ class VisualOdometry:
         else:
             plt.show()
 
-    def _cv_draw_pts3d(self, new_frame, pause=True, label='3d points', shape=(768, 768), m_per_px=1.3):
+    def _cv_draw_pts3d(self, new_frame, pause=True, label='3d points', shape=(768, 768), min_side_m=50):
+        self._map_image = np.zeros((*shape, 3), dtype=np.uint8)
         if len(self.state.map3d) == 0:
-            return
+            return self._map_image
 
-        m0, m1 = self._prev_map3d, self.state.map3d
-        ids, pts1 = zip(*[(id, pt.pt3d.copy().flatten()) for id, pt in m1.items()]) if len(m1) > 0 else ([], [])
-        pts0 = [(m0[id] if id in m0 else None) for id in ids]
-        self._prev_map3d = dict(zip(ids, pts1))
+        # +z out from image, +y is up (north), +x is right (east)
+        wf_cam_q = self.wf_body_q * self.bf_cam_pose.quat
 
-        if self._map_image is None:
-            self._map_image = np.zeros((*shape, 3), dtype=np.uint8)
-        else:
-            self._map_image = (self._map_image * 0.9).astype(np.uint8)
-        img = np.zeros((*shape, 3), dtype=np.uint8)
+        # map scaling
+        pts3d = tools.q_times_mx(wf_cam_q.conj(), self.get_3d_map_pts(all=True))
+        min_x, min_y = np.min(pts3d[:, :2], axis=0)
+        max_x, max_y = np.max(pts3d[:, :2], axis=0)
+        m_per_px = max(min_side_m, max_x - min_x, max_y - min_y) / shape[0]
+        m_per_px = np.exp(np.ceil(np.log10(m_per_px)*20)/20)
+        off_x = np.round((min_x + (max_x - min_x) / 2) / m_per_px / 30) * m_per_px * 30
+        off_y = np.round((min_y + (max_y - min_y) / 2) / m_per_px / 30) * m_per_px * 30
 
-        if self._init_map_center is None:
-            self._init_map_center = 0
-        map_center = self._init_map_center
-        cx, cz = shape[1] // 2, shape[0] // 2
+        def colormap(z, base, vary='h'):
+            hsv = cv2.cvtColor(np.array(base, dtype=np.uint8).reshape((1, 1, 3)), cv2.COLOR_BGR2HSV).flatten()
+            maxv = 179 if vary == 'h' else 255
+            z_sc = self._z_range[1] - self._z_range[0]
+            hsv[{'h': 0, 's': 1, 'v': 2}[vary]] = maxv - int(min(maxv, max(0, maxv * (z + self._z_range[0]) / z_sc + maxv//2)))
+            return tuple(map(int, cv2.cvtColor(np.array(hsv, dtype=np.uint8).reshape((1, 1, 3)), cv2.COLOR_HSV2BGR).flatten()))
 
-        def massage(pt):
-            x, y, z = pt - map_center
-            x = cx + x/m_per_px
-            z = cz + z/m_per_px
+        def loc2uvc(cf_loc, base=(0, 255, 0)):
+            wf_loc = tools.q_times_v(wf_cam_q.conj(), cf_loc) - np.array([off_x, off_y, 0])
+            x, y, z = np.array([1/m_per_px, -1/m_per_px, 1]) * wf_loc + np.array([shape[1] // 2, shape[0] // 2, 0])
             lo, hi = np.iinfo(np.int32).min, np.iinfo(np.int32).max
-            return np.clip(int(round(0 if np.isnan(x) else x)), lo, hi), np.clip(int(round(0 if np.isnan(z) else z)), lo, hi)
+            return np.clip(int(round(0 if np.isnan(x) else x)), lo, hi), \
+                   np.clip(int(round(0 if np.isnan(y) else y)), lo, hi), \
+                   colormap(z, base)
 
-        for id, pt0, pt1 in zip(ids, pts0, pts1):
-            try:
-                x1, y1 = massage(pt1)
-                if pt0 is not None:
-                    x0, y0 = massage(pt0)
-                    self._map_image = cv2.line(self._map_image, (x1, y1), (x0, y0), self._col(id), 1)
-                img = cv2.circle(img, (x1, y1), 5, self._col(id), -1)
-            except:
-                return
+        def pose2uvc(pose, base):
+            return loc2uvc((-pose).loc, base)
 
-        # draw s/c position,
-        lfp, nfp = self.state.last_frame.pose.post, new_frame.pose.post
-        if lfp is not None and nfp is not None:
-            x0, y0 = massage(tools.q_times_v(lfp.quat.conj(), -lfp.loc))
-            x1, y1 = massage(tools.q_times_v(nfp.quat.conj(), -nfp.loc))
-            self._map_image = cv2.line(self._map_image, (x1, y1), (x0, y0), (0, 0, 255), 1)
-            img = cv2.circle(img, (x1, y1), 8, (0, 0, 255), -1)
+        for pt in list(self.state.map3d.values()) + self.removed_keypoints:
+            u, v, c = loc2uvc(pt.pt3d, (0, 255 if pt.active else 128, 0))
+            self._map_image[v:v+2, u:u+2, :] = c
+
+        # draw trajectories
+        measures = []
+        traj_b = []
+        for kf in self.state.keyframes + ([] if new_frame is not self.state.keyframes[-1] else [new_frame]):
+            ub1, vb1, _ = pose2uvc(kf.pose.post, (0, 0, 255))
+            traj_b.append([ub1, vb1])
+            if kf.measure is not None:
+                measures.append(kf.pose.prior)
+
+        traj_a = []
+        for pose in measures:
+            ua1, va1, _ = pose2uvc(pose, (255, 0, 0))
+            traj_a.append([ua1, va1])
+
+        self._map_image = cv2.polylines(self._map_image, [np.array(traj_a, np.int32).reshape((-1, 1, 2))], 0, (0, 0, 255), 1)
+        self._map_image = cv2.polylines(self._map_image, [np.array(traj_b, np.int32).reshape((-1, 1, 2))], 0, (255, 128, 0), 1)
+
+        # draw s/c position
+        sc = np.array([[0, -1, 0], [-1, 1, 0], [0, 0, 0], [1, 1, 0], [0, -1, 0]]) * 10 * m_per_px
+
+        wf_a = -measures[-1]
+        sc_a = tools.q_times_mx(wf_cam_q.conj(), tools.q_times_mx(wf_a.quat, sc*2/3) + wf_a.loc) - np.array([off_x, off_y, 0])
+        sc_a = np.array([1, -1]) * sc_a[:, :2] / m_per_px + np.array([shape[1] // 2, shape[0] // 2])
+
+        wf_b = -new_frame.pose.post
+        sc_b = tools.q_times_mx(wf_cam_q.conj(), tools.q_times_mx(wf_b.quat, sc) + wf_b.loc) - np.array([off_x, off_y, 0])
+        sc_b = np.array([1, -1]) * sc_b[:, :2] / m_per_px + np.array([shape[1] // 2, shape[0] // 2])
+
+        self._map_image = cv2.fillPoly(self._map_image, [np.array(sc_a, np.int32).reshape((-1, 1, 2))], (0, 0, 255))
+        self._map_image = cv2.polylines(self._map_image, [np.array(sc_b, np.int32).reshape((-1, 1, 2))], 0, (255, 128, 0), 1)
 
         # add origin as a blue cross
-        img = cv2.line(img, (cx-3, cz-3), (cx+3, cz+3), (255, 0, 0), 1)
-        img = cv2.line(img, (cx-3, cz+3), (cx+3, cz-3), (255, 0, 0), 1)
+        # self._map_image = cv2.line(self._map_image, (cx-3, cz-3), (cx+3, cz+3), (255, 0, 0), 1)
+        # self._map_image = cv2.line(self._map_image, (cx-3, cz+3), (cx+3, cz-3), (255, 0, 0), 1)
 
-        img = cv2.add(img, self._map_image)
-        cv2.imshow(label, img)
-        cv2.waitKey(0 if pause else 25)
+        if label is not None:
+            cv2.imshow(label, self._map_image)
+            cv2.waitKey(0 if pause else 25)
+        else:
+            return self._map_image
+
+    def _draw_bottom_bar(self, interactive=False):
+        # TODO: better transformation from cam frame to world frame
+
+        i = [i for i, kf in enumerate(self.state.keyframes) if kf.pose.post is not None]
+        z = -np.array([(-kf.pose.post).loc[2] for kf in self.state.keyframes if kf.pose.post is not None])
+        p = -np.array([tools.q_to_ypr((-kf.pose.post).quat)[2] for kf in self.state.keyframes if kf.pose.post is not None])
+
+        mi = [i for i, kf in enumerate(self.state.keyframes) if kf.measure is not None]
+        mz = -np.array([(-kf.pose.prior).loc[2] for kf in self.state.keyframes if kf.measure is not None])
+        mp = -np.array([tools.q_to_ypr((-kf.pose.prior).quat)[2] for kf in self.state.keyframes if kf.measure is not None])
+
+        import matplotlib.pyplot as plt
+        fig = plt.figure(figsize=(11, 2))
+        axs = fig.subplots(1, 2, sharex=True)
+        axs[0].set_ylabel('alt [m]')
+        axs[0].plot(i, z)
+        axs[0].plot(mi, mz)
+
+        axs[1].set_ylabel('pitch [deg]')
+        axs[1].plot(i, p/np.pi*180)
+        axs[1].plot(mi, mp/np.pi*180)
+        plt.tight_layout()
+
+        if not interactive:
+            fig.canvas.draw()
+            img = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep='')
+            w, h = np.array(fig.canvas.devicePixelRatio()) * fig.canvas.get_width_height()
+            img = np.flip(img.reshape((h, w, 3)), axis=2)
+            self._bottom_bar_img = img
+            plt.close(fig)
+        else:
+            plt.show()
 
     def _draw_matches(self, img1, img2, kp1, kp2, mask, pause=True, label='matches'):
         idxs = np.array(list(range(len(kp1))))[mask]

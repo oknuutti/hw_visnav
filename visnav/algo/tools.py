@@ -373,6 +373,27 @@ def qarr_to_ypr(qarr):
     return np.stack((yaw, pitch, roll), axis=1)
 
 
+def lla_ypr_to_loc_quat(geodetic_origin, lla, ypr, w2b_q=None, b2c_q=None, b2c_r=None):
+    # world frame: +z up, +x is east, +y is north
+    wf_body_r = to_cartesian(*lla, *geodetic_origin)
+
+    # body frame: +z down, +x is fw towards north, +y is right wing (east)
+    world_body_q = ypr_to_q(*ypr)
+
+    if w2b_q is None:
+        w2b_q = eul_to_q((np.pi, -np.pi / 2), 'xz')
+
+    if b2c_q is None:
+        wf_body_q = w2b_q * world_body_q * w2b_q.conj()
+        return wf_body_r, wf_body_q
+    else:
+        cf_world_body_q = b2c_q * world_body_q * b2c_q.conj()
+        cf_world_body_r = q_times_v(b2c_q.conj() * w2b_q.conj(), wf_body_r)
+        cf_world_c_q = cf_world_body_q  # TODO: how can this be?? something wrong somewhere?
+        cf_world_c_r = cf_world_body_r + (0 if b2c_r is None else q_times_v(b2c_q.conj(), b2c_r))  # TODO: debug rotating of b2c_r
+        return cf_world_c_r, cf_world_c_q
+
+
 def mean_q(qs, ws=None):
     """
     returns a (weighted) mean of a set of quaternions

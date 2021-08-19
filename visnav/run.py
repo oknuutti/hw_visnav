@@ -13,7 +13,8 @@ import quaternion
 from visnav.algo import tools
 from visnav.algo.odo.base import VisualOdometry, Pose
 from visnav.missions.hwproto import HardwarePrototype
-from visnav.missions.nokia import NokiaSensor
+from visnav.missions.nokia import NokiaSensor, interp_loc
+from visnav.missions.toynokia import ToyNokiaSensor
 
 
 def main():
@@ -23,7 +24,7 @@ def main():
     parser.add_argument('--meta', '-t', metavar='META', help='path to meta data')
     parser.add_argument('--video-toff', '--dt', type=float, metavar='dT', help='video time offset compared to metadata')
     parser.add_argument('--out', '-o', metavar='OUT', help='path to the output folder')
-    parser.add_argument('--mission', '-m', choices=('hwproto', 'nokia'), help='select mission')
+    parser.add_argument('--mission', '-m', choices=('hwproto', 'nokia', 'toynokia'), help='select mission')
     parser.add_argument('--skip', '-s', type=int, default=1, help='use only every xth frame (default: 1)')
     args = parser.parse_args()
 
@@ -32,7 +33,10 @@ def main():
         mission = HardwarePrototype(args.data, last_frame=(155, 321, None)[0])
     elif args.mission == 'nokia':
         mission = NokiaSensor(args.data, data_path=args.meta, video_toff=args.video_toff,
-                              first_frame=(350, 1650)[0], last_frame=(500, 1850)[0])
+                              first_frame=(100, 350, 850, 1650)[1], last_frame=(415, 500, 1250, 1850, 2000)[1])
+    elif args.mission == 'toynokia':
+        mission = ToyNokiaSensor(args.data, data_path=args.meta, video_toff=args.video_toff,
+                                 first_frame=(1000, 350, 850, 1650)[1], last_frame=(415, 500, 1250, 1850, 2000)[1])
     else:
         assert False, 'bad mission given: %s' % args.mission
 
@@ -62,24 +66,25 @@ def main():
         try:
             nf, *_ = mission.odo.process(img, datetime.fromtimestamp(mission.time0 + t), measure=meta)
 
-            if 1 and nf is not None and nf.id is not None:
+            if nf is not None and nf.id is not None:
                 kfid2img[nf.id] = i
-
-                w2c_q = NokiaSensor.w2b_q * NokiaSensor.b2c_q
-                post = np.zeros((len(mission.odo.state.keyframes), 7))
-                k, prior = 0, np.zeros((len(mission.odo.state.keyframes), 7))
-                for j, kf in enumerate([kf for kf in mission.odo.state.keyframes if kf.pose.post]):
-                    post[j, :3] = tools.q_times_v(w2c_q * kf.pose.post.quat.conj(), -kf.pose.post.loc)
-                    post[j, 3:] = quaternion.as_float_array(w2c_q.conj() * kf.pose.post.quat.conj() * w2c_q)
-                    if kf.measure is not None:
-                        prior[k, :3] = tools.q_times_v(w2c_q * kf.pose.prior.quat.conj(), -kf.pose.prior.loc)
-                        prior[k, 3:] = quaternion.as_float_array(w2c_q.conj() * kf.pose.prior.quat.conj() * w2c_q)
-                        k += 1
-                if ax is not None:
-                    ax.clear()
-                ax = tools.plot_poses(post, axis=(0, 1, 0), up=(0, 0, 1), ax=ax, wait=False)
-                tools.plot_poses(prior[:k, :], axis=(0, 1, 0), up=(0, 0, 1), ax=ax, wait=False,
-                                 colors=map(lambda c: (c, 0, 0, 0.5), np.linspace(.3, 1.0, k)))
+                if mission.odo.verbose > 1:
+                    w2c_q = NokiaSensor.w2b_q * NokiaSensor.b2c_q
+                    post = np.zeros((len(mission.odo.state.keyframes), 7))
+                    k, prior = 0, np.zeros((len(mission.odo.state.keyframes), 7))
+                    for j, kf in enumerate([kf for kf in mission.odo.state.keyframes if kf.pose.post]):
+                        post[j, :3] = tools.q_times_v(w2c_q * kf.pose.post.quat.conj(), -kf.pose.post.loc)
+                        post[j, 3:] = quaternion.as_float_array(w2c_q.conj() * kf.pose.post.quat.conj() * w2c_q)
+                        if kf.measure is not None:
+                            prior[k, :3] = tools.q_times_v(w2c_q * kf.pose.prior.quat.conj(), -kf.pose.prior.loc)
+                            prior[k, 3:] = quaternion.as_float_array(w2c_q.conj() * kf.pose.prior.quat.conj() * w2c_q)
+                            k += 1
+                    if ax is not None:
+                        ax.clear()
+                    ax = tools.plot_poses(post, axis=(0, 1, 0), up=(0, 0, 1), ax=ax, wait=False)
+                    tools.plot_poses(prior[:k, :], axis=(0, 1, 0), up=(0, 0, 1), ax=ax, wait=False,
+                                     colors=map(lambda c: (c, 0, 0, 0.5), np.linspace(.3, 1.0, k)))
+                    plt.pause(0.05)
 
         except TypeError as e:
             if 0:
@@ -112,6 +117,26 @@ def main():
         results, frame_names, meta_names, ground_truth = results0, frame_names0, meta_names0, ground_truth0
 
     logging.info('time spent: %.0fs' % (datetime.now() - started).total_seconds())
+
+    repr_errs = np.concatenate([list(kf.repr_err.values()) for kf in mission.odo.removed_keyframes if len(kf.repr_err)])
+    err_q95 = np.quantile(np.linalg.norm(repr_errs, axis=1), 0.95) if len(repr_errs) else np.nan
+    logging.info('95%% percentile repr err: %.3fpx' % (err_q95,))
+
+    interp = interp_loc(mission.odo.removed_keyframes, mission.time0)
+    loc_est = np.array([np.ones((3,))*np.nan if kf.pose.post is None else (-kf.pose.post).loc for kf in mission.odo.removed_keyframes])
+    loc_gps = np.array([interp(kf.time.timestamp() - mission.time0).flatten() for kf in mission.odo.removed_keyframes]).squeeze()
+    mean_loc_err = np.nanmean(np.linalg.norm(loc_est - loc_gps, axis=1))
+    logging.info('mean loc err: %.3fm' % (mean_loc_err,))
+
+    if 0:
+        plt.figure(10)
+        plt.plot(loc_est[:, 0], loc_est[:, 1])
+        plt.plot(loc_gps[:, 0], loc_gps[:, 1])
+        plt.show()
+
+    if mission.odo.verbose > 1:
+        plt.show()  # stop to show last trajectory plot
+
     plot_results(results, map3d, frame_names, meta_names, ground_truth, '%s-result.pickle' % args.mission)
 
 
@@ -236,7 +261,7 @@ def plot_results(results=None, map3d=None, frame_names=None, meta_names=None, gr
 
     plt.tight_layout()
 
-    tools.plot_poses(pose[idx, :], axis=(0, 1, 0), up=(0, 0, 1))
+#    tools.plot_poses(pose[idx, :], axis=(0, 1, 0), up=(0, 0, 1))
 
     plt.show()
     print('ok: %.1f%%, delta loc std: %.3e' % (
