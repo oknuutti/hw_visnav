@@ -6,7 +6,7 @@
   <component name="ChangeListManager">
     <list default="true" id="605325bb-f302-46e4-8025-caaabf115796" name="Default Changelist" comment="">
       <change afterPath="$PROJECT_DIR$/3rdparty/nokia-ds/setup.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/visnav/missions/toynokia.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/visnav.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/visnav.iml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/3rdparty/VINS-Fusion/config/A3_ptgrey/a3_ptgrey_mono_imu_config.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/3rdparty/VINS-Fusion/config/A3_ptgrey/a3_ptgrey_mono_imu_config.yaml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/3rdparty/VINS-Fusion/config/A3_ptgrey/a3_ptgrey_stereo_config.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/3rdparty/VINS-Fusion/config/A3_ptgrey/a3_ptgrey_stereo_config.yaml" afterDir="false" />
@@ -24,13 +24,16 @@
       <change beforePath="$PROJECT_DIR$/3rdparty/nokia-ds/conf/config_ok.yml" beforeDir="false" afterPath="$PROJECT_DIR$/3rdparty/nokia-ds/conf/config_ok.yml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/3rdparty/nokia-ds/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/3rdparty/nokia-ds/config.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/3rdparty/nokia-ds/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/3rdparty/nokia-ds/main.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/visnav/algo/model.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/algo/model.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/visnav/algo/bundleadj.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/algo/bundleadj.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/visnav/algo/odo/base.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/algo/odo/base.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/visnav/algo/odo/vis_gps_bundleadj.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/algo/odo/vis_gps_bundleadj.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/visnav/algo/odo/visgps_odo.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/algo/odo/visgps_odo.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/visnav/algo/orig/bundleadj.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/algo/orig/bundleadj.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/visnav/algo/orig/image.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/algo/orig/image.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/visnav/algo/tools.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/algo/tools.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/visnav/calibrate.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/calibrate.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/visnav/missions/nokia.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/missions/nokia.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/visnav/missions/toynokia.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/missions/toynokia.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/visnav/run.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/run.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -57,16 +60,19 @@
     </file-type-list>
   </component>
   <component name="HighlightingSettingsPerFile">
-    <setting file="file://$PROJECT_DIR$/visnav/algo/tools.py" root0="FORCE_HIGHLIGHTING" />
     <setting file="file://$PROJECT_DIR$/visnav/algo/model.py" root0="FORCE_HIGHLIGHTING" />
+    <setting file="file://$PROJECT_DIR$/visnav/run.py" root0="FORCE_HIGHLIGHTING" />
+    <setting file="file://$PROJECT_DIR$/visnav/algo/odo/vis_gps_bundleadj.py" root0="FORCE_HIGHLIGHTING" />
     <setting file="file://$PROJECT_DIR$/visnav/algo/odo/base.py" root0="FORCE_HIGHLIGHTING" />
     <setting file="file://$PROJECT_DIR$/visnav/algo/odo/visgps_odo.py" root0="FORCE_HIGHLIGHTING" />
-    <setting file="file://$PROJECT_DIR$/visnav/missions/rosetta.py" root0="FORCE_HIGHLIGHTING" />
-    <setting file="file://$PROJECT_DIR$/visnav/missions/nokia.py" root0="FORCE_HIGHLIGHTING" />
-    <setting file="file://$PROJECT_DIR$/visnav/run.py" root0="FORCE_HIGHLIGHTING" />
     <setting file="file://$PROJECT_DIR$/visnav/algo/odometry.py" root0="FORCE_HIGHLIGHTING" />
-    <setting file="file://$PROJECT_DIR$/visnav/missions/base.py" root0="FORCE_HIGHLIGHTING" />
+    <setting file="file://$PROJECT_DIR$/visnav/missions/toynokia.py" root0="FORCE_HIGHLIGHTING" />
+    <setting file="file://$PROJECT_DIR$/visnav/calibrate.py" root0="FORCE_HIGHLIGHTING" />
+    <setting file="file://$PROJECT_DIR$/visnav/algo/tools.py" root0="FORCE_HIGHLIGHTING" />
     <setting file="file://$USER_HOME$/AppData/Local/JetBrains/PyCharmCE2021.1/python_stubs/1681892229/cv2/__init__.py" root0="SKIP_INSPECTION" />
+    <setting file="file://$PROJECT_DIR$/visnav/missions/nokia.py" root0="FORCE_HIGHLIGHTING" />
+    <setting file="file://$PROJECT_DIR$/visnav/missions/rosetta.py" root0="FORCE_HIGHLIGHTING" />
+    <setting file="file://$PROJECT_DIR$/visnav/missions/base.py" root0="FORCE_HIGHLIGHTING" />
   </component>
   <component name="ProjectId" id="1igws4gmtkEGKTtl6DDuDmyIrQb" />
   <component name="ProjectLevelVcsManager" settingsEditedManually="true" />
@@ -76,7 +82,7 @@
   </component>
   <component name="PropertiesComponent">
     <property name="SHARE_PROJECT_CONFIGURATION_FILES" value="true" />
-    <property name="last_opened_file_path" value="$PROJECT_DIR$" />
+    <property name="last_opened_file_path" value="$PROJECT_DIR$/../sispo" />
     <property name="restartRequiresConfirmation" value="false" />
     <property name="settings.editor.selected.configurable" value="project.propVCSSupport.Mappings" />
     <property name="two.files.diff.last.used.file" value="$PROJECT_DIR$/arducam/arducam_api/Windows/Python/Streaming_demo/ArduCam_Py_Demo.py" />
@@ -122,6 +128,37 @@
       </EXTENSION>
       <option name="SCRIPT_NAME" value="$PROJECT_DIR$/visnav/calibrate.py" />
       <option name="PARAMETERS" value="--path D:\projects\hw_visnav\arducam-output\calib\cb -x 7 -y 5 -s 43" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="calibrate nokia (2 params only)" type="PythonConfigurationType" factoryName="Python">
+      <module name="visnav" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <EXTENSION ID="net.ashald.envfile">
+        <option name="IS_ENABLED" value="false" />
+        <option name="IS_SUBST" value="false" />
+        <option name="IS_PATH_MACRO_SUPPORTED" value="false" />
+        <option name="IS_IGNORE_MISSING_FILES" value="false" />
+        <option name="IS_ENABLE_EXPERIMENTAL_INTEGRATIONS" value="false" />
+        <ENTRIES>
+          <ENTRY IS_ENABLED="true" PARSER="runconfig" />
+        </ENTRIES>
+      </EXTENSION>
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/visnav/calibrate.py" />
+      <option name="PARAMETERS" value="--path data\nokia\calibration -x 8 -y 6 -s 32 -n 3" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
       <option name="MODULE_MODE" value="false" />
@@ -338,7 +375,7 @@
         </ENTRIES>
       </EXTENSION>
       <option name="SCRIPT_NAME" value="$PROJECT_DIR$/visnav/run.py" />
-      <option name="PARAMETERS" value="--mission=nokia --out=C:\projects\hw_visnav\data\output --data=C:\projects\hw_visnav\data\nokia\2020-12-17\HD_CAM_2020_12_17_14_50_40.mp4 --meta=C:\projects\hw_visnav\data\nokia\2020-12-17\telem_2020-12-17_12_50_00_13_13_00.csv --video-toff=40.2" />
+      <option name="PARAMETERS" value="--mission=nokia --out=C:\projects\hw_visnav\data\output --data=C:\projects\hw_visnav\data\nokia\2020-12-17\HD_CAM_2020_12_17_14_50_40.mp4 --meta=C:\projects\hw_visnav\data\nokia\2020-12-17\telem_2020-12-17_12_50_00_13_13_00.csv --video-toff=40.2 -s=1 --nadir-looking" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
       <option name="MODULE_MODE" value="false" />
@@ -369,7 +406,69 @@
         </ENTRIES>
       </EXTENSION>
       <option name="SCRIPT_NAME" value="$PROJECT_DIR$/visnav/run.py" />
-      <option name="PARAMETERS" value="--mission=nokia --out=C:\projects\hw_visnav\data\output3 --data=C:\projects\hw_visnav\data\nokia\2021-06-05\HD_CAM-1__06052021_140014.mp4 --meta=C:\projects\hw_visnav\data\nokia\2021-06-05\2021_05_06_11_00_00_11_21_00.csv --video-toff=13.9 -s 1" />
+      <option name="PARAMETERS" value="--mission=nokia --out=C:\projects\hw_visnav\data\output3 --data=C:\projects\hw_visnav\data\nokia\2021-06-05\HD_CAM-1__06052021_140014.mp4 --meta=C:\projects\hw_visnav\data\nokia\2021-06-05\2021_05_06_11_00_00_11_21_00.csv --video-toff=13.9 -s=1 --nadir-looking" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="run nokia [2]" type="PythonConfigurationType" factoryName="Python">
+      <module name="visnav" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/visnav" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <EXTENSION ID="net.ashald.envfile">
+        <option name="IS_ENABLED" value="false" />
+        <option name="IS_SUBST" value="false" />
+        <option name="IS_PATH_MACRO_SUPPORTED" value="false" />
+        <option name="IS_IGNORE_MISSING_FILES" value="false" />
+        <option name="IS_ENABLE_EXPERIMENTAL_INTEGRATIONS" value="false" />
+        <ENTRIES>
+          <ENTRY IS_ENABLED="true" PARSER="runconfig" />
+        </ENTRIES>
+      </EXTENSION>
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/visnav/run.py" />
+      <option name="PARAMETERS" value="--mission=nokia --out=C:\projects\hw_visnav\data\output3 --data=C:\projects\hw_visnav\data\nokia\2021-07-01\HD_CAM-1_20210701_120414_UTC.mp4 --meta=C:\projects\hw_visnav\data\nokia\2021-07-01\2021_07_01_12_04_14_12_23_00.csv --video-toff=9.4 -s=1 --use-gimbal" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="run nokia [3]" type="PythonConfigurationType" factoryName="Python">
+      <module name="visnav" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/visnav" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <EXTENSION ID="net.ashald.envfile">
+        <option name="IS_ENABLED" value="false" />
+        <option name="IS_SUBST" value="false" />
+        <option name="IS_PATH_MACRO_SUPPORTED" value="false" />
+        <option name="IS_IGNORE_MISSING_FILES" value="false" />
+        <option name="IS_ENABLE_EXPERIMENTAL_INTEGRATIONS" value="false" />
+        <ENTRIES>
+          <ENTRY IS_ENABLED="true" PARSER="runconfig" />
+        </ENTRIES>
+      </EXTENSION>
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/visnav/run.py" />
+      <option name="PARAMETERS" value="--mission=nokia --out=C:\projects\hw_visnav\data\output3 --data=C:\projects\hw_visnav\data\nokia\2021-07-01\HD_CAM-1_20210701_125709_UTC.mp4 --meta=C:\projects\hw_visnav\data\nokia\2021-07-01\2021_07_01_12_57_09_13_16_00.csv --video-toff=9.5 -s=1 --nadir-looking --use-gimbal" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
       <option name="MODULE_MODE" value="false" />
@@ -460,16 +559,16 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
-    <configuration name="test" type="PythonConfigurationType" factoryName="Python">
+    <configuration name="test" type="PythonConfigurationType" factoryName="Python" nameIsGenerated="true">
       <module name="visnav" />
       <option name="INTERPRETER_OPTIONS" value="" />
       <option name="PARENT_ENVS" value="true" />
       <envs>
         <env name="PYTHONUNBUFFERED" value="1" />
       </envs>
-      <option name="SDK_HOME" value="C:\ProgramData\Anaconda3\envs\arducam\python.exe" />
-      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/arducam" />
-      <option name="IS_MODULE_SDK" value="false" />
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/visnav/algo/odo" />
+      <option name="IS_MODULE_SDK" value="true" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
       <EXTENSION ID="net.ashald.envfile">
@@ -482,7 +581,7 @@
           <ENTRY IS_ENABLED="true" PARSER="runconfig" />
         </ENTRIES>
       </EXTENSION>
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/arducam/test.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/visnav/algo/odo/test.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -518,18 +617,20 @@
     </configuration>
     <list>
       <item itemvalue="Python.calibrate hw-proto" />
+      <item itemvalue="Python.calibrate nokia (2 params only)" />
       <item itemvalue="Python.calibrate nokia" />
+      <item itemvalue="Python.extract calibration video" />
       <item itemvalue="Python.nokia-ds" />
       <item itemvalue="Python.render" />
       <item itemvalue="Python.run hwproto &quot;long trip&quot;" />
       <item itemvalue="Python.run hwproto &quot;winter&quot;" />
       <item itemvalue="Python.run nokia [0]" />
-      <item itemvalue="Python.run toynokia [0]" />
       <item itemvalue="Python.run nokia [1]" />
+      <item itemvalue="Python.run nokia [2]" />
+      <item itemvalue="Python.run nokia [3]" />
+      <item itemvalue="Python.run toynokia [0]" />
       <item itemvalue="Python.splnav" />
       <item itemvalue="Python.test" />
-      <item itemvalue="Python.extract calibration video" />
-      <item itemvalue="Python.test (1)" />
       <item itemvalue="Python tests.Unittests in odometry.py" />
     </list>
   </component>
@@ -578,18 +679,13 @@
     <breakpoint-manager>
       <breakpoints>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
-          <url>file://$PROJECT_DIR$/visnav/calibrate.py</url>
-          <line>57</line>
-          <option name="timeStamp" value="60" />
-        </line-breakpoint>
-        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/visnav/algo/odometry.py</url>
           <line>694</line>
           <option name="timeStamp" value="161" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/visnav/run.py</url>
-          <line>266</line>
+          <line>276</line>
           <option name="timeStamp" value="184" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
@@ -600,13 +696,13 @@
         <line-breakpoint suspend="THREAD" type="python-line">
           <condition expression="len(keyframes)&gt;=2 and keyframes[-1].id&gt;=16" language="Python" />
           <url>file://$PROJECT_DIR$/visnav/algo/odo/visgps_odo.py</url>
-          <line>166</line>
+          <line>167</line>
           <option name="timeStamp" value="311" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <condition expression="keyframes[-2]==23" language="Python" />
           <url>file://$PROJECT_DIR$/visnav/algo/odo/base.py</url>
-          <line>1321</line>
+          <line>1327</line>
           <option name="timeStamp" value="314" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
@@ -616,41 +712,35 @@
         </line-breakpoint>
         <line-breakpoint suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/visnav/algo/odo/visgps_odo.py</url>
-          <line>172</line>
+          <line>173</line>
           <option name="timeStamp" value="339" />
         </line-breakpoint>
         <line-breakpoint suspend="THREAD" type="python-line">
           <condition expression="np.sum(err&gt;max_err) &gt; 50 or len(frames)==1 and np.sum(err&lt;norm_err) &lt; 20" language="Python" />
           <url>file://$PROJECT_DIR$/visnav/algo/odo/base.py</url>
-          <line>1194</line>
+          <line>1200</line>
           <option name="timeStamp" value="395" />
-        </line-breakpoint>
-        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
-          <condition expression="np.any(np.array([(kf.pose.post is None) for kf in keyframes]))" language="Python" />
-          <url>file://$PROJECT_DIR$/visnav/algo/odo/base.py</url>
-          <line>1248</line>
-          <option name="timeStamp" value="413" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <condition expression="np.any(new_kp2d[mask.astype(bool), 0, :]&lt;=0)" language="Python" />
           <url>file://$PROJECT_DIR$/visnav/algo/odo/base.py</url>
-          <line>748</line>
+          <line>749</line>
           <option name="timeStamp" value="527" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/visnav/algo/odo/vis_gps_bundleadj.py</url>
+          <line>131</line>
+          <option name="timeStamp" value="708" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/visnav/algo/odo/visgps_odo.py</url>
+          <line>153</line>
+          <option name="timeStamp" value="751" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/visnav/algo/odo/base.py</url>
-          <line>629</line>
-          <option name="timeStamp" value="648" />
-        </line-breakpoint>
-        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
-          <url>file://$PROJECT_DIR$/visnav/missions/toynokia.py</url>
-          <line>139</line>
-          <option name="timeStamp" value="699" />
-        </line-breakpoint>
-        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
-          <url>file://$PROJECT_DIR$/visnav/algo/model.py</url>
-          <line>1313</line>
-          <option name="timeStamp" value="702" />
+          <line>413</line>
+          <option name="timeStamp" value="753" />
         </line-breakpoint>
       </breakpoints>
       <default-breakpoints>

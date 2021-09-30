@@ -11,8 +11,9 @@ import matplotlib.pyplot as plt
 from TelemetryParsing import readTelemetryCsv
 
 from visnav.algo import tools
+from visnav.algo.tools import Pose
 from visnav.algo.model import Camera
-from visnav.algo.odo.base import Measure, Pose
+from visnav.algo.odo.base import Measure
 from visnav.algo.odo.visgps_odo import VisualGPSNav
 from visnav.algo.odometry import VisualOdometry
 
@@ -23,15 +24,15 @@ class ToyNokiaSensor(Mission):
     # world frame: +z up, +x is east, +y is north
     # body frame: +z down, +x is fw towards north, +y is right wing (east)
     # camera frame: +z into the image plane, -y is up (north), +x is right (east)
-    w2b_q = tools.eul_to_q((np.pi, -np.pi / 2), 'xz')
-    b2c_q = tools.eul_to_q((np.pi / 2,), 'z')
+    w2b = Pose(None, tools.eul_to_q((np.pi, -np.pi / 2), 'xz'))
+    b2c = Pose(None, tools.eul_to_q((np.pi / 2,), 'z'))
 
     def __init__(self, *args, **kwargs):
         super(ToyNokiaSensor, self).__init__(*args, **kwargs)
         self.real_cam = copy.deepcopy(self.init_cam())
         if 0:
             self.real_cam.dist_coefs = [-0.11250615, 0.14296794, 0, 0, -0.11678778]
-        elif 0:
+        elif 1:
             self.real_cam.dist_coefs = [-0.11250615, 0.14296794, -0.00175085, 0.00057391, -0.11678778]
         else:
             self.real_cam.dist_coefs = [0, 0, 0, 0, 0]
@@ -48,7 +49,7 @@ class ToyNokiaSensor(Mission):
             t_data[:, :3] = cv2.filter2D(t_data[:, :3], cv2.CV_32F, np.ones((3, 1))/3)
 
         meas_interval = 10
-        frame_rate = 10
+        frame_rate = 5
 
         def data_gen():
             first = True
@@ -98,18 +99,17 @@ class ToyNokiaSensor(Mission):
         ypr0 = np.flip(mes0[3:6]) if full_rot else [mes0[5], 0, 0]
         ypr1 = np.flip(mes1[3:6]) if full_rot else [mes1[5], 0, 0]
 
-        cf_w2c_r0, cf_w2c_q0 = tools.lla_ypr_to_loc_quat(coord0, mes0[:3], ypr0, b2c_q=self.b2c_q)
-        cf_w2c_r1, cf_w2c_q1 = tools.lla_ypr_to_loc_quat(coord0, mes1[:3], ypr1, b2c_q=self.b2c_q)
-        dq = cf_w2c_q0.conj() * cf_w2c_q1
-        aa = tools.q_to_angleaxis(dq)
+        cf_w2c0 = tools.lla_ypr_to_loc_quat(coord0, mes0[:3], ypr0, b2c=self.b2c)
+        cf_w2c1 = tools.lla_ypr_to_loc_quat(coord0, mes1[:3], ypr1, b2c=self.b2c)
+        delta = cf_w2c1 - cf_w2c0
+        aa = tools.q_to_angleaxis(delta.quat)
         aa[0] = tools.wrap_rads(aa[0]) * weight
 
-        cf_w2c_q = tools.angleaxis_to_q(aa) * cf_w2c_q0
-        cf_w2c_r = cf_w2c_r0 * (1 - weight) + cf_w2c_r1 * weight
+        cf_w2c = Pose(cf_w2c0.loc * (1 - weight) + cf_w2c1.loc * weight,
+                      tools.angleaxis_to_q(aa) * cf_w2c0.quat)
+        cf_c2w = -cf_w2c
 
-        cf_c2w_q = cf_w2c_q.conj()
-        cf_c2w_r = tools.q_times_v(cf_c2w_q, -cf_w2c_r)
-        return Pose(cf_c2w_r, cf_c2w_q)
+        return cf_c2w
 
     _pts4d = None
     def generate_image(self, pose, grid=5):
@@ -121,7 +121,12 @@ class ToyNokiaSensor(Mission):
             else:
                 xx = np.random.uniform(x - z * 3, x + z * 3, 2 * (math.ceil(z * 3 / grid) * 2 + 1,))
                 yy = np.random.uniform(x - z * 3, x + z * 3, 2 * (math.ceil(z * 3 / grid) * 2 + 1,))
-            zz = np.zeros_like(xx)
+
+            if 0:
+                zz = np.zeros_like(xx)
+            else:
+                zz = np.random.uniform(0, -40, xx.shape)
+
             pts3d = np.stack((xx.flatten(), yy.flatten(), zz.flatten()), axis=1).reshape((-1, 3))
             self._pts4d = np.hstack((pts3d, np.ones((len(pts3d), 1))))
 
@@ -173,7 +178,7 @@ class ToyNokiaSensor(Mission):
             f_stop=5,  # TODO: put better value here
             point_spread_fn=0.50,  # ratio of brightness in center pixel
             scattering_coef=2e-10,  # affects strength of haze/veil when sun shines on the lens
-            dist_coefs=None if 1 else [-0.11250615, 0.14296794, -0.00175085, 0.00057391, -0.11678778],
+            dist_coefs=None if 0 else [-0.11250615, 0.14296794, -0.00175085, 0.00057391, -0.11678778],
             cam_mx=np.array([[1.58174667e+03, 0.00000000e+00, 9.97176182e+02],
                              [0.00000000e+00, 1.58154569e+03, 5.15553843e+02],
                              [0.00000000e+00, 0.00000000e+00, 1.00000000e+00]]),
@@ -190,6 +195,7 @@ class ToyNokiaSensor(Mission):
             'new_keyframe_ba': False,
             'threaded_ba': False,    # TODO: debug adjustment to new keyframes & 3d points (!!) after ba completed
 
+            'online_cam_calib': False,
             'verify_feature_tracks': True,
             'max_keypoints': 320,                # 315
             'min_keypoint_dist': round(50 * sc),
@@ -233,5 +239,5 @@ class ToyNokiaSensor(Mission):
                            geodetic_origin=self.coord0,
                            wf_body_q=self.w2b_q,
                            bf_cam_pose=Pose(np.array([0, 0, 0]), self.b2c_q),
-                           verbose=2, pause=False, **params)
+                           verbose=1, pause=False, **params)
         return odo

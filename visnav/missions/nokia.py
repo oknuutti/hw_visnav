@@ -9,36 +9,73 @@ import cv2
 from TelemetryParsing import readTelemetryCsv
 
 from visnav.algo import tools
+from visnav.algo.tools import Pose
 from visnav.algo.model import Camera
-from visnav.algo.odo.base import Measure, Pose
+from visnav.algo.odo.base import Measure
 from visnav.algo.odo.visgps_odo import VisualGPSNav
 from visnav.algo.odometry import VisualOdometry
 
 from visnav.missions.base import Mission
 
 UNDISTORT_IMAGE = False
+DIST_COEF_N = 5
+
 
 if 0:
     # nokia calibration
     DIST_COEFFS = [-0.10409018071479297, 0.07753040773494844, -0.0012432655612101095, -8.782982357309616e-05, 0.0]
-    CALIB_K = [1580.356552415608, 0.0, 994.0266973706297, 0.0, 1580.5531767058067, 518.9387257616232, 0.0, 0.0, 1.0]
-    CALIB_P = [1533.907470703125, 0.0, 994.5594689049904, 0.0, 1560.9056396484375, 517.2969790578827, 0.0, 0.0, 1.0]
-else:
-    # own calib
+    CALIB_K = [1580.356552415608, 0.0, 994.0266973706297,
+               0.0, 1580.5531767058067, 518.9387257616232,
+               0.0, 0.0, 1.0]
+    CALIB_P = [1533.907470703125, 0.0, 994.5594689049904,
+               0.0, 1560.9056396484375, 517.2969790578827,
+               0.0, 0.0, 1.0]
+elif DIST_COEF_N == 5:
+    # own calib, 5 dist coeffs
+    # DIST_COEFFS = [-0.11250615, 0.14296794, -0.00175085, 0.00057391, -0.11678778]
+    c, d = 1.0, 1.0     # 1.15, 5.31
     DIST_COEFFS = [-0.11250615, 0.14296794, -0.00175085, 0.00057391, -0.11678778]
-    CALIB_K = [1.58174667e+03, 0.00000000e+00, 9.97176182e+02, 0.00000000e+00, 1.58154569e+03, 5.15553843e+02,
+    CALIB_K = [1.58174667e+03*c, 0.00000000e+00, 9.97176182e+02,
+               0.00000000e+00, 1.58154569e+03*c, 5.15553843e+02*d,
                0.00000000e+00, 0.00000000e+00, 1.00000000e+00]
-    CALIB_P = [1.51946704e+03, 0.00000000e+00, 9.99938541e+02, 0.00000000e+00, 1.51758582e+03, 5.12326558e+02,
+    CALIB_P = [1.51946704e+03*c, 0.00000000e+00, 9.99938541e+02,
+               0.00000000e+00, 1.51758582e+03*c, 5.12326558e+02*d,
                0.00000000e+00, 0.00000000e+00, 1.00000000e+00]
-    CALIB_P, CALIB_K = CALIB_K, None
+elif DIST_COEF_N == 8:
+    # own calib, 8 dist coeffs
+    DIST_COEFFS = [-6.16252484e+00,  7.24901612e+00, -1.78015022e-03,  6.20574203e-04,
+                    9.73407083e+00, -6.05836470e+00,  6.52823697e+00,  1.10393054e+01]
+    CALIB_K = [[1.58091067e+03, 0.00000000e+00, 9.98071831e+02],
+               [0.00000000e+00, 1.58073779e+03, 5.15360237e+02],
+               [0.00000000e+00, 0.00000000e+00, 1.00000000e+00]]
+elif DIST_COEF_N == 2:
+    # own calib, 2 dist coeffs
+    DIST_COEFFS = [-0.10364428,  0.07621745,  0.,          0.,          0.]
+    CALIB_K = [[1.58089753e+03, 0.00000000e+00, 9.94527661e+02],    # 9.94527661e+02],
+               [0.00000000e+00, 1.58053141e+03, 5.22590026e+02],    # 5.22590026e+02],
+               [0.00000000e+00, 0.00000000e+00, 1.00000000e+00]]
+elif DIST_COEF_N == 1:
+    # own calib, 1 dist coeffs
+    DIST_COEFFS = [-0.07282351,  0.,  0.,          0.,          0.]     # -0.07282351
+    CALIB_K = [[1.57982944e+03, 0.00000000e+00, 1.00429069e+03],
+               [0.00000000e+00, 1.57982258e+03, 5.22368437e+02],
+               [0.00000000e+00, 0.00000000e+00, 1.00000000e+00]]
+else:
+    assert False, 'wrong num for DIST_COEF_N'
+
+CALIB_P, CALIB_K = CALIB_K, None
 
 
 class NokiaSensor(Mission):
     # world frame: +z up, +x is east, +y is north
     # body frame: +z down, +x is fw towards north, +y is right wing (east)
     # camera frame: +z into the image plane, -y is up (north), +x is right (east)
-    w2b_q = tools.eul_to_q((np.pi, -np.pi / 2), 'xz')
-    b2c_q = tools.eul_to_q((np.pi / 2,), 'z')
+    w2b = Pose(None, tools.eul_to_q((np.pi, -np.pi / 2), 'xz'))
+    b2c = Pose(None, tools.eul_to_q((np.pi / 2, np.pi / 2), 'zx'))
+
+    def __init__(self, *args, use_gimbal=False, **kwargs):
+        super(NokiaSensor, self).__init__(*args, **kwargs)
+        self.use_gimbal = use_gimbal
 
     def init_data(self):
         t_time, *t_data = readTelemetryCsv(self.data_path, None, None)
@@ -48,9 +85,9 @@ class NokiaSensor(Mission):
         t_data = list(zip(*t_data))
         if UNDISTORT_IMAGE:
             cam = self.init_cam()
-            map_u, map_v = cv2.initUndistortRectifyMap(np.array(CALIB_K).reshape((3, 3)), np.array(DIST_COEFFS), None,
-                                                       cam.cam_mx, (cam.width, cam.height),
-                                                       cv2.CV_16SC2)
+            map_u, map_v = cv2.initUndistortRectifyMap(cam.cam_mx if CALIB_K is None else np.array(CALIB_K).reshape((3, 3)),
+                                                       np.array(DIST_COEFFS), None,
+                                                       cam.cam_mx, (cam.width, cam.height), cv2.CV_16SC2)
 
         def data_gen():
             cap = cv2.VideoCapture(self.video_path)
@@ -75,14 +112,35 @@ class NokiaSensor(Mission):
                 if t_t <= f_t + 0.5/fps:
                     t_id = np.where(t_time > f_t + 0.5 / fps)[0][0] - 1
                     t_t = t_time[t_id]
-                    lat, lon, alt, roll, pitch, yaw, gimbal_roll, gimbal_pitch, gimbal_yaw = t_data[t_id]
+                    lat, lon, alt, roll, pitch, yaw, *gimbal = t_data[t_id]
+                    gimbal_roll, gimbal_pitch, gimbal_yaw = map(math.radians, gimbal)
 
-                    if 1:
-                        roll, pitch = 0, 0
-                    elif 0:
-                        pitch = pitch - math.radians(5)
+                    incremental = False
 
-                    meas = Measure(data=np.array([lat, lon, alt, roll, pitch, yaw]), time_off=t_t - f_t)
+                    if not self.use_gimbal:
+                        roll, pitch = math.radians(0), math.radians(0)
+
+                    b_q = tools.ypr_to_q(yaw, pitch, roll)
+
+                    if incremental:
+                        if self.use_gimbal:
+                            # seems that gimbal overrides regular (roll, pitch, yaw) instead of being relative to body
+                            c_q = tools.ypr_to_q(gimbal_yaw, gimbal_pitch, gimbal_roll)
+                            gimbal_yaw, gimbal_pitch, gimbal_roll = tools.q_to_ypr(b_q.conj() * c_q)
+                        else:
+                            # enable for datasets with no gimbal information
+                            gimbal_roll, gimbal_pitch, gimbal_yaw = 0, math.radians(-89.5), 0
+                    else:
+                        if self.use_gimbal:
+                            yaw, pitch, roll = gimbal_yaw, gimbal_pitch, gimbal_roll
+                            gimbal_yaw, gimbal_pitch, gimbal_roll = 0, 0, 0
+                        else:
+                            c_q = tools.ypr_to_q(0, math.radians(-89.5), 0)
+                            yaw, pitch, roll = tools.q_to_ypr(b_q * c_q)
+                            gimbal_yaw, gimbal_pitch, gimbal_roll = 0, 0, 0
+
+                    meas = Measure(data=np.array([lat, lon, alt, roll, pitch, yaw,
+                                                  gimbal_roll, gimbal_pitch, gimbal_yaw]), time_off=t_t - f_t)
 
                     if t_id >= len(t_time):
                         # last measure used
@@ -148,7 +206,7 @@ class NokiaSensor(Mission):
             scattering_coef=2e-10,  # affects strength of haze/veil when sun shines on the lens
             dist_coefs=None if UNDISTORT_IMAGE else DIST_COEFFS,
             cam_mx=np.array(CALIB_P).reshape((3, 3)),
-            undist_proj_mx=None if UNDISTORT_IMAGE else np.array(CALIB_K).reshape((3, 3)),
+            undist_proj_mx=None if UNDISTORT_IMAGE or CALIB_K is None else np.array(CALIB_K).reshape((3, 3)),
             **common_kwargs
         )
 
@@ -162,6 +220,11 @@ class NokiaSensor(Mission):
             'new_keyframe_ba': False,
             'threaded_ba': False,    # TODO: debug adjustment to new keyframes & 3d points (!!) after ba completed
 
+            'rolling_shutter': False,
+            'rolling_shutter_axis': '-y',
+            'rolling_shutter_delay': 30e-3,  # delay in secs between first and last scanned line
+
+            'online_cam_calib': DIST_COEF_N if 0 else 0,
             'verify_feature_tracks': True,
             'max_keypoints': 320,                # 315
             'min_keypoint_dist': round(50 * sc),
@@ -171,10 +234,11 @@ class NokiaSensor(Mission):
             'refine_kp_uv': False,
             'max_kp_refine_dist': 5,
 
-            'repr_err_fov_ratio': 0.0005,         # was 0.002
+            'repr_err_fov_ratio': 0.0005,         # was 0.002 then 0.0005
             'max_repr_err_fov_ratio': 0.003,      # was 0.003
             'est_2d2d_prob': 0.9999,
             'pose_2d2d_quality_lim': 0.04,
+            'check_2d2d_result': False,
 
             'use_3d2d_ransac': False,
             'opt_init_ransac': False,
@@ -187,25 +251,25 @@ class NokiaSensor(Mission):
             'ba_interval': 6,
             'max_ba_fun_eval': 25 * 2,
             'loc_err_sd': 2,
-            'ori_err_sd': math.radians(10.0),
+            'ori_err_sd': np.inf if 1 else math.radians(10.0),
         }
 
         if 0:
             params.update({
+                'detection_grid': (1, 1),
                 'orb_feature_tracking': True,
-                'orb_search_dist': 0.03,            # in fov ratio
-                'max_keypoints': 2000,
-                'min_keypoint_dist': round(20 * sc),
+                'orb_search_dist': 0.04,            # in fov ratio
+                'max_keypoints': 500,
+                'min_keypoint_dist': round(0 * sc),
                 'repr_err_fov_ratio': 0.006,        # was 0.004
-                'max_repr_err_fov_ratio': 0.008,    # was 0.006
+                'max_repr_err_fov_ratio': 0.012,    # was 0.006
             })
 
         logging.basicConfig(level=logging.INFO)
         odo = VisualGPSNav(self.cam, round(self.cam.width * sc),
                            geodetic_origin=self.coord0,
-                           wf_body_q=self.w2b_q,
-                           bf_cam_pose=Pose(np.array([0, 0, 0]), self.b2c_q),
-                           verbose=2, pause=False, **params)
+                           wf2bf=self.w2b, bf2cf=self.b2c,
+                           verbose=1, pause=False, **params)
         return odo
 
 

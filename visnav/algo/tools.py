@@ -16,6 +16,11 @@ import sys
 from visnav.settings import *
 
 
+class classproperty(property):
+    def __get__(self, cls, owner):
+        return classmethod(self.fget).__get__(None, owner)()
+
+
 class PositioningException(Exception):
     pass
 
@@ -69,6 +74,63 @@ class Time:
 
     def __sub__(self, other: 'Time'):
         return Time(self.unix - other.unix)
+
+
+class Pose:
+    def __init__(self, loc, quat: quaternion):
+        self.loc = np.array(loc).flatten() if loc is not None else np.zeros((3,))
+        self.quat = quat if quat is not None else quaternion.one
+
+    def __add__(self, pose: 'DeltaPose') -> 'Pose':
+        """ rotations added using space-fixed convention """
+        assert isinstance(pose, DeltaPose), 'can only add DeltaPose to Pose'
+        return Pose(
+            q_times_v(pose.quat, self.loc) + pose.loc,
+            (pose.quat * self.quat).normalized()
+        )
+
+    def __sub__(self, pose) -> 'Pose':
+        """ works together with __add__ so that p0 + (p1 - p0) == p1 """
+        d = (-pose) + DeltaPose(self.loc, self.quat)
+        return DeltaPose(d.loc, d.quat)
+
+    def __neg__(self) -> 'Pose':
+        return Pose(q_times_v(self.quat.conj(), -self.loc), self.quat.conj())
+
+    def to_global(self, global_to_local_frame_transf_pose: 'Pose', is_rot=True) -> 'Pose':
+        """ transform pose from local to global frame """
+        # TODO: debug p.loc impact
+        p = global_to_local_frame_transf_pose
+        return Pose(q_times_v(p.quat, self.loc) + p.loc, p.quat * self.quat * (p.quat.conj() if is_rot else 1))
+
+    def to_local(self, global_to_local_frame_transf_pose: 'Pose', is_rot=True) -> 'Pose':
+        """ transform pose from global to local frame """
+        # TODO: debug p.loc impact
+        p = global_to_local_frame_transf_pose
+        return Pose(q_times_v(p.quat.conj(), self.loc - p.loc),  p.quat.conj() * self.quat * (p.quat if is_rot else 1))
+
+    def to_array(self):
+        return np.array(list(self.loc) + list(self.quat.components))
+
+    def __repr__(self):
+        return 'loc: %s\nori: %s (ypr: %s)' % (self.loc, self.quat, np.array(q_to_ypr(self.quat))/np.pi*180)
+
+    def new(self, dr, dq) -> 'Pose':
+        assert False, 'deprecated'
+        return Pose(
+            q_times_v(dq, self.loc) + dr,
+            (dq * self.quat).normalized(),
+        )
+
+    @classproperty
+    def identity(cls) -> 'Pose':
+        return Pose(np.array([0, 0, 0]), quaternion.one)
+
+
+class DeltaPose(Pose):
+    """
+    Separate class for the result of "pose1 - pose0" in order to prevent wrong usage
+    """
 
 
 def sphere_angle_radius(loc, r):
@@ -327,6 +389,7 @@ def lat_lon_roll_to_q(lat, lon, roll):
 def ypr_to_q(yaw, pitch, roll):
     # Tait-Bryan angles, aka yaw-pitch-roll, nautical angles, cardan angles
     # intrinsic euler rotations z-y'-x'', pitch=-lat, yaw=lon
+    # body-fixed rotations achieved by quaternion multiplication from left to right
     return (
             np.quaternion(math.cos(yaw / 2), 0, 0, math.sin(yaw / 2))
             * np.quaternion(math.cos(pitch / 2), 0, math.sin(pitch / 2), 0)
@@ -335,6 +398,7 @@ def ypr_to_q(yaw, pitch, roll):
 
 
 def eul_to_q(angles, order='xyz', reverse=False):
+    """ combine euler rotations using the body-fixed convention """
     assert len(angles) == len(order), 'len(angles) != len(order)'
     q = quaternion.one
     idx = {'x': 0, 'y': 1, 'z': 2}
@@ -373,25 +437,24 @@ def qarr_to_ypr(qarr):
     return np.stack((yaw, pitch, roll), axis=1)
 
 
-def lla_ypr_to_loc_quat(geodetic_origin, lla, ypr, w2b_q=None, b2c_q=None, b2c_r=None):
+def lla_ypr_to_loc_quat(geodetic_origin, lla, ypr, w2b_q=None, b2c=None):
     # world frame: +z up, +x is east, +y is north
     wf_body_r = to_cartesian(*lla, *geodetic_origin)
 
     # body frame: +z down, +x is fw towards north, +y is right wing (east)
-    world_body_q = ypr_to_q(*ypr)
+    bf_world_body_q = ypr_to_q(*ypr)
 
     if w2b_q is None:
         w2b_q = eul_to_q((np.pi, -np.pi / 2), 'xz')
 
-    if b2c_q is None:
-        wf_body_q = w2b_q * world_body_q * w2b_q.conj()
-        return wf_body_r, wf_body_q
+    bf_world_body_r = q_times_v(w2b_q.conj(), wf_body_r)
+    bf_world_body = Pose(bf_world_body_r, bf_world_body_q)
+
+    if b2c is None:
+        return bf_world_body
     else:
-        cf_world_body_q = b2c_q * world_body_q * b2c_q.conj()
-        cf_world_body_r = q_times_v(b2c_q.conj() * w2b_q.conj(), wf_body_r)
-        cf_world_c_q = cf_world_body_q  # TODO: how can this be?? something wrong somewhere?
-        cf_world_c_r = cf_world_body_r + (0 if b2c_r is None else q_times_v(b2c_q.conj(), b2c_r))  # TODO: debug rotating of b2c_r
-        return cf_world_c_r, cf_world_c_q
+        cf_world_body = bf_world_body.to_local(b2c)  #, is_rot=True)
+        return cf_world_body
 
 
 def mean_q(qs, ws=None):

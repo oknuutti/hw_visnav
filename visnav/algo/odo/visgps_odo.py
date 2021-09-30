@@ -4,9 +4,10 @@ import math
 import numpy as np
 import quaternion
 
-from visnav.algo.odo.base import VisualOdometry, Pose
-from visnav.algo.odo.vis_gps_bundleadj import vis_gps_bundle_adj
 from visnav.algo import tools
+from visnav.algo.tools import Pose
+from visnav.algo.odo.base import VisualOdometry
+from visnav.algo.odo.vis_gps_bundleadj import vis_gps_bundle_adj
 
 
 class VisualGPSNav(VisualOdometry):
@@ -24,20 +25,27 @@ class VisualGPSNav(VisualOdometry):
             nf.measure.time_adj = ta[-1] if len(ta) > 0 else 0
 
             geodetic_origin = self.geodetic_origin
-            lat, lon, alt = nf.measure.data[:3]
-            roll, pitch, yaw = nf.measure.data[3:]
+            lat, lon, alt = nf.measure.data[0:3]
+            roll, pitch, yaw = nf.measure.data[3:6]
+            b2c_roll, b2c_pitch, b2c_yaw = nf.measure.data[6:9]
 
             # world frame: +z up, +x is east, +y is north
             # body frame: +z down, +x is fw towards north, +y is right wing (east)
             # camera frame: +z into the image plane, -y is up, +x is right
 
+            # wf2bf_q = tools.eul_to_q((np.pi, -np.pi / 2), 'xz')
+            # bf2cf = Pose(None, tools.eul_to_q((np.pi / 2, np.pi / 2), 'yz'))
+
+            # TODO: debug discrepancy between estimated and flight data orientations
+            #  - old data still has increasing pitch problem
+            #  -
+
             if 1:
-                # TODO: check function lla_ypr_to_loc_quat, there's something strange still there
-                cf_w2c_r, cf_w2c_q = tools.lla_ypr_to_loc_quat(geodetic_origin, [lat, lon, alt], [yaw, pitch, roll],
-                                                               b2c_q=self.bf_cam_pose.quat)
-                cf_c2w_q = cf_w2c_q.conj()
-                cf_c2w_r = tools.q_times_v(cf_c2w_q, -cf_w2c_r)
-                nf.pose.prior = Pose(cf_c2w_r, cf_c2w_q)
+                w2b_bf_q = tools.ypr_to_q(yaw, pitch, roll)
+                b2c_bf_q = tools.ypr_to_q(b2c_yaw, b2c_pitch, b2c_roll)
+                yaw, pitch, roll = tools.q_to_ypr(w2b_bf_q * b2c_bf_q)
+                cf_w2c = tools.lla_ypr_to_loc_quat(geodetic_origin, [lat, lon, alt], [yaw, pitch, roll], b2c=self.bf2cf)
+                nf.pose.prior = -cf_w2c
             else:
                 wf_body_r = tools.to_cartesian(lat, lon, alt, *geodetic_origin)
                 bf_world_body_q = tools.ypr_to_q(yaw, pitch, roll)
@@ -45,24 +53,24 @@ class VisualGPSNav(VisualOdometry):
                     cf_world_q = bf_cam_q.conj() * bf_world_body_q.conj()
 
                     cf_body_r = tools.q_times_v(bf_cam_q.conj(), -bf_cam_r)
-                    cf_body_world_r = tools.q_times_v(cf_world_q * self.wf_body_q.conj(), -wf_body_r)
+                    cf_body_world_r = tools.q_times_v(cf_world_q * self.wf2bf_q.conj(), -wf_body_r)
 
                     nf.pose.prior = Pose(cf_body_r + cf_body_world_r, cf_world_q * bf_cam_q)
                 else:
-                    bf_world_q = bf_world_body_q.conj() * self.wf_body_q.conj()
+                    bf_world_q = bf_world_body_q.conj() * self.wf2bf_q.conj()
                     cf_world_q = bf_cam_q.conj() * bf_world_q
 
                     cf_body_r = tools.q_times_v(bf_cam_q.conj(), -bf_cam_r)
                     cf_body_world_r = tools.q_times_v(cf_world_q, -wf_body_r)
-                    # bf_cam_q.conj() * bf_world_body_q.conj() * self.wf_body_q.conj()
+                    # bf_cam_q.conj() * bf_world_body_q.conj() * self.wf2bf_q.conj()
 
                     nf.pose.prior = Pose(cf_body_r + cf_body_world_r, bf_cam_q.conj() * bf_world_body_q.conj() * bf_cam_q)
                     # bf_cam_q.conj() * bf_world_body_q.conj() * bf_cam_q
 
                     # (NokiaSensor.w2b_q * NokiaSensor.b2c_q) * prior.quat.conj()
-                    # self.wf_body_q * bf_cam_q * (bf_cam_q.conj() * bf_world_body_q.conj() * bf_cam_q).conj()
-                    # => self.wf_body_q * bf_cam_q //*// bf_cam_q.conj() * bf_world_body_q * bf_cam_q //*//
-                    # self.wf_body_q * bf_cam_q //*// bf_cam_q.conj() * bf_world_body_q * bf_cam_q //*// bf_cam_q.conj() * bf_world_body_q.conj() * self.wf_body_q.conj()
+                    # self.wf2bf_q * bf_cam_q * (bf_cam_q.conj() * bf_world_body_q.conj() * bf_cam_q).conj()
+                    # => self.wf2bf_q * bf_cam_q //*// bf_cam_q.conj() * bf_world_body_q * bf_cam_q //*//
+                    # self.wf2bf_q * bf_cam_q //*// bf_cam_q.conj() * bf_world_body_q * bf_cam_q //*// bf_cam_q.conj() * bf_world_body_q.conj() * self.wf2bf_q.conj()
 
         return nf
 
@@ -80,19 +88,19 @@ class VisualGPSNav(VisualOdometry):
         if 1 and (ref_frame.measure is None or new_frame.measure is None):
             return False
         elif use_prior:  # TODO: useless?
-            dq = new_frame.pose.prior.quat * ref_frame.pose.prior.quat.conj()
-            dr = new_frame.pose.prior.loc - tools.q_times_v(dq, ref_frame.pose.post.loc)
-            new_frame.pose.post = ref_frame.pose.post.new(dr, dq)
+            assert False, 'not in use'
+            p_delta = new_frame.pose.prior - ref_frame.pose.prior
+            new_frame.pose.post = ref_frame.pose + p_delta
             return True
 
         ok = super(VisualGPSNav, self).solve_2d2d(ref_frame, new_frame)
         if not ok:
             return False
 
-        dq = new_frame.pose.post.quat * ref_frame.pose.post.quat.conj()
-        dr = new_frame.pose.post.loc.flatten() - tools.q_times_v(dq, ref_frame.pose.post.loc)
-        dr = dr * np.linalg.norm(new_frame.pose.prior.loc - ref_frame.pose.prior.loc)/np.linalg.norm(dr)
-        new_frame.pose.post = ref_frame.pose.post.new(dr, dq)
+        p_delta = new_frame.pose.post - ref_frame.pose.post
+        dist = np.linalg.norm(new_frame.pose.prior.loc - ref_frame.pose.prior.loc)
+        p_delta.loc = dist * p_delta.loc / np.linalg.norm(p_delta.loc)
+        new_frame.pose.post = ref_frame.pose.post + p_delta
         return True
 
     def _bundle_adjustment(self, keyframes=None, current_only=False, same_thread=False):
@@ -127,9 +135,9 @@ class VisualGPSNav(VisualOdometry):
         #     - camera pitch drift, does not happen on toy data
         #           /=> fixed with correct gimbal orientation? (no, would not result on increasing pitch error, only a bias)
         #           /=> or related to time sync? (probably not as then 3d points would get optimized to different alt.)
-        #           => or camera calibration? Maybe, fixed by:
-        #               => recalibration or online calibration based on low err 3d points)
-        #           /=> or rolling shutter?      (probably not as happens with constant linear velocity)
+        #           /=> or camera calibration? Maybe, fixed by:
+        #           /    => recalibration or online calibration based on low err 3d points)
+        #           => or rolling shutter?      (probably not as happens with constant linear velocity)
         #     - rotation along cam axis still a problem, also happens with toy data
         #           => is because optical flow jitter during rotation
         #               - include 2d features in ba cost function?
@@ -171,3 +179,10 @@ class VisualGPSNav(VisualOdometry):
                 keyframes[i].measure.time_adj = dt - keyframes[i].measure.time_off
 
             self._update_poses(keyframes, ids, poses_ba, pts3d_ba, skip_pose_n=skip_pose_n, pop_ba_queue=not same_thread)
+
+        if not self.cam_calibrated and len(keyframes) >= self.ba_interval:  #  self.ba_interval, self.max_ba_keyframes
+            # experimental, doesnt work
+            self.calibrate_cam(keyframes)
+            if 0:
+                # disable for continuous calibration
+                self.cam_calibrated = True

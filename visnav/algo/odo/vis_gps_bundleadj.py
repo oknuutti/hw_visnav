@@ -18,7 +18,7 @@ from visnav.algo.odo.base import LogWriter
 
 
 GLOBAL_ADJ = 0      # 3: all incl rotation, 2: location and scale, 1: scale only
-ONLY_YAW = 0
+FIXED_PITCH_AND_ROLL = 0
 ANALYTICAL_JACOBIAN = 1
 CHECK_JACOBIAN = 0
 ENABLE_DT_ADJ = 0
@@ -110,7 +110,7 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
         err = _costfun(x0, pose0, fixed_pt3d, n_cams, n_pts, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K, px_err_sd,
                        meas_r, meas_aa, meas_idxs, loc_err_sd, ori_err_sd, huber_coef)
         print('ERR: %.4e' % (np.sum(err**2)/2))
-    if CHECK_JACOBIAN:
+    if CHECK_JACOBIAN and n_cams >= 6:
         if 1:
             jac = _jacobian(x0, pose0, fixed_pt3d, n_cams, n_pts, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K, px_err_sd,
                             meas_r, meas_aa, meas_idxs, loc_err_sd, ori_err_sd, huber_coef).toarray()
@@ -164,7 +164,7 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
 
     tmp = sys.stdout
     sys.stdout = log_writer or LogWriter()
-    res = least_squares(cfun, x0, verbose=2, ftol=1e-4, xtol=1e-5, method='trf',
+    res = least_squares(cfun, x0, verbose=2, ftol=1e-4, xtol=1e-5, gtol=1e-8, method='trf',
                         jac_sparsity=A if not ANALYTICAL_JACOBIAN else None,
                         x_scale='jac', jac='2-point' if not ANALYTICAL_JACOBIAN else jac,
                         # for some reason doesnt work as well as own huber loss
@@ -337,8 +337,8 @@ def _jacobian(params, pose0, fixed_pt3d, n_cams, n_pts, cam_idxs, pt3d_idxs, pts
     """
     cost function jacobian, from https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6891346/
     """
-    assert not GLOBAL_ADJ and not ONLY_YAW and not ENABLE_DT_ADJ, \
-        'analytical jacobian does not support GLOBAL_ADJ, ONLY_YAW or ENABLE_DT_ADJ'
+    assert not GLOBAL_ADJ and not ENABLE_DT_ADJ, \
+        'analytical jacobian does not support GLOBAL_ADJ or ENABLE_DT_ADJ'
 
     params = np.hstack((pose0, params))
     poses, pts3d, t_off = _unpack(params, n_cams, n_pts if len(fixed_pt3d) == 0 else 0, meas_idxs.size,
@@ -499,6 +499,9 @@ def _jacobian(params, pose0, fixed_pt3d, n_cams, n_pts, cam_idxs, pt3d_idxs, pts
     #     for s in range(3):
     #         A[m1 + 6 * i + s, p_offset + d + 3] = 1
 
+    if FIXED_PITCH_AND_ROLL:
+        J[:, :2] = 0
+
     # maybe skip first poses
     if pose0.size > 0:
         J = J[:, pose0.size:]
@@ -628,9 +631,8 @@ def _unpack(params, n_cams, n_pts, n_meas, meas_r0):
     d = c + (7 if GLOBAL_ADJ > 2 else 4)
 
     poses = params[:a].reshape((n_cams, 6))
-    # poses[:, :3] = poses[:, :3]/180*np.pi
 
-    if ONLY_YAW:
+    if FIXED_PITCH_AND_ROLL:
         poses[:, 2] = np.sign(poses[:, 2]) * np.linalg.norm(poses[:, :3], axis=1)
         poses[:, :2] = 0
 
