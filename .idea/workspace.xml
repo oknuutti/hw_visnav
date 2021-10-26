@@ -15,8 +15,6 @@
       <change beforePath="$PROJECT_DIR$/3rdparty/VINS-Fusion/config/fisheye_mask.jpg" beforeDir="false" afterPath="$PROJECT_DIR$/3rdparty/VINS-Fusion/config/fisheye_mask.jpg" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/3rdparty/VINS-Fusion/docker/run.sh" beforeDir="false" afterPath="$PROJECT_DIR$/3rdparty/VINS-Fusion/docker/run.sh" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/3rdparty/VINS-Fusion/support_files/paper/VINS-Mono: A Robust and Versatile Monocular&#10;Visual-Inertial State Estimator.pdf" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/visnav/missions/nokia.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/missions/nokia.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/visnav/run.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/run.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -774,7 +772,7 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/visnav/run.py</url>
-          <line>330</line>
+          <line>333</line>
           <option name="timeStamp" value="184" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
@@ -823,18 +821,13 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/visnav/run.py</url>
-          <line>157</line>
+          <line>159</line>
           <option name="timeStamp" value="770" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/visnav/calibrate.py</url>
           <line>59</line>
           <option name="timeStamp" value="776" />
-        </line-breakpoint>
-        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
-          <url>file://$PROJECT_DIR$/visnav/run.py</url>
-          <line>85</line>
-          <option name="timeStamp" value="779" />
         </line-breakpoint>
       </breakpoints>
       <default-breakpoints>

@@ -5,9 +5,6 @@ from datetime import datetime
 import logging
 import os
 
-import matplotlib.pyplot as plt
-from matplotlib import cm
-from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
 import quaternion
 
@@ -49,6 +46,11 @@ def main():
     parser.add_argument('--last-frame', '-l', type=int, help='last frame (default: None; -1: hardcoded end)')
     parser.add_argument('--skip', '-s', type=int, default=1, help='use only every xth frame (default: 1)')
     args = parser.parse_args()
+
+    if args.verbosity > 0:
+        import matplotlib.pyplot as plt
+        from matplotlib import cm
+        from mpl_toolkits.mplot3d import Axes3D
 
     # init odometry and data
     if args.mission == 'hwproto':
@@ -197,8 +199,9 @@ def main():
     if mission.odo.verbose > 3:
         plt.show()  # stop to show last trajectory plot
 
-    plot_results(results, map3d, frame_names, meta_names, ground_truth, '%s-result.pickle' % args.mission,
-                 nadir_looking=args.nadir_looking)
+    if args.verbosity > 0:
+        plot_results(results, map3d, frame_names, meta_names, ground_truth, '%s-result.pickle' % args.mission,
+                     nadir_looking=args.nadir_looking)
 
 
 def plot_results(results=None, map3d=None, frame_names=None, meta_names=None, ground_truth=None, file='result.pickle',
