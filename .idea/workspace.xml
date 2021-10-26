@@ -5,11 +5,6 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="605325bb-f302-46e4-8025-caaabf115796" name="Default Changelist" comment="">
-      <change afterPath="$PROJECT_DIR$/3rdparty/nokia-ds/setup.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/visnav/depthmaps.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/visnav/iotools/kapture.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/visnav.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/visnav.iml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/3rdparty/VINS-Fusion/config/A3_ptgrey/a3_ptgrey_mono_imu_config.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/3rdparty/VINS-Fusion/config/A3_ptgrey/a3_ptgrey_mono_imu_config.yaml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/3rdparty/VINS-Fusion/config/A3_ptgrey/a3_ptgrey_stereo_config.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/3rdparty/VINS-Fusion/config/A3_ptgrey/a3_ptgrey_stereo_config.yaml" afterDir="false" />
@@ -20,17 +15,7 @@
       <change beforePath="$PROJECT_DIR$/3rdparty/VINS-Fusion/config/fisheye_mask.jpg" beforeDir="false" afterPath="$PROJECT_DIR$/3rdparty/VINS-Fusion/config/fisheye_mask.jpg" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/3rdparty/VINS-Fusion/docker/run.sh" beforeDir="false" afterPath="$PROJECT_DIR$/3rdparty/VINS-Fusion/docker/run.sh" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/3rdparty/VINS-Fusion/support_files/paper/VINS-Mono: A Robust and Versatile Monocular&#10;Visual-Inertial State Estimator.pdf" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/3rdparty/nokia-ds/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/3rdparty/nokia-ds/.gitignore" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/3rdparty/nokia-ds/ImageExtraction.py" beforeDir="false" afterPath="$PROJECT_DIR$/3rdparty/nokia-ds/ImageExtraction.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/3rdparty/nokia-ds/TelemetryParsing.py" beforeDir="false" afterPath="$PROJECT_DIR$/3rdparty/nokia-ds/TelemetryParsing.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/3rdparty/nokia-ds/conf/config_jk.yml" beforeDir="false" afterPath="$PROJECT_DIR$/3rdparty/nokia-ds/conf/config_jk.yml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/3rdparty/nokia-ds/conf/config_ok.yml" beforeDir="false" afterPath="$PROJECT_DIR$/3rdparty/nokia-ds/conf/config_ok.yml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/3rdparty/nokia-ds/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/3rdparty/nokia-ds/config.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/3rdparty/nokia-ds/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/3rdparty/nokia-ds/main.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/visnav/algo/odo/base.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/algo/odo/base.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/visnav/algo/odo/vis_gps_bundleadj.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/algo/odo/vis_gps_bundleadj.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/visnav/algo/odo/visgps_odo.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/algo/odo/visgps_odo.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/visnav/calibrate.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/calibrate.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/visnav/missions/nokia.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/missions/nokia.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/visnav/run.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/run.py" afterDir="false" />
     </list>
@@ -543,7 +528,7 @@
       <envs>
         <env name="PYTHONUNBUFFERED" value="1" />
       </envs>
-      <option name="SDK_HOME" value="C:\ProgramData\Anaconda3\envs\hw_visnav\python.exe" />
+      <option name="SDK_HOME" value="C:\ProgramData\Anaconda3\envs\navex\python.exe" />
       <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/visnav" />
       <option name="IS_MODULE_SDK" value="false" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
@@ -789,7 +774,7 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/visnav/run.py</url>
-          <line>327</line>
+          <line>330</line>
           <option name="timeStamp" value="184" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
@@ -838,7 +823,7 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/visnav/run.py</url>
-          <line>154</line>
+          <line>157</line>
           <option name="timeStamp" value="770" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
@@ -848,7 +833,7 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/visnav/run.py</url>
-          <line>82</line>
+          <line>85</line>
           <option name="timeStamp" value="779" />
         </line-breakpoint>
       </breakpoints>

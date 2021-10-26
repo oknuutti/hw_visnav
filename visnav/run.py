@@ -31,6 +31,8 @@ def main():
     parser.add_argument('--video-toff', '--dt', type=float, metavar='dT', help='video time offset compared to metadata')
     parser.add_argument('--out', '-o', metavar='OUT', help='path to the output folder')
     parser.add_argument('--kapture', metavar='OUT', help='path to kapture-format export folder')
+    parser.add_argument('--verbosity', '-v', default=2, help='verbosity level (0-4)')
+    parser.add_argument('--high-quality', action='store_true', help='high quality settings with more keypoints detected')
 
     parser.add_argument('--mission', '-m', choices=('hwproto', 'nokia', 'toynokia'), help='select mission')
     parser.add_argument('--undist-img', action='store_true', help='undistort image instead of keypoints')
@@ -65,6 +67,7 @@ def main():
                       [0.,            0., 1.]]
         mission = NokiaSensor(args.data, data_path=args.meta, video_toff=args.video_toff, use_gimbal=args.use_gimbal,
                               undist_img=args.undist_img, cam_mx=cam_mx, cam_dist=args.cam_dist,
+                              verbosity=args.verbosity, high_quality=args.high_quality,
                               first_frame=ff, last_frame=lf)
 
     elif args.mission == 'toynokia':

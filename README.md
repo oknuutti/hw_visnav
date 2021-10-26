@@ -33,6 +33,23 @@ or to test synthetic photometric feature algo with config set "1", run:
 xvfb-run --server-args="-screen 0 1024x768x24" python -m cProfile -o profile1.prof tests/splnav.py 1
 ```
 
+## For processing drone videos:
+```
+conda create -n drone -c conda-forge python=3.8 pip numpy numba quaternion scipy opencv
+conda activate drone
+pip install pygeodesy
+pip install --no-deps kapture
+```
+
+### If need telemetry parser for Nokia data:
+```
+mkdir 3rdparty
+cd 3rdparty
+git clone git@version.aalto.fi:jkinnari/nokia-multico-dataset-parser.git -b okn-work nokia-ds
+cd ..
+pip install --no-deps -e 3rdparty/nokia-ds
+```
+
 ## TODO:
 - include inertial measurements
 

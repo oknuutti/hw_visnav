@@ -84,7 +84,11 @@ class NokiaSensor(Mission):
     w2b = Pose(None, tools.eul_to_q((np.pi, -np.pi / 2), 'xz'))
     b2c = Pose(None, tools.eul_to_q((np.pi / 2, np.pi / 2), 'zx'))
 
-    def __init__(self, *args, use_gimbal=False, cam_mx=None, cam_dist=None, undist_img=False, **kwargs):
+    def __init__(self, *args, verbosity=2, high_quality=False,
+                 use_gimbal=False, cam_mx=None, cam_dist=None, undist_img=False, **kwargs):
+        self.verbosity = verbosity
+        self.high_quality = high_quality
+
         self.undist_img = undist_img
         self.use_gimbal = use_gimbal
         self.cam_mx = cam_mx or CALIB_K
@@ -282,7 +286,7 @@ class NokiaSensor(Mission):
             'ori_err_sd': np.inf if 1 else math.radians(10.0),
         }
 
-        if 0:
+        if self.high_quality:
             params.update({
                 'max_keypoints': 1000,                # 320
                 'min_keypoint_dist': round(25 * sc),
@@ -304,7 +308,7 @@ class NokiaSensor(Mission):
         odo = VisualGPSNav(self.cam, round(self.cam.width * sc),
                            geodetic_origin=self.coord0,
                            wf2bf=self.w2b, bf2cf=self.b2c,
-                           verbose=2, pause=False, **params)  # 1: logging, 2: tracks, 3: 3d-map, 4: poses
+                           verbose=self.verbosity, pause=False, **params)  # 1: logging, 2: tracks, 3: 3d-map, 4: poses
         return odo
 
 
