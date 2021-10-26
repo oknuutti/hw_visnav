@@ -9,6 +9,8 @@ from visnav.algo.tools import Pose
 from visnav.algo.odo.base import VisualOdometry
 from visnav.algo.odo.vis_gps_bundleadj import vis_gps_bundle_adj
 
+logger = logging.getLogger("odo").getChild("visgps")
+
 
 class VisualGPSNav(VisualOdometry):
     DEF_LOC_ERR_SD = 10     # in meters
@@ -104,7 +106,7 @@ class VisualGPSNav(VisualOdometry):
         return True
 
     def _bundle_adjustment(self, keyframes=None, current_only=False, same_thread=False):
-        logging.info('starting bundle adjustment')
+        logger.info('starting bundle adjustment')
         skip_meas = False
 
         with self._new_frame_lock:

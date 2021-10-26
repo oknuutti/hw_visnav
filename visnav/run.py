@@ -3,6 +3,7 @@ import copy
 import pickle
 from datetime import datetime
 import logging
+import os
 
 import matplotlib.pyplot as plt
 from matplotlib import cm
@@ -13,9 +14,13 @@ import quaternion
 from visnav.algo import tools
 from visnav.algo.tools import Pose
 from visnav.algo.odo.base import VisualOdometry
+from visnav.iotools.kapture import KaptureIO
 from visnav.missions.hwproto import HardwarePrototype
 from visnav.missions.nokia import NokiaSensor, interp_loc
 from visnav.missions.toynokia import ToyNokiaSensor
+
+logger = logging.getLogger("main")
+logger.setLevel(logging.INFO)
 
 
 def main():
@@ -25,9 +30,21 @@ def main():
     parser.add_argument('--meta', '-t', metavar='META', help='path to meta data')
     parser.add_argument('--video-toff', '--dt', type=float, metavar='dT', help='video time offset compared to metadata')
     parser.add_argument('--out', '-o', metavar='OUT', help='path to the output folder')
+    parser.add_argument('--kapture', metavar='OUT', help='path to kapture-format export folder')
+
     parser.add_argument('--mission', '-m', choices=('hwproto', 'nokia', 'toynokia'), help='select mission')
+    parser.add_argument('--undist-img', action='store_true', help='undistort image instead of keypoints')
     parser.add_argument('--use-gimbal', action='store_true', help='gimbal data is ok, use it')
     parser.add_argument('--nadir-looking', action='store_true', help='downwards looking cam')
+
+    parser.add_argument('--cam-dist', type=float, nargs='*', help='cam distortion coeffs')
+    parser.add_argument('--cam-fl-x', type=float, help='cam focal length x')
+    parser.add_argument('--cam-fl-y', type=float, help='cam focal length y')
+    parser.add_argument('--cam-pp-x', type=float, help='cam principal point x')
+    parser.add_argument('--cam-pp-y', type=float, help='cam principal point y')
+
+    parser.add_argument('--first-frame', '-f', type=int, default=0, help='first frame (default: 0; -1: hardcoded value)')
+    parser.add_argument('--last-frame', '-l', type=int, help='last frame (default: None; -1: hardcoded end)')
     parser.add_argument('--skip', '-s', type=int, default=1, help='use only every xth frame (default: 1)')
     args = parser.parse_args()
 
@@ -35,9 +52,21 @@ def main():
     if args.mission == 'hwproto':
         mission = HardwarePrototype(args.data, last_frame=(155, 321, None)[0])
     elif args.mission == 'nokia':
+        ff = (100, 250, 520, 750, 1250, 1500, 1750)[0] if args.first_frame == -1 else args.first_frame
+        lf = (240, 400, 640, 1000, 1500, 1750, 2000)[1] if args.last_frame == -1 else args.last_frame
+
+        cam_mx = None
+        if args.cam_fl_x:
+            fl_y = args.cam_fl_y or args.cam_fl_x
+            pp_x = args.cam_pp_x or NokiaSensor.CAM_WIDTH / 2
+            pp_y = args.cam_pp_y or NokiaSensor.CAM_HEIGHT / 2
+            cam_mx = [[args.cam_fl_x, 0., pp_x],
+                      [0.,          fl_y, pp_y],
+                      [0.,            0., 1.]]
         mission = NokiaSensor(args.data, data_path=args.meta, video_toff=args.video_toff, use_gimbal=args.use_gimbal,
-                              first_frame=(250, 350, 560, 1250, 1500, 1750)[2],
-                              last_frame=(450, 500, 750, 1500, 1750, 2000)[2])
+                              undist_img=args.undist_img, cam_mx=cam_mx, cam_dist=args.cam_dist,
+                              first_frame=ff, last_frame=lf)
+
     elif args.mission == 'toynokia':
         mission = ToyNokiaSensor(args.data, data_path=args.meta, video_toff=args.video_toff,
                                  first_frame=(100, 350, 850, 1650)[1], last_frame=(415, 500, 1250, 1850, 2000)[2])
@@ -64,8 +93,8 @@ def main():
         if i % args.skip != 0:
             continue
 
-        logging.info('')
-        logging.info(name)
+        logger.info('')
+        logger.info(name)
         frame_names0.append(name)
         meta_names0.append(meta_name)
         ground_truth0.append(gt)
@@ -75,7 +104,14 @@ def main():
 
             if nf is not None and nf.id is not None:
                 kfid2img[nf.id] = i
-                if mission.odo.verbose > 2:
+
+                pts3d_w = np.array([pt.pt3d for pt in mission.odo.state.map3d.values() if pt.active])
+                if len(pts3d_w) > 0:
+                    pts3d_c = tools.q_times_mx(nf.pose.post.quat, pts3d_w) + nf.pose.post.loc
+                    pts_d = np.quantile(pts3d_c[:, 2], (0.01, 0.5, 0.9))
+                    logger.info('tot pts: %d, tree tops: %.1f m, median: %.1f m, ground: %.1f m' % (len(pts3d_w), *pts_d))
+
+                if mission.odo.verbose > 3:
                     post = np.zeros((len(mission.odo.state.keyframes), 7))
                     k, prior = 0, np.zeros((len(mission.odo.state.keyframes), 7))
                     for j, kf in enumerate([kf for kf in mission.odo.state.keyframes if kf.pose.post]):
@@ -108,6 +144,23 @@ def main():
         frame_names = [frame_names0[kfid2img[r[3]]] for r in results]
         meta_names = [meta_names0[kfid2img[r[3]]] for r in results]
         ground_truth = [ground_truth0[kfid2img[r[3]]] for r in results]
+
+        if 1:
+            pts3d = np.array([pt.pt3d for pt in map3d])
+            ground_alt = np.quantile(-pts3d[:, 1], 0.5)    # neg-y is altitude in cam frame
+            drone_alt = -(-results[-1][0].post).loc[1]        # word
+            expected_dist = drone_alt - mission.coord0[2]
+            modeled_dist = drone_alt - ground_alt
+            fl_used = (mission.cam.cam_mx[0, 0] + mission.cam.cam_mx[1, 1]) / 2
+            logger.info('ground at %.1f m (%.1f m), drone alt %.1f m (%.1f m), est focal length: %.1f px' % (
+                ground_alt, mission.coord0[2], modeled_dist, expected_dist, fl_used * expected_dist / modeled_dist
+            ))
+
+        if args.kapture:
+            kapture = KaptureIO(args.kapture, reset=True, jpg_qlt=95, scale=0.5)
+            kapture.set_camera(1, 'cam', mission.cam)
+            kapture.add_frames(mission.odo.removed_keyframes, map3d)
+            kapture.write_to_dir()
     except AttributeError as e:
         if 0:
             map3d = None
@@ -120,17 +173,17 @@ def main():
         # show results as given by the online version of the algorithm
         results, frame_names, meta_names, ground_truth = results0, frame_names0, meta_names0, ground_truth0
 
-    logging.info('time spent: %.0fs' % (datetime.now() - started).total_seconds())
+    logger.info('time spent: %.0fs' % (datetime.now() - started).total_seconds())
 
     repr_errs = np.concatenate([list(kf.repr_err.values()) for kf in mission.odo.removed_keyframes if len(kf.repr_err)])
     err_q95 = np.quantile(np.linalg.norm(repr_errs, axis=1), 0.95) if len(repr_errs) else np.nan
-    logging.info('95%% percentile repr err: %.3fpx' % (err_q95,))
+    logger.info('95%% percentile repr err: %.3fpx' % (err_q95,))
 
     interp = interp_loc(mission.odo.removed_keyframes, mission.time0)
     loc_est = np.array([np.ones((3,))*np.nan if kf.pose.post is None else (-kf.pose.post).loc for kf in mission.odo.removed_keyframes])
     loc_gps = np.array([interp(kf.time.timestamp() - mission.time0).flatten() for kf in mission.odo.removed_keyframes]).squeeze()
     mean_loc_err = np.nanmean(np.linalg.norm(loc_est - loc_gps, axis=1))
-    logging.info('mean loc err: %.3fm' % (mean_loc_err,))
+    logger.info('mean loc err: %.3fm' % (mean_loc_err,))
 
     if 0:
         plt.figure(10)
@@ -138,7 +191,7 @@ def main():
         plt.plot(loc_gps[:, 0], loc_gps[:, 1])
         plt.show()
 
-    if mission.odo.verbose > 2:
+    if mission.odo.verbose > 3:
         plt.show()  # stop to show last trajectory plot
 
     plot_results(results, map3d, frame_names, meta_names, ground_truth, '%s-result.pickle' % args.mission,
@@ -176,8 +229,6 @@ def plot_results(results=None, map3d=None, frame_names=None, meta_names=None, gr
         # TODO: better way, now somehow works heuristically
         est_ori = est_ori[:, (2, 0, 1)]
         meas_ori = meas_ori[:, (2, 0, 1)]
-
-    logging.disable(logging.INFO)
 
     fst = np.where(np.logical_not(np.isnan(est_loc[:, 0])))[0][0]
     idx = np.where([r is not None for r in results])[0]

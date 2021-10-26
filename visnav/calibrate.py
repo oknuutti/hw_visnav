@@ -9,7 +9,9 @@ import cv2
 def main():
     # parse arguments
     parser = argparse.ArgumentParser(description='Calibrate camera an image taken of a checker board')
-    parser.add_argument('--path', '-f', help='path to the calibration images')
+    parser.add_argument('--path', '-f', action='append', help='path to the calibration images / video(s)')
+    parser.add_argument('--skip', '-i', type=int, default=1, help='frame interval (1=no skipping, 2=use every other frame, etc)')
+    parser.add_argument('--offset', '-o', type=int, default=0, help='skip these many images from the start')
     parser.add_argument('--nx', '-x', type=int, help='checker board corner count on x-axis')
     parser.add_argument('--ny', '-y', type=int, help='checker board corner count on y-axis')
     parser.add_argument('--cell-size', '-s', type=float, help='cell width and height in mm')
@@ -28,30 +30,52 @@ def main():
     objpoints = []  # 3d point in real world space
     imgpoints = []  # 2d points in image plane.
     imgs = []
+    shape = None
 
-    for fname in os.listdir(args.path):
-        if fname[-4:] in ('.bmp', '.jpg', '.jpeg', '.png'):
-            img = cv2.imread(os.path.join(args.path, fname))
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    def process_img(img, name):
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        shape = gray.shape
 
-            # Find the chess board corners
-            ret, corners = cv2.findChessboardCorners(gray, (args.nx, args.ny), None, detect_corner_flags)
+        # Find the chess board corners
+        ret, corners = cv2.findChessboardCorners(gray, (args.nx, args.ny), None, detect_corner_flags)
 
-            # If found, add object points, image points (after refining them)
-            if ret:
-                objpoints.append(objp)
-                imgpoints.append(corners)
-                imgs.append(img)
+        # If found, add object points, image points (after refining them)
+        if ret:
+            objpoints.append(objp)
+            imgpoints.append(corners)
+            imgs.append(img)
 
-                # Draw and display the corners
-                img_show = img.copy()
-                corners2 = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
-                cv2.drawChessboardCorners(img_show, (args.nx, args.ny), corners2, ret)
-                sc = 1024/np.max(img_show.shape)
-                cv2.imshow('calibration', cv2.resize(img_show, None, fx=sc, fy=sc))
-                cv2.waitKey(500)
-            else:
-                print('cant find the corners from %s' % fname)
+            # Draw and display the corners
+            img_show = img.copy()
+            corners2 = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
+            cv2.drawChessboardCorners(img_show, (args.nx, args.ny), corners2, ret)
+            sc = 1024/np.max(img_show.shape)
+            cv2.imshow('calibration', cv2.resize(img_show, None, fx=sc, fy=sc))
+            cv2.waitKey(500)
+        else:
+            print('cant find the corners from %s' % name)
+
+        return shape
+
+    for path in args.path:
+        if os.path.isdir(path):
+            files = [fname for fname in os.listdir(path) if fname in ('.bmp', '.jpg', '.jpeg', '.png')]
+            files = sorted(files)
+            for i, fname in enumerate(files):
+                if i >= args.offset and (i - args.offset) % args.skip == 0:
+                    img = cv2.imread(os.path.join(path, fname))
+                    shape = process_img(img, fname)
+
+        else:
+            cap = cv2.VideoCapture(path)
+            i, ret = 0, True
+            while cap.isOpened() and ret:
+                ret, img = cap.read()
+                if i >= args.offset and (i - args.offset) % args.skip == 0 and ret:
+                    shape = process_img(img, 'frame-%d' % i)
+                i += 1
+
+            cap.release()
 
     if len(imgs) == 0:
         print('too few images found at %s (%d)' % (args.path, len(imgs)))
@@ -69,7 +93,10 @@ def main():
     if args.dist_coef_n < 1:
         flags |= cv2.CALIB_FIX_K1
 
-    ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, gray.shape[::-1], None, None, flags=flags)
+    print('estimating camera parameters using a total of %d images...' % (len(imgs),))
+
+    ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, shape[::-1], None, None, flags=flags)
+
     print('camera mx (K):\n%s' % (mtx,))
     print('\ndist coefs (D): %s' % (dist,))
 

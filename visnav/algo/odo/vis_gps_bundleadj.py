@@ -164,7 +164,7 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
 
     tmp = sys.stdout
     sys.stdout = log_writer or LogWriter()
-    res = least_squares(cfun, x0, verbose=2, ftol=1e-4, xtol=1e-5, gtol=1e-8, method='trf',
+    res = least_squares(cfun, x0, verbose=2, ftol=1e-5, xtol=1e-5, gtol=1e-8, method='trf',
                         jac_sparsity=A if not ANALYTICAL_JACOBIAN else None,
                         x_scale='jac', jac='2-point' if not ANALYTICAL_JACOBIAN else jac,
                         # for some reason doesnt work as well as own huber loss
@@ -764,7 +764,7 @@ def vee(R):
 
 def logR(R):
     ax1, ax2 = list(range(len(R.shape)))[-2:]
-    c = (np.trace(R, axis1=ax1, axis2=ax2) - 1) / 2
+    c = np.clip((np.trace(R, axis1=ax1, axis2=ax2) - 1) / 2, -1, 1)
     s, th = np.sqrt(1 - c ** 2), np.arccos(c)
     with np.errstate(invalid='ignore'):
         tmp = (0.5 * th / s).reshape((-1, *((1,) * ax2)))
@@ -778,7 +778,7 @@ def dlogR_dR(R):
     # from section 10.3.2, eq 10.11, https://ingmec.ual.es/~jlblanco/papers/jlblanco2010geometry3D_techrep.pdf
     assert R.shape == (3, 3), 'wrong size rotation matrix'
 
-    c = (np.trace(R) - 1) / 2
+    c = np.clip((np.trace(R) - 1) / 2, -1, 1)
     if np.isclose(c, 1):
         S1 = np.array([[0, 0, 0],
                        [0, 0, -.5],
