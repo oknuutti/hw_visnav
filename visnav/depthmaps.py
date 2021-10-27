@@ -1,11 +1,11 @@
 import os
 import argparse
+import subprocess
 
 import numpy as np
 
 from kapture.io.records import get_record_fullpath
 from kapture.converter.colmap.export_colmap import export_colmap
-from kapture_localization.colmap.colmap_command import run_image_undistorter, run_colmap_command
 
 
 def main():
@@ -50,15 +50,27 @@ def main():
     dense_path = os.path.join(args.path, args.dense)
     os.makedirs(os.path.join(dense_path, 'images', args.sensor), exist_ok=True)
 
+    if args.composite_cmd:
+        cmd = args.composite_cmd.split(' ')
+    else:
+        assert args.cmd, 'either --cmd or --composite-cmd argument needs to be given'
+        cmd = [args.cmd]
+
     if not args.skip_import:
         export_colmap(args.kapture, db_path, txt_rec, keypoints_type=args.keypoint, force_overwrite_existing=True)
-        run_image_undistorter(args.cmd, img_path, txt_rec, dense_path)
+        image_undistorter_args = ["image_undistorter",
+                                  "--image_path", img_path,
+                                  "--input_path", txt_rec,
+                                  "--output_path", dense_path
+                                  ]
+        exec_cmd(cmd + image_undistorter_args)
 
         for f in ('consistency_graphs', 'depth_maps', 'normal_maps'):
             os.makedirs(os.path.join(dense_path, 'stereo', f, args.sensor), exist_ok=True)
 
     if not args.skip_depth_est:
-        patch_match_stereo_args = ["patch_match_stereo", "--workspace_path", dense_path,
+        patch_match_stereo_args = ["patch_match_stereo",
+                                   "--workspace_path", dense_path,
                                    "--PatchMatchStereo.depth_min", str(args.min_depth),
                                    "--PatchMatchStereo.depth_max", str(args.max_depth),
                                    "--PatchMatchStereo.window_radius", str(args.win_rad),
@@ -66,26 +78,7 @@ def main():
                                    "--PatchMatchStereo.gpu_index", args.gpu,
                                    "--PatchMatchStereo.cache_size", str(args.mem),
                                    ]
-        if args.composite_cmd:
-            extras = args.composite_cmd.split(' ')
-            cmd, patch_match_stereo_args = extras[0], extras[1:] + patch_match_stereo_args
-        else:
-            assert args.cmd, 'either --cmd or --composite-cmd argument needs to be given'
-            cmd = args.cmd
-
-        print('execute command: %s' % ([cmd] + patch_match_stereo_args,))
-
-        if 0:
-            run_colmap_command(cmd, patch_match_stereo_args)
-        else:
-            import subprocess
-            colmap_process = subprocess.Popen([cmd] + patch_match_stereo_args, shell=True)
-            colmap_process.wait()
-
-            if colmap_process.returncode != 0:
-                raise ValueError(
-                    '\nSubprocess Error (Return code:'
-                    f' {colmap_process.returncode} )')
+        exec_cmd(cmd + patch_match_stereo_args)
 
 
 def read_colmap_array(path):
@@ -104,6 +97,16 @@ def read_colmap_array(path):
         array = np.fromfile(fid, np.float32)
     array = array.reshape((width, height, channels), order="F")
     return np.transpose(array, (1, 0, 2)).squeeze()
+
+
+def exec_cmd(args):
+    proc = subprocess.Popen(args)
+    proc.wait()
+
+    if proc.returncode != 0:
+        raise ValueError(
+            '\nSubprocess Error (Return code:'
+            f' {proc.returncode} )')
 
 
 if __name__ == '__main__':
