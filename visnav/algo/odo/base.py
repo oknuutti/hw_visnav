@@ -1225,7 +1225,7 @@ class VisualOdometry:
         kf_repr_err = []
         for j, f in enumerate(frames):
             norm_err, max_err = self.repr_err(f), self.max_repr_err(f)
-            tmp = np.array([[i, f.kps_uv_norm[id]] for i, id in enumerate(ids[idxs]) if id in f.kps_uv_norm]).T
+            tmp = np.array([[i, f.kps_uv_norm[id]] for i, id in enumerate(ids[idxs]) if id in f.kps_uv_norm], dtype=object).T
             err = []
             if len(tmp) > 0:
                 kp_idxs, uvs = tmp[0].astype(int), np.concatenate(tmp[1, :])

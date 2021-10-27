@@ -26,7 +26,8 @@ def main():
     parser.add_argument('--data', '-d', metavar='DATA', help='path to data')
     parser.add_argument('--meta', '-t', metavar='META', help='path to meta data')
     parser.add_argument('--video-toff', '--dt', type=float, metavar='dT', help='video time offset compared to metadata')
-    parser.add_argument('--out', '-o', metavar='OUT', help='path to the output folder')
+    parser.add_argument('--res', '-r', metavar='OUT', help='path to the result pickle')
+    parser.add_argument('--debug-out', '-o', metavar='OUT', help='path to the debug output folder')
     parser.add_argument('--kapture', metavar='OUT', help='path to kapture-format export folder')
     parser.add_argument('--verbosity', '-v', type=int, default=2, help='verbosity level (0-4)')
     parser.add_argument('--high-quality', action='store_true', help='high quality settings with more keypoints detected')
@@ -78,8 +79,8 @@ def main():
     else:
         assert False, 'bad mission given: %s' % args.mission
 
-    if args.out:
-        mission.odo._track_save_path = args.out
+    if args.debug_out:
+        mission.odo._track_save_path = args.debug_out
 
     if args.nadir_looking:
         mission.odo._nadir_looking = True
@@ -199,19 +200,27 @@ def main():
     if mission.odo.verbose > 3:
         plt.show()  # stop to show last trajectory plot
 
+    file = args.res or ('%s-result.pickle' % args.mission)
+    res_path = os.path.dirname(file)
+    if res_path:
+        os.makedirs(res_path, exist_ok=True)
+    with open(file, 'wb') as fh:
+        pickle.dump((results, map3d, frame_names, meta_names, ground_truth), fh)
+
     if args.verbosity > 0:
-        plot_results(results, map3d, frame_names, meta_names, ground_truth, '%s-result.pickle' % args.mission,
-                     nadir_looking=args.nadir_looking)
+        plot_results(results, map3d, frame_names, meta_names, ground_truth, file, nadir_looking=args.nadir_looking)
 
 
 def plot_results(results=None, map3d=None, frame_names=None, meta_names=None, ground_truth=None, file='result.pickle',
                  nadir_looking=False):
+
+    import matplotlib.pyplot as plt
+    from matplotlib import cm
+    from mpl_toolkits.mplot3d import Axes3D
+
     if results is None:
         with open(file, 'rb') as fh:
             results, map3d, frame_names, meta_names, ground_truth = pickle.load(fh)
-    else:
-        with open(file, 'wb') as fh:
-            pickle.dump((results, map3d, frame_names, meta_names, ground_truth), fh)
 
     w2b, b2c = NokiaSensor.w2b, NokiaSensor.b2c
     nl_dq = tools.eul_to_q((-np.pi / 2,), 'y') if nadir_looking else quaternion.one
