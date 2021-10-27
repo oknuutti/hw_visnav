@@ -10,13 +10,13 @@ from kapture_localization.colmap.colmap_command import run_image_undistorter, ru
 
 def main():
     parser = argparse.ArgumentParser(description='Estimate depthmaps using COLMAP')
-    parser.add_argument('-i', '-k', '--kapture', required=True,
+    parser.add_argument('-i', '--kapture', required=True,
                         help='input path to kapture data root directory')
     parser.add_argument('-s', '--sensor', default='cam',
                         help='input kapture image sensor name')
     parser.add_argument('-k', '--keypoint', default='gftt',
                         help='input kapture keypoint type name')
-    parser.add_argument('-d', '--path', required=True,
+    parser.add_argument('-p', '--path', required=True,
                         help='output base path')
     parser.add_argument('-t', '--txt', default='txt',
                         help='output text folder name')
@@ -24,6 +24,10 @@ def main():
                         help='output dense folder name')
     parser.add_argument('-c', '--cmd',
                         help='path to colmap command')
+    parser.add_argument('--gpu', default='0',
+                        help='gpu indices to use, e.g. 0 (default) or 0,0,0,0 or 0,1,2')
+    parser.add_argument('--mem', default=32, type=int,
+                        help='max mem usage in GB ')
     parser.add_argument('--min-depth', type=float, default=10,
                         help='min depth for depth map estimation')
     parser.add_argument('--max-depth', type=float, default=200,
@@ -57,8 +61,10 @@ def main():
                                    "--PatchMatchStereo.depth_max", str(args.max_depth),
                                    "--PatchMatchStereo.window_radius", str(args.win_rad),
                                    "--PatchMatchStereo.window_step", str(args.win_step),
+                                   "--PatchMatchStereo.gpu_index", args.gpu,
+                                   "--PatchMatchStereo.cache_size", str(args.mem),
                                    ]
-        run_colmap_command(args.colmap_cmd, patch_match_stereo_args)
+        run_colmap_command(args.cmd, patch_match_stereo_args)
 
 
 def read_colmap_array(path):
