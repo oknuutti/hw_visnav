@@ -24,6 +24,8 @@ def main():
                         help='output dense folder name')
     parser.add_argument('-c', '--cmd',
                         help='path to colmap command')
+    parser.add_argument('--composite-cmd',
+                        help='composite cmd to invoke colmap command, e.g. "singularity exec colmap.sif colmap"')
     parser.add_argument('--gpu', default='0',
                         help='gpu indices to use, e.g. 0 (default) or 0,0,0,0 or 0,1,2')
     parser.add_argument('--mem', default=32, type=int,
@@ -64,7 +66,13 @@ def main():
                                    "--PatchMatchStereo.gpu_index", args.gpu,
                                    "--PatchMatchStereo.cache_size", str(args.mem),
                                    ]
-        run_colmap_command(args.cmd, patch_match_stereo_args)
+        if args.composite_cmd:
+            extras = args.composite_cmd.split(' ')
+            cmd, patch_match_stereo_args = extras[0], extras[1:] + patch_match_stereo_args
+        else:
+            cmd = args.cmd
+
+        run_colmap_command(cmd, patch_match_stereo_args)
 
 
 def read_colmap_array(path):
