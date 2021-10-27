@@ -29,7 +29,8 @@ def main():
     parser.add_argument('--res', '-r', metavar='OUT', help='path to the result pickle')
     parser.add_argument('--debug-out', '-o', metavar='OUT', help='path to the debug output folder')
     parser.add_argument('--kapture', metavar='OUT', help='path to kapture-format export folder')
-    parser.add_argument('--verbosity', '-v', type=int, default=2, help='verbosity level (0-4)')
+    parser.add_argument('--verbosity', '-v', type=int, default=2,
+                        help='verbosity level (0-4, 0-1: text only, 2:+debug imgs, 3: +keypoints, 4: +poses)')
     parser.add_argument('--high-quality', action='store_true', help='high quality settings with more keypoints detected')
 
     parser.add_argument('--mission', '-m', choices=('hwproto', 'nokia', 'toynokia'), help='select mission')
@@ -48,7 +49,7 @@ def main():
     parser.add_argument('--skip', '-s', type=int, default=1, help='use only every xth frame (default: 1)')
     args = parser.parse_args()
 
-    if args.verbosity > 0:
+    if args.verbosity > 1:
         import matplotlib.pyplot as plt
         from matplotlib import cm
         from mpl_toolkits.mplot3d import Axes3D
@@ -117,7 +118,7 @@ def main():
                     pts_d = np.quantile(pts3d_c[:, 2], (0.01, 0.5, 0.9))
                     logger.info('tot pts: %d, tree tops: %.1f m, median: %.1f m, ground: %.1f m' % (len(pts3d_w), *pts_d))
 
-                if mission.odo.verbose > 3:
+                if args.verbosity > 3:
                     post = np.zeros((len(mission.odo.state.keyframes), 7))
                     k, prior = 0, np.zeros((len(mission.odo.state.keyframes), 7))
                     for j, kf in enumerate([kf for kf in mission.odo.state.keyframes if kf.pose.post]):
@@ -197,7 +198,7 @@ def main():
         plt.plot(loc_gps[:, 0], loc_gps[:, 1])
         plt.show()
 
-    if mission.odo.verbose > 3:
+    if args.verbosity > 3:
         plt.show()  # stop to show last trajectory plot
 
     file = args.res or ('%s-result.pickle' % args.mission)
@@ -207,7 +208,7 @@ def main():
     with open(file, 'wb') as fh:
         pickle.dump((results, map3d, frame_names, meta_names, ground_truth), fh)
 
-    if args.verbosity > 0:
+    if args.verbosity > 1:
         plot_results(results, map3d, frame_names, meta_names, ground_truth, file, nadir_looking=args.nadir_looking)
 
 
