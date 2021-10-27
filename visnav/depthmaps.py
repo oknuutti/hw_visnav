@@ -72,7 +72,17 @@ def main():
         else:
             cmd = args.cmd
 
-        run_colmap_command(cmd, patch_match_stereo_args)
+        if 0:
+            run_colmap_command(cmd, patch_match_stereo_args)
+        else:
+            import subprocess
+            colmap_process = subprocess.Popen([cmd] + patch_match_stereo_args, shell=True)
+            colmap_process.wait()
+
+            if colmap_process.returncode != 0:
+                raise ValueError(
+                    '\nSubprocess Error (Return code:'
+                    f' {colmap_process.returncode} )')
 
 
 def read_colmap_array(path):
