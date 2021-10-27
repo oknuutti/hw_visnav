@@ -5,7 +5,6 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="605325bb-f302-46e4-8025-caaabf115796" name="Default Changelist" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/3rdparty/VINS-Fusion/config/A3_ptgrey/a3_ptgrey_mono_imu_config.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/3rdparty/VINS-Fusion/config/A3_ptgrey/a3_ptgrey_mono_imu_config.yaml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/3rdparty/VINS-Fusion/config/A3_ptgrey/a3_ptgrey_stereo_config.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/3rdparty/VINS-Fusion/config/A3_ptgrey/a3_ptgrey_stereo_config.yaml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/3rdparty/VINS-Fusion/config/A3_ptgrey/a3_ptgrey_stereo_imu_config.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/3rdparty/VINS-Fusion/config/A3_ptgrey/a3_ptgrey_stereo_imu_config.yaml" afterDir="false" />
@@ -15,8 +14,7 @@
       <change beforePath="$PROJECT_DIR$/3rdparty/VINS-Fusion/config/fisheye_mask.jpg" beforeDir="false" afterPath="$PROJECT_DIR$/3rdparty/VINS-Fusion/config/fisheye_mask.jpg" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/3rdparty/VINS-Fusion/docker/run.sh" beforeDir="false" afterPath="$PROJECT_DIR$/3rdparty/VINS-Fusion/docker/run.sh" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/3rdparty/VINS-Fusion/support_files/paper/VINS-Mono: A Robust and Versatile Monocular&#10;Visual-Inertial State Estimator.pdf" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/visnav/missions/toynokia.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/missions/toynokia.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/visnav/run.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/run.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />

@@ -28,7 +28,7 @@ def main():
     parser.add_argument('--video-toff', '--dt', type=float, metavar='dT', help='video time offset compared to metadata')
     parser.add_argument('--out', '-o', metavar='OUT', help='path to the output folder')
     parser.add_argument('--kapture', metavar='OUT', help='path to kapture-format export folder')
-    parser.add_argument('--verbosity', '-v', default=2, help='verbosity level (0-4)')
+    parser.add_argument('--verbosity', '-v', type=int, default=2, help='verbosity level (0-4)')
     parser.add_argument('--high-quality', action='store_true', help='high quality settings with more keypoints detected')
 
     parser.add_argument('--mission', '-m', choices=('hwproto', 'nokia', 'toynokia'), help='select mission')
