@@ -6,7 +6,6 @@ from datetime import datetime
 import numpy as np
 import quaternion
 import cv2
-import matplotlib.pyplot as plt
 
 from TelemetryParsing import readTelemetryCsv
 
@@ -90,6 +89,7 @@ class ToyNokiaSensor(Mission):
                     f_id += 1
                 prev_t_t = t_t
                 prev_meas = meas_data
+            # import matplotlib.pyplot as plt
             # plt.plot(np.array([p.loc for p in poses]))
             # plt.show()
 

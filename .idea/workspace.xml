@@ -15,7 +15,8 @@
       <change beforePath="$PROJECT_DIR$/3rdparty/VINS-Fusion/config/fisheye_mask.jpg" beforeDir="false" afterPath="$PROJECT_DIR$/3rdparty/VINS-Fusion/config/fisheye_mask.jpg" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/3rdparty/VINS-Fusion/docker/run.sh" beforeDir="false" afterPath="$PROJECT_DIR$/3rdparty/VINS-Fusion/docker/run.sh" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/3rdparty/VINS-Fusion/support_files/paper/VINS-Mono: A Robust and Versatile Monocular&#10;Visual-Inertial State Estimator.pdf" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/visnav/run.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/run.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/visnav/missions/toynokia.py" beforeDir="false" afterPath="$PROJECT_DIR$/visnav/missions/toynokia.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
