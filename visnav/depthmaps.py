@@ -70,7 +70,10 @@ def main():
             extras = args.composite_cmd.split(' ')
             cmd, patch_match_stereo_args = extras[0], extras[1:] + patch_match_stereo_args
         else:
+            assert args.cmd, 'either --cmd or --composite-cmd argument needs to be given'
             cmd = args.cmd
+
+        print('execute command: %s' % ([cmd] + patch_match_stereo_args,))
 
         if 0:
             run_colmap_command(cmd, patch_match_stereo_args)
