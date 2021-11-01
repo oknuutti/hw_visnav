@@ -116,7 +116,7 @@ class NokiaSensor(Mission):
         def data_gen():
             cap = cv2.VideoCapture(self.video_path)
             fps = cap.get(cv2.CAP_PROP_FPS)
-            f_id, t_id, t_t = 0, 0, 0
+            f_id, t_id, t_t, f_t_raw1 = 0, 0, 0, None
             last_measure, ret = False, True
 
             while cap.isOpened() and ret:
@@ -125,7 +125,15 @@ class NokiaSensor(Mission):
 
                 f_id += 1
                 ret, img = cap.read()
-                f_t = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000 + self.video_toff
+                if not ret or img is None:
+                    continue
+
+                f_t_raw0, f_t_raw1 = f_t_raw1, cap.get(cv2.CAP_PROP_POS_MSEC) / 1000
+                if f_t_raw0 is not None and f_t_raw1 == 0:
+                    # for some reason sometimes (at the end of a video?) CAP_PROP_POS_MSEC returns zero
+                    f_t_raw1 = f_t_raw0 + 1/fps
+
+                f_t = f_t_raw1 + self.video_toff
                 if self.first_frame is not None and f_id < self.first_frame:
                     continue
                 elif self.last_frame is not None and f_id > self.last_frame:
@@ -279,7 +287,7 @@ class NokiaSensor(Mission):
             'ini_kf_triangulation_trigger': 40,
 
             'max_keyframes': 50000,
-            'max_ba_keyframes': 100,
+            'max_ba_keyframes': 72,
             'ba_interval': 6,
             'max_ba_fun_eval': 25 * 10,
             'loc_err_sd': np.array([2., 10., 2.]),  # y == alt
