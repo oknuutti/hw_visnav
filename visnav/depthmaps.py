@@ -1,8 +1,12 @@
 import os
 import argparse
 import subprocess
+import re
+import logging
 
 import numpy as np
+import cv2
+import tqdm
 
 from kapture.io.records import get_record_fullpath
 from kapture.converter.colmap.export_colmap import export_colmap
@@ -22,6 +26,8 @@ def main():
                         help='output text folder name')
     parser.add_argument('-d', '--dense', default='dense',
                         help='output dense folder name')
+    parser.add_argument('-e', '--export', required=True,
+                        help='export depth maps here')
     parser.add_argument('-c', '--cmd',
                         help='path to colmap command')
     parser.add_argument('--composite-cmd',
@@ -42,6 +48,8 @@ def main():
                         help='skip importing kapture to colmap format')
     parser.add_argument('--skip-depth-est', action='store_true',
                         help='skip depth map estimation')
+    parser.add_argument('--skip-export', action='store_true',
+                        help='skip exporting depth maps to exr format')
 
     args = parser.parse_args()
     txt_rec = os.path.join(args.path, args.txt)
@@ -49,6 +57,7 @@ def main():
     img_path = get_record_fullpath(args.kapture)
     dense_path = os.path.join(args.path, args.dense)
     os.makedirs(os.path.join(dense_path, 'images', args.sensor), exist_ok=True)
+    logging.basicConfig(level=logging.INFO)
 
     if args.composite_cmd:
         cmd = args.composite_cmd.split(' ')
@@ -61,7 +70,8 @@ def main():
         image_undistorter_args = ["image_undistorter",
                                   "--image_path", img_path,
                                   "--input_path", txt_rec,
-                                  "--output_path", dense_path
+                                  "--output_path", dense_path,
+                                  "--blank_pixels", "1",
                                   ]
         exec_cmd(cmd + image_undistorter_args)
 
@@ -80,8 +90,23 @@ def main():
                                    ]
         exec_cmd(cmd + patch_match_stereo_args)
 
+    if not args.skip_export:
+        depth_path = os.path.join(dense_path, 'stereo', 'depth_maps', args.sensor)
+        os.makedirs(args.export, exist_ok=True)
+
+        logging.info('Exporting geometric depth maps in EXR format...')
+        for fname in tqdm.tqdm(os.listdir(depth_path), mininterval=3):
+            m = re.search(r'(.*?)(\.jpg|\.png|\.jpeg)?\.geometric\.bin', fname)
+            if m:
+                outfile = os.path.join(args.export, m[1] + '.d.exr')
+                depth = read_colmap_array(os.path.join(depth_path, fname))
+                depth[depth <= args.min_depth] = np.nan
+                depth[depth >= args.max_depth] = np.nan
+                cv2.imwrite(outfile, depth, (cv2.IMWRITE_EXR_TYPE, cv2.IMWRITE_EXR_TYPE_FLOAT))
+
 
 def read_colmap_array(path):
+    # from https://github.com/colmap/colmap/blob/dev/scripts/python/read_write_dense.py
     with open(path, "rb") as fid:
         width, height, channels = np.genfromtxt(fid, delimiter="&", max_rows=1,
                                                 usecols=(0, 1, 2), dtype=int)
