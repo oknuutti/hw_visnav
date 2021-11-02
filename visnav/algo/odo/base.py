@@ -32,7 +32,7 @@ from visnav.algo.tools import Pose, DeltaPose
 from visnav.algo.bundleadj import vis_bundle_adj
 from visnav.algo.featdet import detect_gridded
 
-logger = logging.getLogger("odo")
+logger = tools.get_logger("odo")
 
 
 class PoseEstimate:

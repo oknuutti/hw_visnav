@@ -1,8 +1,6 @@
 import argparse
-import copy
 import pickle
 from datetime import datetime
-import logging
 import os
 
 import numpy as np
@@ -16,8 +14,7 @@ from visnav.missions.hwproto import HardwarePrototype
 from visnav.missions.nokia import NokiaSensor, interp_loc
 from visnav.missions.toynokia import ToyNokiaSensor
 
-logger = logging.getLogger("main")
-logger.setLevel(logging.INFO)
+logger = tools.get_logger("main")
 
 
 def main():

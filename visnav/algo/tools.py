@@ -1,11 +1,11 @@
 import math
 import time
+import logging
 import dateutil.parser as dparser
 
 import numpy as np
 #import numba as nb
 import quaternion  # adds to numpy  # noqa # pylint: disable=unused-import
-import sys
 
 # import scipy
 # from astropy.coordinates import SkyCoord
@@ -259,6 +259,18 @@ def to_cartesian(lat, lon, alt, lat0, lon0, alt0):
     lc = LocalCartesian(lat0, lon0, alt0)
     xyz = lc.forward(lat, lon, alt)
     return np.array(xyz.xyz)
+
+
+def get_logger(name, level=logging.INFO, fmt='%(asctime)s %(levelname)-8s %(message)s',
+               date_fmt='%Y-%m-%d %H:%M:%S'):
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
+    logger.propagate = False
+    f = logging.Formatter(fmt, date_fmt)
+    h = logging.StreamHandler()
+    h.setFormatter(f)
+    logger.addHandler(h)
+    return logger
 
 
 def angle_between_v(v1, v2):

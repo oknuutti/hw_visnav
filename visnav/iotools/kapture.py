@@ -81,6 +81,9 @@ class KaptureIO:
         k.points3d = kt.Points3d(np.concatenate((pt3d_arr, np.ones_like(pt3d_arr)*128), axis=1))
 
         for f in frames:
+            if not f.pose.post:
+                continue
+
             id = f.frame_num
             img = f.orig_image
             img_file = os.path.join(self.default_cam[1], 'frame%06d.%s' % (id, self.img_format))
