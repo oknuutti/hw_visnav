@@ -8,8 +8,12 @@ import numpy as np
 import cv2
 import tqdm
 
+from kapture.io.csv import kapture_from_dir
 from kapture.io.records import get_record_fullpath
 from kapture.converter.colmap.export_colmap import export_colmap
+
+from visnav.algo import tools
+from visnav.algo.tools import Pose
 
 
 def main():
@@ -26,7 +30,7 @@ def main():
                         help='output text folder name')
     parser.add_argument('-d', '--dense', default='dense',
                         help='output dense folder name')
-    parser.add_argument('-e', '--export', required=True,
+    parser.add_argument('-e', '--export',
                         help='export depth maps here')
     parser.add_argument('-c', '--cmd',
                         help='path to colmap command')
@@ -44,6 +48,16 @@ def main():
                         help='window radius for colmap depth map estimation (default=5)')
     parser.add_argument('--win-step', type=int, default=1,
                         help='window step size for colmap depth map estimation (default=1)')
+
+    parser.add_argument('--filter-min-ncc', type=float, default=0.1,
+                        help='--PatchMatchStereo.filter_min_ncc  arg (=0.1)')
+    parser.add_argument('--filter-min-triangulation-angle', type=float, default=3.0,
+                        help='--PatchMatchStereo.filter_min_triangulation_angle  arg (=3.0)')
+    parser.add_argument('--filter-min-num-consistent', type=int, default=2,
+                        help='--PatchMatchStereo.filter_min_num_consistent  arg (=2)')
+    parser.add_argument('--filter-geom-consistency-max-cost', type=float, default=1.0,
+                        help='--PatchMatchStereo.filter_geom_consistency_max_cost  arg (=1.0)')
+
     parser.add_argument('--skip-import', action='store_true',
                         help='skip importing kapture to colmap format')
     parser.add_argument('--skip-depth-est', action='store_true',
@@ -58,6 +72,9 @@ def main():
     dense_path = os.path.join(args.path, args.dense)
     os.makedirs(os.path.join(dense_path, 'images', args.sensor), exist_ok=True)
     logging.basicConfig(level=logging.INFO)
+
+    if not args.export:
+        args.export = os.path.join(args.kapture, 'reconstruction')
 
     if args.composite_cmd:
         cmd = args.composite_cmd.split(' ')
@@ -87,22 +104,89 @@ def main():
                                    "--PatchMatchStereo.window_step", str(args.win_step),
                                    "--PatchMatchStereo.gpu_index", args.gpu,
                                    "--PatchMatchStereo.cache_size", str(args.mem),
+                                   "--PatchMatchStereo.filter_min_ncc", str(args.filter_min_ncc),
+                                   "--PatchMatchStereo.filter_min_triangulation_angle",
+                                        str(args.filter_min_triangulation_angle),
+                                   "--PatchMatchStereo.filter_min_num_consistent",
+                                        str(args.filter_min_num_consistent),
+                                   "--PatchMatchStereo.filter_geom_consistency_max_cost",
+                                        str(args.filter_geom_consistency_max_cost),
                                    ]
         exec_cmd(cmd + patch_match_stereo_args)
 
     if not args.skip_export:
         depth_path = os.path.join(dense_path, 'stereo', 'depth_maps', args.sensor)
-        os.makedirs(args.export, exist_ok=True)
+        os.makedirs(os.path.join(args.export, 'depth'), exist_ok=True)
+        os.makedirs(os.path.join(args.export, 'geometry'), exist_ok=True)
+        kapt = kapture_from_dir(args.kapture)
+        sensor_id, width, height, fl_x, fl_y, pp_x, pp_y, *dist_coefs = get_cam_params(kapt, args.sensor)
+        file2id = {fn[sensor_id]: id for id, fn in kapt.records_camera.items()}
 
         logging.info('Exporting geometric depth maps in EXR format...')
         for fname in tqdm.tqdm(os.listdir(depth_path), mininterval=3):
             m = re.search(r'(.*?)(\.jpg|\.png|\.jpeg)?\.geometric\.bin', fname)
             if m:
-                outfile = os.path.join(args.export, m[1] + '.d.exr')
                 depth = read_colmap_array(os.path.join(depth_path, fname))
                 depth[depth <= args.min_depth] = np.nan
                 depth[depth >= args.max_depth] = np.nan
+
+                if width != depth.shape[1] or height != depth.shape[0]:
+                    logging.warning('Depth map for image %s is different size than the camera resolution %s vs %s' % (
+                        m[1] + m[2], depth.shape, (height, width)))
+
+                outfile = os.path.join(args.export, 'depth', m[1] + '.d.exr')
                 cv2.imwrite(outfile, depth, (cv2.IMWRITE_EXR_TYPE, cv2.IMWRITE_EXR_TYPE_FLOAT))
+
+                # TODO:
+                #  - use common zero lat,lon,alt at nokia.py
+                frame_id = file2id.get(args.sensor + '/' + m[1] + m[2], file2id.get(args.sensor + '\\' + m[1] + m[2], None))
+                cf_cam_world_v, cf_cam_world_q = kapt.trajectories[frame_id][sensor_id].t, kapt.trajectories[frame_id][sensor_id].r
+                cf_world_cam = -Pose(cf_cam_world_v, cf_cam_world_q)
+
+                px_u = cam_px_u(depth.shape[1], depth.shape[0], fl_x, fl_y, pp_x, pp_y)
+
+                # the depth is actually the z-component, not the distance from the camera to the surface
+                dist = depth.flatten()/px_u[:, 2]
+
+                px_u = tools.q_times_mx(cf_world_cam.quat, px_u * dist[:, None])
+                xyz = px_u.reshape(depth.shape + (3,)) + cf_world_cam.loc.reshape((1, 1, 3))
+
+                outfile = os.path.join(args.export, 'geometry', m[1] + '.xyz.exr')
+                cv2.imwrite(outfile, xyz.astype(np.float32), (cv2.IMWRITE_EXR_TYPE, cv2.IMWRITE_EXR_TYPE_FLOAT))
+
+                if 0 and m[1] == 'frame000299':
+                    import matplotlib.pyplot as plt
+                    from mpl_toolkits.mplot3d import Axes3D
+                    f = plt.figure(1)
+                    a = f.add_subplot(111, projection='3d')
+                    a.set_xlabel('x')
+                    a.set_ylabel('y')
+                    a.set_zlabel('z')
+                    a.plot(xyz.reshape((-1, 3))[:, 0], xyz.reshape((-1, 3))[:, 1], xyz.reshape((-1, 3))[:, 2], '.')
+
+
+def get_cam_params(kapt, sensor_name):
+    sid, sensor = None, None
+    for id, s in kapt.sensors.items():
+        if s.name == sensor_name:
+            sid, sensor = id, s
+            break
+    sp = sensor.sensor_params
+    return (sid,) + tuple(map(int, sp[1:3])) + tuple(map(float, sp[3:]))
+
+
+def unit_aflow(W, H):
+    return np.stack(np.meshgrid(np.arange(W, dtype=np.float32), np.arange(H, dtype=np.float32)), axis=2)
+
+
+def cam_px_u(width, height, fl_x, fl_y, pp_x, pp_y):
+    xy = unit_aflow(width, height).reshape((-1, 2))
+    u = tools.normalize_mx(np.stack((
+        (xy[:, 0] - pp_x) / fl_x,
+        (xy[:, 1] - pp_y) / fl_y,
+        np.ones((xy.shape[0],), dtype=np.float32)
+    ), axis=1))
+    return u
 
 
 def read_colmap_array(path):

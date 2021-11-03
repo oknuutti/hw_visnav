@@ -203,11 +203,11 @@ def normalize_v_f8(v):
     return v / norm if norm != 0 else v
 
 
-def normalize_mx(mx):
-    norm = np.linalg.norm(mx, axis=1)
-    mx = mx.copy()
-    mx[norm > 0, :] = mx[norm > 0, :] / norm[norm > 0, None]
-    mx[norm == 0, :] = 0
+def normalize_mx(mx, axis=1):
+    norm = np.linalg.norm(mx, axis=axis)
+    with np.errstate(invalid='ignore'):
+        mx /= norm[:, None]
+        mx = np.nan_to_num(mx)
     return mx
 
 
