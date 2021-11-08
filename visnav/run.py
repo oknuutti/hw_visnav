@@ -2,6 +2,7 @@ import argparse
 import pickle
 from datetime import datetime
 import os
+import math
 
 import numpy as np
 import quaternion
@@ -33,7 +34,12 @@ def main():
     parser.add_argument('--mission', '-m', choices=('hwproto', 'nokia', 'toynokia'), help='select mission')
     parser.add_argument('--undist-img', action='store_true', help='undistort image instead of keypoints')
     parser.add_argument('--use-gimbal', action='store_true', help='gimbal data is ok, use it')
+    parser.add_argument('--drifting-gimbal', action='store_true',
+                        help='gimbal orientation measure drifts, update orientation offset with each odometry result')
     parser.add_argument('--nadir-looking', action='store_true', help='downwards looking cam')
+
+    parser.add_argument('--ori-off-ypr', type=float, nargs=3,
+                        help='orientation offset in ypr (deg) to be applied in body frame to orientation measurements')
 
     parser.add_argument('--cam-dist', type=float, nargs='*', help='cam distortion coeffs')
     parser.add_argument('--cam-fl-x', type=float, help='cam focal length x')
@@ -44,7 +50,13 @@ def main():
     parser.add_argument('--first-frame', '-f', type=int, default=0, help='first frame (default: 0; -1: hardcoded value)')
     parser.add_argument('--last-frame', '-l', type=int, help='last frame (default: None; -1: hardcoded end)')
     parser.add_argument('--skip', '-s', type=int, default=1, help='use only every xth frame (default: 1)')
+    parser.add_argument('--plot-only', action='store_true', help='only plot the result')
     args = parser.parse_args()
+
+    res_file = args.res or ('%s-result.pickle' % args.mission)
+    if args.plot_only:
+        plot_results(file=res_file, nadir_looking=args.nadir_looking)
+        return
 
     if args.verbosity > 1:
         import matplotlib.pyplot as plt
@@ -69,6 +81,7 @@ def main():
         mission = NokiaSensor(args.data, data_path=args.meta, video_toff=args.video_toff, use_gimbal=args.use_gimbal,
                               undist_img=args.undist_img, cam_mx=cam_mx, cam_dist=args.cam_dist,
                               verbosity=args.verbosity, high_quality=args.high_quality,
+                              ori_off_q=tools.ypr_to_q(*map(math.radians, args.ori_off_ypr)) if args.ori_off_ypr else None,
                               first_frame=ff, last_frame=lf)
 
     elif args.mission == 'toynokia':
@@ -89,6 +102,7 @@ def main():
     meta_names0 = []
     results0 = []
     ground_truth0 = []
+    ori_offs = []
     kfid2img = {}
     started = datetime.now()
     ax = None
@@ -108,6 +122,13 @@ def main():
 
             if nf is not None and nf.id is not None:
                 kfid2img[nf.id] = i
+
+                if args.drifting_gimbal and nf.pose.post and meta:
+                    est_w2c_bf_q = (-nf.pose.post).to_global(mission.b2c).quat
+                    meas_w2c_bf_q = (-nf.pose.prior).to_global(mission.b2c).quat * mission.odo.ori_off_q.conj()
+                    new_ori_off_q = meas_w2c_bf_q.conj() * est_w2c_bf_q
+                    mission.odo.ori_off_q = tools.mean_q([mission.odo.ori_off_q, new_ori_off_q], [0.9, 0.1])
+                    ori_offs.append(mission.odo.ori_off_q)
 
                 pts3d_w = np.array([pt.pt3d for pt in mission.odo.state.map3d.values() if pt.active])
                 if len(pts3d_w) > 0:
@@ -198,15 +219,14 @@ def main():
     if args.verbosity > 3:
         plt.show()  # stop to show last trajectory plot
 
-    file = args.res or ('%s-result.pickle' % args.mission)
-    res_path = os.path.dirname(file)
-    if res_path:
-        os.makedirs(res_path, exist_ok=True)
-    with open(file, 'wb') as fh:
+    res_folder = os.path.dirname(res_file)
+    if res_folder:
+        os.makedirs(res_folder, exist_ok=True)
+    with open(res_file, 'wb') as fh:
         pickle.dump((results, map3d, frame_names, meta_names, ground_truth), fh)
 
     if args.verbosity > 1:
-        plot_results(results, map3d, frame_names, meta_names, ground_truth, file, nadir_looking=args.nadir_looking)
+        plot_results(results, map3d, frame_names, meta_names, ground_truth, res_file, nadir_looking=args.nadir_looking)
 
 
 def plot_results(results=None, map3d=None, frame_names=None, meta_names=None, ground_truth=None, file='result.pickle',
@@ -345,9 +365,4 @@ def plot_results(results=None, map3d=None, frame_names=None, meta_names=None, gr
 
 
 if __name__ == '__main__':
-    if 1:
-        main()
-    elif 0:
-        plot_results(file='hwproto-result.pickle')
-    else:
-        plot_results(file='nokia-result.pickle')
+    main()

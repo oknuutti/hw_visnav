@@ -16,9 +16,10 @@ class VisualGPSNav(VisualOdometry):
     DEF_LOC_ERR_SD = 10     # in meters
     DEF_ORI_ERR_SD = math.radians(10)
 
-    def __init__(self, *args, geodetic_origin=None, **kwargs):
+    def __init__(self, *args, geodetic_origin=None, ori_off_q=None, **kwargs):
         super(VisualGPSNav, self).__init__(*args, **kwargs)
         self.geodetic_origin = geodetic_origin    # (lat, lon, height)
+        self.ori_off_q = ori_off_q
 
     def initialize_frame(self, time, image, measure):
         nf = super(VisualGPSNav, self).initialize_frame(time, image, measure)
@@ -45,7 +46,7 @@ class VisualGPSNav(VisualOdometry):
             if 1:
                 w2b_bf_q = tools.ypr_to_q(yaw, pitch, roll)
                 b2c_bf_q = tools.ypr_to_q(b2c_yaw, b2c_pitch, b2c_roll)
-                yaw, pitch, roll = tools.q_to_ypr(w2b_bf_q * b2c_bf_q)
+                yaw, pitch, roll = tools.q_to_ypr(w2b_bf_q * b2c_bf_q * (self.ori_off_q or quaternion.one))
                 cf_w2c = tools.lla_ypr_to_loc_quat(geodetic_origin, [lat, lon, alt], [yaw, pitch, roll], b2c=self.bf2cf)
                 nf.pose.prior = -cf_w2c
             else:
@@ -113,42 +114,10 @@ class VisualGPSNav(VisualOdometry):
             if keyframes is None and current_only:
                 keyframes = self.state.keyframes[-1:]
 
-        # TODO: when drone rotates, estimate goes off the rails
-        #       /=> maybe problem at BA as optimized 3d points move far away when rotating
-        #          - also, points at the top of the image are estimated to be farther away than points at the bottom
-        #          - jumpy ransac poses as points stupidly far
-        #          - however, optimized poses barely move at all
-        #       /=> why does optimization make a pose in the middle "lag", i.e. yaws: 146, 154, *152* (id=14), 163, 168 (id=16)
-        #          => because corresponding yaw measure (145) drags it down
-        #       /=> why points triangulated on a non-horizontal plane?
-        #          => because movement of points gets explained by tilt rather than movement, why?
-        #             => too slack reprojection error given for ransac
-        #       /=> why reprojection error gets high during rotation, same as before with the "lag"?
-        #           => disabling time-difference optimization helped
-        #           => optical flow less accurate during rotation
-        #       /=> don't converge always, why? => because starting pose from meas, which is too far from solution
-        #       /=> meas and 3d-pt scales dont start to match (see trajectory plot), why?
-        #           => doesnt even start from the same location
-        #           => even global scale and location offset doesnt work, why?
-        #       => Why drifts sideways when rotating along z-axis?
-        #           => something wrong with rotation transformations ??? => all seem ok...
-        #   - NEXT:
-        #     - use gimbal orientation on new nokia datasets
-        #     - camera pitch drift, does not happen on toy data
-        #           /=> fixed with correct gimbal orientation? (no, would not result on increasing pitch error, only a bias)
-        #           /=> or related to time sync? (probably not as then 3d points would get optimized to different alt.)
-        #           /=> or camera calibration? Maybe, fixed by:
-        #           /    => recalibration or online calibration based on low err 3d points)
-        #           => or rolling shutter?      (probably not as happens with constant linear velocity)
-        #     - rotation along cam axis still a problem, also happens with toy data
-        #           => is because optical flow jitter during rotation
-        #               - include 2d features in ba cost function?
-        #               - use orb during rotations?
-        #  - other ideas:
+        # TODO:
         #     - keyframe pruning from the middle like in orb-slam
         #     - inverse distance formulation, project covariance also (see vins)
         #     ?- speed and angular speed priors that limit them to reasonably low values
-        #     ?- outlier rejection for features using ransac and F-matrix
         #     - when get basic stuff working:
         #           - try ransac again with loose repr err param values
         #           - try time-diff optimization (feedback for frame-skipping at nokia.py)

@@ -137,8 +137,6 @@ def main():
                 outfile = os.path.join(args.export, 'depth', m[1] + '.d.exr')
                 cv2.imwrite(outfile, depth, (cv2.IMWRITE_EXR_TYPE, cv2.IMWRITE_EXR_TYPE_FLOAT))
 
-                # TODO:
-                #  - use common zero lat,lon,alt at nokia.py
                 frame_id = file2id.get(args.sensor + '/' + m[1] + m[2], file2id.get(args.sensor + '\\' + m[1] + m[2], None))
                 cf_cam_world_v, cf_cam_world_q = kapt.trajectories[frame_id][sensor_id].t, kapt.trajectories[frame_id][sensor_id].r
                 cf_world_cam = -Pose(cf_cam_world_v, cf_cam_world_q)
@@ -154,7 +152,7 @@ def main():
                 outfile = os.path.join(args.export, 'geometry', m[1] + '.xyz.exr')
                 cv2.imwrite(outfile, xyz.astype(np.float32), (cv2.IMWRITE_EXR_TYPE, cv2.IMWRITE_EXR_TYPE_FLOAT))
 
-                if 0 and m[1] == 'frame000299':
+                if 0 and m[1] == 'frame000370':
                     import matplotlib.pyplot as plt
                     from mpl_toolkits.mplot3d import Axes3D
                     f = plt.figure(1)
@@ -163,6 +161,12 @@ def main():
                     a.set_ylabel('y')
                     a.set_zlabel('z')
                     a.plot(xyz.reshape((-1, 3))[:, 0], xyz.reshape((-1, 3))[:, 1], xyz.reshape((-1, 3))[:, 2], '.')
+                    plt.show()
+
+                    mask = np.logical_not(np.isnan(depth)).astype(np.uint8)*255
+                    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+                    mask2 = cv2.erode(mask, k)
+
 
 
 def get_cam_params(kapt, sensor_name):

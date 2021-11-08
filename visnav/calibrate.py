@@ -54,6 +54,9 @@ def main():
             cv2.waitKey(500)
         else:
             print('cant find the corners from %s' % name)
+            sc = 1024 / np.max(img.shape)
+            cv2.imshow('calibration', cv2.resize(img, None, fx=sc, fy=sc))
+            cv2.waitKey(200)
 
         return shape
 

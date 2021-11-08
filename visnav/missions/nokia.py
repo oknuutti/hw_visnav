@@ -75,6 +75,8 @@ else:
 
 
 class NokiaSensor(Mission):
+    COORD0 = (60.08879, 24.35987, 0.629)    # reference (lat, lon, alt) from 2021_10_07_10_53_12_11_03_00.csv
+
     CAM_WIDTH = 1920
     CAM_HEIGHT = 1080
 
@@ -84,7 +86,7 @@ class NokiaSensor(Mission):
     w2b = Pose(None, tools.eul_to_q((np.pi, -np.pi / 2), 'xz'))
     b2c = Pose(None, tools.eul_to_q((np.pi / 2, np.pi / 2), 'zx'))
 
-    def __init__(self, *args, verbosity=2, high_quality=False,
+    def __init__(self, *args, verbosity=2, high_quality=False, ori_off_q=None,
                  use_gimbal=False, cam_mx=None, cam_dist=None, undist_img=False, **kwargs):
         self.verbosity = verbosity
         self.high_quality = high_quality
@@ -92,6 +94,8 @@ class NokiaSensor(Mission):
         self.undist_img = undist_img
         self.use_gimbal = use_gimbal
         self.cam_mx = cam_mx or CALIB_K
+
+        self.ori_off_q = ori_off_q
 
         tmp = cam_dist or DIST_COEFFS
         self.cam_dist_n = np.where(np.array(tmp) != 0)[0][-1] + 1
@@ -167,11 +171,14 @@ class NokiaSensor(Mission):
                             yaw, pitch, roll = gimbal_yaw, gimbal_pitch, gimbal_roll
                             gimbal_yaw, gimbal_pitch, gimbal_roll = 0, 0, 0
 
-                            if 0:
+                            if 1:
                                 gf_world_cam = Pose(None, tools.ypr_to_q(yaw, pitch, roll))
-                                b2g = Pose(None, tools.ypr_to_q(*map(math.radians, (-3.00986123,   1.55428417, -13.07760242))))
-                                # b2g = Pose(None, tools.ypr_to_q(*map(math.radians, (10.0,  -0.0, -0))))
-                                yaw, pitch, roll = tools.q_to_ypr(gf_world_cam.to_global(b2g).quat)
+                                if 0:
+                                    off_q = tools.ypr_to_q(*map(math.radians, (-1.39653216, -16.87428421, 1.66370009)))
+                                    yaw, pitch, roll = tools.q_to_ypr(gf_world_cam.quat * off_q)
+                                elif 0:
+                                    b2g = Pose(None, tools.ypr_to_q(*map(math.radians, (-3.56934931, 1.1271115, 2.04077157))))
+                                    yaw, pitch, roll = tools.q_to_ypr(gf_world_cam.to_global(b2g).quat)
                             elif 1:
                                 yaw, pitch, roll = np.array([yaw, pitch, roll]) + np.array(list(map(math.radians,
                                                    (0.0, -5.5, 7.5))))
@@ -201,7 +208,7 @@ class NokiaSensor(Mission):
 
             cap.release()
 
-        return data_gen(), time0, coord0
+        return data_gen(), time0, NokiaSensor.COORD0
 
     @staticmethod
     def preprocess_image(img, gamma):
@@ -289,8 +296,8 @@ class NokiaSensor(Mission):
             'max_keyframes': 50000,
             'max_ba_keyframes': 72,
             'ba_interval': 6,
-            'max_ba_fun_eval': 25 * 10,
-            'loc_err_sd': np.array([2., 10., 2.]),  # y == alt
+            'max_ba_fun_eval': 100 * 10,
+            'loc_err_sd': np.array([2., 2., 2.]),  # y == alt (was [2, 10, 2])
             'ori_err_sd': np.inf if 1 else math.radians(10.0),
         }
 
@@ -315,7 +322,7 @@ class NokiaSensor(Mission):
         logging.basicConfig(level=logging.INFO)
         odo = VisualGPSNav(self.cam, round(self.cam.width * sc),
                            geodetic_origin=self.coord0,
-                           wf2bf=self.w2b, bf2cf=self.b2c,
+                           wf2bf=self.w2b, bf2cf=self.b2c, ori_off_q=self.ori_off_q,
                            verbose=self.verbosity, pause=False, **params)  # 1: logging, 2: tracks, 3: 3d-map, 4: poses
         return odo
 
