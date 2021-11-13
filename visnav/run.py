@@ -103,9 +103,17 @@ def main():
     results0 = []
     ground_truth0 = []
     ori_offs = []
+    ba_errs = []
     kfid2img = {}
     started = datetime.now()
     ax = None
+
+    def ba_err_logger(frame_id, per_frame_ba_errs):
+        per_frame_ba_errs = np.stack((per_frame_ba_errs[:, 0],
+                                      np.linalg.norm(per_frame_ba_errs[:, 1:4], axis=1),
+                                      np.linalg.norm(per_frame_ba_errs[:, 4:7], axis=1) / np.pi * 180), axis=1)
+        ba_errs.append([frame_id, *np.nanmean(per_frame_ba_errs, axis=0)])
+    mission.odo.ba_err_logger = ba_err_logger
 
     for i, (img, t, name, meta, meta_name, gt) in enumerate(mission.data):
         if i % args.skip != 0:
@@ -169,6 +177,7 @@ def main():
         frame_names = [frame_names0[kfid2img[r[3]]] for r in results]
         meta_names = [meta_names0[kfid2img[r[3]]] for r in results]
         ground_truth = [ground_truth0[kfid2img[r[3]]] for r in results]
+        ba_errs = np.array(ba_errs)
 
         if 1:
             pts3d = np.array([pt.pt3d for pt in map3d])
@@ -209,6 +218,8 @@ def main():
     loc_gps = np.array([interp(kf.time.timestamp() - mission.time0).flatten() for kf in mission.odo.removed_keyframes]).squeeze()
     mean_loc_err = np.nanmean(np.linalg.norm(loc_est - loc_gps, axis=1))
     logger.info('mean loc err: %.3fm' % (mean_loc_err,))
+    logger.info('mean ba errs (repr, loc, ori): %.3fpx %.3fm %.3fdeg' % (*np.nanmean(ba_errs[:, 1:], axis=0),))
+    logger.info('latest ba errs (repr, loc, ori): %.3fpx %.3fm %.3fdeg' % (*ba_errs[-1, 1:],))
 
     if 0:
         plt.figure(10)
@@ -223,14 +234,14 @@ def main():
     if res_folder:
         os.makedirs(res_folder, exist_ok=True)
     with open(res_file, 'wb') as fh:
-        pickle.dump((results, map3d, frame_names, meta_names, ground_truth), fh)
+        pickle.dump((results, map3d, frame_names, meta_names, ground_truth, ba_errs), fh)
 
     if args.verbosity > 1:
-        plot_results(results, map3d, frame_names, meta_names, ground_truth, res_file, nadir_looking=args.nadir_looking)
+        plot_results(results, map3d, frame_names, meta_names, ground_truth, ba_errs, res_file, nadir_looking=args.nadir_looking)
 
 
-def plot_results(results=None, map3d=None, frame_names=None, meta_names=None, ground_truth=None, file='result.pickle',
-                 nadir_looking=False):
+def plot_results(results=None, map3d=None, frame_names=None, meta_names=None, ground_truth=None, ba_errs=None,
+                 file='result.pickle', nadir_looking=False):
 
     import matplotlib.pyplot as plt
     from matplotlib import cm
@@ -238,7 +249,8 @@ def plot_results(results=None, map3d=None, frame_names=None, meta_names=None, gr
 
     if results is None:
         with open(file, 'rb') as fh:
-            results, map3d, frame_names, meta_names, ground_truth = pickle.load(fh)
+            results, map3d, frame_names, meta_names, ground_truth, *ba_errs = pickle.load(fh)
+            ba_errs = ba_errs[0] if len(ba_errs) else None
 
     w2b, b2c = NokiaSensor.w2b, NokiaSensor.b2c
     nl_dq = tools.eul_to_q((-np.pi / 2,), 'y') if nadir_looking else quaternion.one
@@ -338,9 +350,19 @@ def plot_results(results=None, map3d=None, frame_names=None, meta_names=None, gr
         axs[0].set_ylabel('z')
         axs[0].set_xlabel('t')
 
-        line = axs[1].plot(t2, dt, 'C0')  #, '+-')
-        tools.hover_annotate(fig, axs[1], line[0], [meta_names[i] for i in idx2])
-        axs[1].set_ylabel('dt')
+        if ba_errs is None:
+            line = axs[1].plot(t2, dt, 'C0')  #, '+-')
+            tools.hover_annotate(fig, axs[1], line[0], [meta_names[i] for i in idx2])
+            axs[1].set_ylabel('dt')
+        else:
+            id2idx = {r[3]: i for i, r in enumerate(results)}
+            t3 = [results[id2idx[int(id)]][2].timestamp() - t0 for id in ba_errs[:, 0]]
+
+            axs[1].plot(t3, ba_errs[:, 1], 'C0', label='repr [px]')
+            axs[1].plot(t3, ba_errs[:, 2], 'C1', label='loc [m]')
+            axs[1].plot(t3, ba_errs[:, 3], 'C2', label='ori [deg]')
+            axs[1].set_title('BA errors')
+            axs[1].legend()
         axs[1].set_xlabel('t')
 
         fig, axs = plt.subplots(3, 1)

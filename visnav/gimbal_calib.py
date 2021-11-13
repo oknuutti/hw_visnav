@@ -20,7 +20,7 @@ def main():
     args = parser.parse_args()
 
     with open(args.res, 'rb') as fh:
-        results, map3d, frame_names, meta_names, ground_truth = pickle.load(fh)
+        results, map3d, frame_names, meta_names, ground_truth, *_ = pickle.load(fh)
 
     def cf(pose):
         return (-pose).to_global(NokiaSensor.b2c).quat

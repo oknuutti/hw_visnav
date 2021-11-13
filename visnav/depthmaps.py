@@ -122,20 +122,28 @@ def main():
         sensor_id, width, height, fl_x, fl_y, pp_x, pp_y, *dist_coefs = get_cam_params(kapt, args.sensor)
         file2id = {fn[sensor_id]: id for id, fn in kapt.records_camera.items()}
 
+        exr_params_d = exr_params_xyz = (cv2.IMWRITE_EXR_TYPE, cv2.IMWRITE_EXR_TYPE_FLOAT)
+        if hasattr(cv2, 'IMWRITE_EXR_COMPRESSION'):
+            # supported in OpenCV 4, see descriptions at
+            #   https://rainboxlab.org/downloads/documents/EXR_Data_Compression.pdf
+            exr_params_d += (cv2.IMWRITE_EXR_COMPRESSION, cv2.IMWRITE_EXR_COMPRESSION_PXR24)    # zip 24bit floats
+            exr_params_xyz += (cv2.IMWRITE_EXR_COMPRESSION, cv2.IMWRITE_EXR_COMPRESSION_ZIP)    # zip 32bit floats
+
         logging.info('Exporting geometric depth maps in EXR format...')
         for fname in tqdm.tqdm(os.listdir(depth_path), mininterval=3):
             m = re.search(r'(.*?)(\.jpg|\.png|\.jpeg)?\.geometric\.bin', fname)
             if m:
-                depth = read_colmap_array(os.path.join(depth_path, fname))
-                depth[depth <= args.min_depth] = np.nan
-                depth[depth >= args.max_depth] = np.nan
+                depth0 = read_colmap_array(os.path.join(depth_path, fname))
+                depth0[depth0 <= args.min_depth] = np.nan
+                depth0[depth0 >= args.max_depth] = np.nan
+                depth = filter_depth(depth0, args)
 
                 if width != depth.shape[1] or height != depth.shape[0]:
                     logging.warning('Depth map for image %s is different size than the camera resolution %s vs %s' % (
                         m[1] + m[2], depth.shape, (height, width)))
 
                 outfile = os.path.join(args.export, 'depth', m[1] + '.d.exr')
-                cv2.imwrite(outfile, depth, (cv2.IMWRITE_EXR_TYPE, cv2.IMWRITE_EXR_TYPE_FLOAT))
+                cv2.imwrite(outfile, depth, exr_params_d)
 
                 frame_id = file2id.get(args.sensor + '/' + m[1] + m[2], file2id.get(args.sensor + '\\' + m[1] + m[2], None))
                 cf_cam_world_v, cf_cam_world_q = kapt.trajectories[frame_id][sensor_id].t, kapt.trajectories[frame_id][sensor_id].r
@@ -150,23 +158,82 @@ def main():
                 xyz = px_u.reshape(depth.shape + (3,)) + cf_world_cam.loc.reshape((1, 1, 3))
 
                 outfile = os.path.join(args.export, 'geometry', m[1] + '.xyz.exr')
-                cv2.imwrite(outfile, xyz.astype(np.float32), (cv2.IMWRITE_EXR_TYPE, cv2.IMWRITE_EXR_TYPE_FLOAT))
+                cv2.imwrite(outfile, xyz.astype(np.float32), exr_params_xyz)
 
                 if 0 and m[1] == 'frame000370':
+                    _, depth2 = filter_depth(depth0, args, return_interm=True)
+                    xyz = xyz.reshape((-1, 3))
+
                     import matplotlib.pyplot as plt
                     from mpl_toolkits.mplot3d import Axes3D
-                    f = plt.figure(1)
+
+                    plt.figure(1)
+                    plt.imshow(depth0)
+
+                    plt.figure(2)
+                    plt.imshow(depth2)
+
+                    plt.figure(3)
+                    plt.imshow(depth)
+
+                    f = plt.figure(4)
                     a = f.add_subplot(111, projection='3d')
                     a.set_xlabel('x')
                     a.set_ylabel('y')
                     a.set_zlabel('z')
-                    a.plot(xyz.reshape((-1, 3))[:, 0], xyz.reshape((-1, 3))[:, 1], xyz.reshape((-1, 3))[:, 2], '.')
+                    a.plot(xyz[::5, 0], xyz[::5, 1], xyz[::5, 2], '.')
+
                     plt.show()
 
-                    mask = np.logical_not(np.isnan(depth)).astype(np.uint8)*255
-                    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-                    mask2 = cv2.erode(mask, k)
+                    # mask = np.logical_not(np.isnan(depth)).astype(np.uint8)*255
+                    # k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+                    # mask2 = cv2.erode(mask, k)
 
+
+def filter_depth(depth, args, return_interm=False):
+    lim_val = (args.max_depth - args.min_depth) * 0.1
+    depth2 = filter_outliers(depth, (15, 15), (7, 7), lim_val, 0.2, 0.7)
+    depth3 = nan_blur(depth2, krn=(3, 3), lim=3, onlynans=True)
+    depth3 = remove_borders(depth3, margin=args.win_rad)
+    if return_interm:
+        return depth3, depth2
+    return depth3
+
+
+def filter_outliers(arr, krn_bg, krn_nan, lim_val, lim_nan, max_nan, use_and=True):
+    bg_val = nan_blur(arr, krn_bg, 0)
+    nans = nan_blur(np.isnan(arr).astype(float), krn_nan, 0)
+    if use_and:
+        is_outlier = np.logical_and(np.abs(arr - bg_val) > lim_val, nans > lim_nan)
+        is_outlier = np.logical_or(is_outlier, nans > max_nan)
+    else:
+        is_outlier = np.abs(arr - bg_val) * nans > lim_val * lim_nan
+    is_outlier[np.isnan(is_outlier)] = False
+    arr2 = arr.copy()
+    arr2[is_outlier] = np.nan
+    return arr2
+
+
+def nan_blur(arr, krn=(3, 3), lim=3, onlynans=False):
+    arr2 = arr.copy()
+    arr2[np.isnan(arr)] = 0
+    filt_arr = cv2.blur(arr2, krn)
+    filt_mask = cv2.blur(np.logical_not(np.isnan(arr)).astype(np.float32), krn)
+    filt_ok = filt_mask > lim / np.prod(krn)
+    if onlynans:
+        filt_ok = np.logical_and(filt_ok, np.isnan(arr))
+    arr2[filt_ok] = filt_arr[filt_ok] / filt_mask[filt_ok]
+    arr2[filt_mask <= lim / np.prod(krn)] = np.nan
+    return arr2
+
+
+def remove_borders(arr, margin):
+    arr2 = arr.copy()
+    arr2[:margin, :] = np.nan
+    arr2[-margin:, :] = np.nan
+    arr2[:, :margin] = np.nan
+    arr2[:, -margin:] = np.nan
+    return arr2
 
 
 def get_cam_params(kapt, sensor_name):

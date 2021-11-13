@@ -16,10 +16,11 @@ class VisualGPSNav(VisualOdometry):
     DEF_LOC_ERR_SD = 10     # in meters
     DEF_ORI_ERR_SD = math.radians(10)
 
-    def __init__(self, *args, geodetic_origin=None, ori_off_q=None, **kwargs):
+    def __init__(self, *args, geodetic_origin=None, ori_off_q=None, ba_err_logger=None, **kwargs):
         super(VisualGPSNav, self).__init__(*args, **kwargs)
         self.geodetic_origin = geodetic_origin    # (lat, lon, height)
         self.ori_off_q = ori_off_q
+        self.ba_err_logger = ba_err_logger
 
     def initialize_frame(self, time, image, measure):
         nf = super(VisualGPSNav, self).initialize_frame(time, image, measure)
@@ -143,13 +144,16 @@ class VisualGPSNav(VisualOdometry):
                 meas_idxs, self.loc_err_sd, self.ori_err_sd)
         kwargs = dict(max_nfev=self.max_ba_fun_eval, skip_pose_n=skip_pose_n, huber_coef=(1, 5, 0.5), poses_only=current_only)
 
-        poses_ba, pts3d_ba, t_off = self._call_ba(vis_gps_bundle_adj, args, kwargs, parallize=not same_thread)
+        poses_ba, pts3d_ba, t_off, errs = self._call_ba(vis_gps_bundle_adj, args, kwargs, parallize=not same_thread)
 
         with self._new_frame_lock:
             for i, dt in zip(meas_idxs, t_off):
                 keyframes[i].measure.time_adj = dt - keyframes[i].measure.time_off
 
             self._update_poses(keyframes, ids, poses_ba, pts3d_ba, skip_pose_n=skip_pose_n, pop_ba_queue=not same_thread)
+
+        if self.ba_err_logger is not None and not current_only:
+            self.ba_err_logger(keyframes[-1].id, errs)
 
         if not self.cam_calibrated and len(keyframes) >= self.ba_interval:  #  self.ba_interval, self.max_ba_keyframes
             # experimental, doesnt work

@@ -175,23 +175,29 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
                         max_nfev=max_nfev)
     sys.stdout = tmp
 
-    # TODO (1): return res.fun somewhat processed (per frame: mean px err, meas errs),
-    #           so that can follow the errors and notice/debug problems
-
     assert isinstance(res.x, Manifold), 'somehow manifold lost during optimization'
     new_poses, new_pts3d, new_t_off = _unpack(res.x.to_array(), n_cams - skip_pose_n,
                                               0 if poses_only else n_pts, meas_idxs.size,
                                               meas_r0=None if len(meas_idxs) < 2 else meas_r[0])
+
+    # return also per frame errors (median repr err, meas loc and ori errs)
+    # so that can follow the errors and notice/debug problems
+    repr_err = np.linalg.norm(res.fun[:cam_idxs.size * 2].reshape((-1, 2)), axis=1)
+    errs = np.array([[np.median(repr_err[cam_idxs == i])] for i in range(n_cams)])
+
     if len(meas_idxs) > 0:
         loc_err = res.fun[-6*len(meas_idxs):-3*len(meas_idxs)].reshape((-1, 3))
         ori_err = res.fun[-3*len(meas_idxs):].reshape((-1, 3))
+        errs = np.concatenate((errs, np.ones((len(errs), 6), dtype=errs.dtype) * np.nan), axis=1)
+        errs[meas_idxs, 1:] = np.concatenate((loc_err, ori_err), axis=1)
 
     if new_poses.dtype != orig_dtype:
         new_poses = new_poses.astype(orig_dtype)
         new_pts3d = new_pts3d.astype(orig_dtype)
         new_t_off = new_t_off.astype(orig_dtype)
+        errs = errs.astype(orig_dtype)
 
-    return new_poses, new_pts3d, new_t_off
+    return new_poses, new_pts3d, new_t_off, errs
 
 
 def _costfun(params, pose0, fixed_pt3d, n_cams, n_pts, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K, px_err_sd,
