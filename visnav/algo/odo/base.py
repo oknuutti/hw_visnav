@@ -198,7 +198,7 @@ class VisualOdometry:
     DEF_REMOVAL_AGE = 8                # remove if last inlier was this many keyframes ago
     DEF_MM_BIAS_SDS = np.ones(6) * 2e-3  # bias drift sds, x, y, z, then so3
 
-    DEF_INLIER_RATIO_2D2D = 0.20        # expected ratio of inliers when using the 5-point algo for pose
+    DEF_INLIER_RATIO_2D2D = 0.50        # expected ratio of inliers when using the 5-point algo for pose
     DEF_MIN_2D2D_INLIERS = 20           # discard pose estimate if less inliers than this   (was 60, with 7px min dist feats)
     DEF_MIN_INLIERS = 15                # discard pose estimate if less inliers than this   (was 35, with 7px min dist feats)
     DEF_MIN_INLIER_RATIO = 0.01         # discard pose estimate if less inliers than this   (was 0.08 for asteroid)

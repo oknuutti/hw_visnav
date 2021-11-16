@@ -6,6 +6,7 @@ import math
 import sys
 import logging
 from functools import lru_cache
+import warnings
 
 import numpy as np
 import quaternion
@@ -183,7 +184,9 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
     # return also per frame errors (median repr err, meas loc and ori errs)
     # so that can follow the errors and notice/debug problems
     repr_err = np.linalg.norm(res.fun[:cam_idxs.size * 2].reshape((-1, 2)), axis=1)
-    errs = np.array([[np.median(repr_err[cam_idxs == i])] for i in range(n_cams)])
+    with warnings.catch_warnings():
+        warnings.filterwarnings(action='ignore', message='Mean of empty slice')
+        errs = np.array([[np.median(repr_err[cam_idxs == i])] for i in range(n_cams)])
 
     if len(meas_idxs) > 0:
         loc_err = res.fun[-6*len(meas_idxs):-3*len(meas_idxs)].reshape((-1, 3))

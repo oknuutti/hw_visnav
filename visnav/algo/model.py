@@ -794,7 +794,7 @@ class SystemModel(ABC):
 class Camera:
     def __init__(self, width, height, x_fov=None, y_fov=None,
                  sensor_size=None, focal_length=None, f_stop=None, aperture=None, dist_coefs=None,
-                 quantum_eff=None, qeff_coefs=None, px_saturation_e=None, emp_coef=1,
+                 quantum_eff=None, qeff_coefs=None, px_saturation_e=1e4, emp_coef=1,
                  lambda_min=None, lambda_eff=None, lambda_max=None,
                  dark_noise_mu=None, dark_noise_sd=None, readout_noise_sd=None,
                  point_spread_fn=None, scattering_coef=None, cam_mx=None, undist_proj_mx=None,

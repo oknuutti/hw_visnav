@@ -377,7 +377,22 @@ def plot_results(results=None, map3d=None, frame_names=None, meta_names=None, gr
 
     plt.tight_layout()
 
-#    tools.plot_poses(pose[idx, :], axis=(0, 1, 0), up=(0, 0, 1))
+    x, y, z = np.array([tools.q_times_v(w2b.quat * b2c.quat, pt.pt3d) for pt in map3d]).T
+    if 1:
+        fig, ax = plt.subplots(1, 1)
+        ax.set_aspect('equal')
+        ax.set_xlabel("east", fontsize=12)
+        ax.set_ylabel("north", fontsize=12)
+        line = ax.scatter(x, y, s=20, c=z, marker='o', vmin=-5., vmax=5., cmap=cm.get_cmap('jet'))
+        fig.colorbar(line)
+        tools.hover_annotate(fig, ax, line, [str(v) for v in z])
+    else:
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        ax.plot(x, y, z, '.')
+        ax.set_xlabel("east", fontsize=12)
+        ax.set_ylabel("north", fontsize=12)
+        ax.set_zlabel("alt", fontsize=12)
 
     plt.show()
     print('ok: %.1f%%, delta loc std: %.3e' % (
