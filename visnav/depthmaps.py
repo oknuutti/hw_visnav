@@ -22,7 +22,7 @@ def main():
                         help='input path to kapture data root directory')
     parser.add_argument('-s', '--sensor', default='cam',
                         help='input kapture image sensor name')
-    parser.add_argument('-k', '--keypoint', default='gftt',
+    parser.add_argument('-nl', '--keypoint', default='gftt',
                         help='input kapture keypoint type name')
     parser.add_argument('-p', '--path', required=True,
                         help='output base path')
@@ -64,6 +64,10 @@ def main():
                         help='skip depth map estimation')
     parser.add_argument('--skip-export', action='store_true',
                         help='skip exporting depth maps to exr format')
+    parser.add_argument('--skip-depth-filter', action='store_true',
+                        help='skip extra filter scheme for depth map')
+
+    parser.add_argument('--plot', help='during export, only process and plot the frame given here')
 
     args = parser.parse_args()
     txt_rec = os.path.join(args.path, args.txt)
@@ -132,11 +136,11 @@ def main():
         logging.info('Exporting geometric depth maps in EXR format...')
         for fname in tqdm.tqdm(os.listdir(depth_path), mininterval=3):
             m = re.search(r'(.*?)(\.jpg|\.png|\.jpeg)?\.geometric\.bin', fname)
-            if m:
+            if m and (not args.plot or m[1] == args.plot):
                 depth0 = read_colmap_array(os.path.join(depth_path, fname))
                 depth0[depth0 <= args.min_depth] = np.nan
                 depth0[depth0 >= args.max_depth] = np.nan
-                depth = filter_depth(depth0, args)
+                depth = depth0 if args.skip_depth_filter else filter_depth(depth0, args)
 
                 if width != depth.shape[1] or height != depth.shape[0]:
                     logging.warning('Depth map for image %s is different size than the camera resolution %s vs %s' % (
@@ -160,7 +164,7 @@ def main():
                 outfile = os.path.join(args.export, 'geometry', m[1] + '.xyz.exr')
                 cv2.imwrite(outfile, xyz.astype(np.float32), exr_params_xyz)
 
-                if 0 and m[1] == 'frame000370':
+                if args.plot:
                     _, depth2 = filter_depth(depth0, args, return_interm=True)
                     xyz = xyz.reshape((-1, 3))
 
@@ -186,8 +190,8 @@ def main():
                     plt.show()
 
                     # mask = np.logical_not(np.isnan(depth)).astype(np.uint8)*255
-                    # k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-                    # mask2 = cv2.erode(mask, k)
+                    # nl = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+                    # mask2 = cv2.erode(mask, nl)
 
 
 def filter_depth(depth, args, return_interm=False):

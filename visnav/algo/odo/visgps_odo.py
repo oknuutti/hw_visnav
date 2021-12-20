@@ -15,6 +15,7 @@ logger = logging.getLogger("odo").getChild("visgps")
 class VisualGPSNav(VisualOdometry):
     DEF_LOC_ERR_SD = 10     # in meters
     DEF_ORI_ERR_SD = math.radians(10)
+    DEF_BA_DIST_COEF = False
 
     def __init__(self, *args, geodetic_origin=None, ori_off_q=None, ba_err_logger=None, **kwargs):
         super(VisualGPSNav, self).__init__(*args, **kwargs)
@@ -39,10 +40,6 @@ class VisualGPSNav(VisualOdometry):
 
             # wf2bf_q = tools.eul_to_q((np.pi, -np.pi / 2), 'xz')
             # bf2cf = Pose(None, tools.eul_to_q((np.pi / 2, np.pi / 2), 'yz'))
-
-            # TODO: debug discrepancy between estimated and flight data orientations
-            #  - old data still has increasing pitch problem
-            #  -
 
             if 1:
                 w2b_bf_q = tools.ypr_to_q(yaw, pitch, roll)
@@ -112,19 +109,38 @@ class VisualGPSNav(VisualOdometry):
         skip_meas = False
 
         with self._new_frame_lock:
-            if keyframes is None and current_only:
-                keyframes = self.state.keyframes[-1:]
+            if keyframes is None:
+                if current_only:
+                    keyframes = self.state.keyframes[-1:]
+                else:
+                    keyframes = self._get_ba_keyframes()
+
+        # possibly do camera calibration before bundle adjustment
+        if not self.cam_calibrated and len(keyframes) >= self.ba_interval:  #  self.ba_interval, self.max_ba_keyframes
+            # experimental, doesnt work
+            self.calibrate_cam(keyframes)
+            if 0:
+                # disable for continuous calibration
+                self.cam_calibrated = True
 
         # TODO:
         #     - keyframe pruning from the middle like in orb-slam
+        #     - using a changing subset of keypoints like in HybVIO ()
+        #     - supply initial points to LK-feature tracker based on predicted state and existing 3d points
         #     - inverse distance formulation, project covariance also (see vins)
         #     ?- speed and angular speed priors that limit them to reasonably low values
         #     - when get basic stuff working:
         #           - try ransac again with loose repr err param values
         #           - try time-diff optimization (feedback for frame-skipping at nokia.py)
 
+        with self._new_frame_lock:
+            dist_coefs = None
+            if self.ba_dist_coef and not current_only and len(keyframes) >= self.max_ba_keyframes:
+                assert np.where(np.array(self.cam.dist_coefs) != 0)[0][-1] + 1 <= 2, 'too many distortion coefficients'
+                dist_coefs = self.cam.dist_coefs[:2]
+
             keyframes, ids, poses_mx, pts3d, pts2d, v_pts2d, px_err_sd, cam_idxs, pt3d_idxs = \
-                    self._get_visual_ba_args(keyframes, current_only)
+                    self._get_visual_ba_args(keyframes, current_only, distorted=dist_coefs is not None)
             skip_pose_n = (1 if skip_meas else 0) if not current_only else 0
 
             if not skip_meas:
@@ -140,24 +156,23 @@ class VisualGPSNav(VisualOdometry):
         meas_r = meas_r.reshape((-1, 3))
         meas_aa = meas_aa.reshape((-1, 3))
 
-        args = (poses_mx, pts3d, pts2d, v_pts2d, cam_idxs, pt3d_idxs, self.cam_mx, px_err_sd, meas_r, meas_aa, t_off,
-                meas_idxs, self.loc_err_sd, self.ori_err_sd)
+        args = (poses_mx, pts3d, pts2d, v_pts2d, cam_idxs, pt3d_idxs, self.cam_mx, dist_coefs, px_err_sd, meas_r,
+                meas_aa, t_off, meas_idxs, self.loc_err_sd, self.ori_err_sd)
         kwargs = dict(max_nfev=self.max_ba_fun_eval, skip_pose_n=skip_pose_n, huber_coef=(1, 5, 0.5), poses_only=current_only)
 
-        poses_ba, pts3d_ba, t_off, errs = self._call_ba(vis_gps_bundle_adj, args, kwargs, parallize=not same_thread)
+        poses_ba, pts3d_ba, dist_ba, cam_intr, t_off, errs = self._call_ba(vis_gps_bundle_adj, args, kwargs, parallize=not same_thread)
+
+        if dist_ba is not None:
+            print('\nDIST: %s\n' % dist_ba)
+        if cam_intr is not None:
+            # TODO: update camera matrix based on this
+            print('\nCAM INTR: %s\n' % cam_intr)
 
         with self._new_frame_lock:
             for i, dt in zip(meas_idxs, t_off):
                 keyframes[i].measure.time_adj = dt - keyframes[i].measure.time_off
 
-            self._update_poses(keyframes, ids, poses_ba, pts3d_ba, skip_pose_n=skip_pose_n, pop_ba_queue=not same_thread)
+            self._update_poses(keyframes, ids, poses_ba, pts3d_ba, dist_ba, skip_pose_n=skip_pose_n, pop_ba_queue=not same_thread)
 
         if self.ba_err_logger is not None and not current_only:
             self.ba_err_logger(keyframes[-1].id, errs)
-
-        if not self.cam_calibrated and len(keyframes) >= self.ba_interval:  #  self.ba_interval, self.max_ba_keyframes
-            # experimental, doesnt work
-            self.calibrate_cam(keyframes)
-            if 0:
-                # disable for continuous calibration
-                self.cam_calibrated = True

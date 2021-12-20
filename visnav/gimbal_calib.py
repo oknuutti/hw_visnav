@@ -22,18 +22,12 @@ def main():
     with open(args.res, 'rb') as fh:
         results, map3d, frame_names, meta_names, ground_truth, *_ = pickle.load(fh)
 
-    def cf(pose):
-        return (-pose).to_global(NokiaSensor.b2c).quat
-
     # (kf.pose, kf.measure, kf.time, kf.id)
-    meas_q = np.array([tools.ypr_to_q(*meas.data[3:6]) for pose, meas, _, _ in results if meas and pose.post])
+    meas_q = np.array([tools.ypr_to_q(*np.flip(meas.data[3:6])) for pose, meas, _, _ in results if meas and pose.post])
     est_q = np.array([(-pose.post).to_global(NokiaSensor.b2c).quat for pose, meas, _, _ in results if meas and pose.post])
 
     meas_q = meas_q[args.skip:]
     est_q = est_q[args.skip:]
-
-    nl_dq = tools.eul_to_q((-np.pi / 2,), 'y') if args.nadir_looking else quaternion.one
-    est_ypr = np.array([tools.q_to_ypr(nl_dq.conj() * q) for q in est_q]) / np.pi * 180
 
     print('optimizing orientation offset based on %d measurements...' % (len(meas_q),))
 
@@ -48,9 +42,13 @@ def main():
                         args=(meas_q, est_q))
 
     off_q = np.quaternion(*res.x).normalized() if 1 else quaternion.one
-    corr_ypr = np.array([tools.q_to_ypr(nl_dq.conj() * q * off_q) for q in meas_q]) / np.pi * 180
 
     print('offset q: %s, ypr: %s' % (off_q, np.array(tools.q_to_ypr(off_q)) / np.pi * 180,))
+
+    args.nadir_looking = False  # TODO: remove override
+    nl_dq = tools.eul_to_q((-np.pi / 2,), 'y') if args.nadir_looking else quaternion.one
+    est_ypr = np.array([tools.q_to_ypr(nl_dq.conj() * q) for q in est_q]) / np.pi * 180
+    corr_ypr = np.array([tools.q_to_ypr(nl_dq.conj() * q * off_q) for q in meas_q]) / np.pi * 180
 
     plt.plot(est_ypr[:, 0], 'C0:')
     plt.plot(est_ypr[:, 1], 'C1:')

@@ -41,7 +41,7 @@ def bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray,
     pts2d with shape (n_observations, 2)
             contains measured 2-D coordinates of points projected on images in each observations.
 
-    cam_idxs with shape (n_observations,)
+    pose_idxs with shape (n_observations,)
             contains indices of cameras (from 0 to n_cameras - 1) involved in each observation.
 
     pt3d_idxs with shape (n_observations,)
@@ -51,7 +51,7 @@ def bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray,
     assert len(poses.shape) == 2 and poses.shape[1] == 6, 'wrong shape poses: %s' % (poses.shape,)
     assert len(pts3d.shape) == 2 and pts3d.shape[1] == 3, 'wrong shape pts3d: %s' % (pts3d.shape,)
     assert len(pts2d.shape) == 2 and pts2d.shape[1] == 2, 'wrong shape pts2d: %s' % (pts2d.shape,)
-    assert len(cam_idxs.shape) == 1, 'wrong shape cam_idxs: %s' % (cam_idxs.shape,)
+    assert len(cam_idxs.shape) == 1, 'wrong shape pose_idxs: %s' % (cam_idxs.shape,)
     assert len(pt3d_idxs.shape) == 1, 'wrong shape pt3d_idxs: %s' % (pt3d_idxs.shape,)
     assert K.shape == (3, 3), 'wrong shape K: %s' % (K.shape,)
 
@@ -189,7 +189,7 @@ def _jacobian(params, pose0, fixed_pt3d, n_cams, n_pts, cam_idxs, pt3d_idxs, pts
     # error term count (2d reprojection errors)
     m = cam_idxs.size * 2
 
-    # parameter count (6d poses, n x 3d keypoint locations, 1d time offset)
+    # parameter count (6d poses, np x 3d keypoint locations, 1d time offset)
     n1 = n_cams * 6
     n2 = (0 if poses_only else n_pts * 3)
     n = n1 + n2
@@ -312,7 +312,7 @@ def _rot_pt_jac(params, pose0, fixed_pt3d, n_cams, n_pts, cam_idxs, pt3d_idxs, p
 
     poses_only = len(fixed_pt3d) > 0
     points_3d = fixed_pt3d if poses_only else pts3d
-    points_3d_cf = _rotate(points_3d[pt3d_idxs], poses[cam_idxs, :3]) #+ poses[cam_idxs, 3:6]
+    points_3d_cf = _rotate(points_3d[pt3d_idxs], poses[cam_idxs, :3]) #+ poses[pose_idxs, 3:6]
 
     # output term count (rotated coords)
     m = cam_idxs.size * 3

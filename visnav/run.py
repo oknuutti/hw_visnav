@@ -31,7 +31,7 @@ def main():
                         help='verbosity level (0-4, 0-1: text only, 2:+debug imgs, 3: +keypoints, 4: +poses)')
     parser.add_argument('--high-quality', action='store_true', help='high quality settings with more keypoints detected')
 
-    parser.add_argument('--mission', '-m', choices=('hwproto', 'nokia', 'toynokia'), help='select mission')
+    parser.add_argument('--mission', '-mr', choices=('hwproto', 'nokia', 'toynokia'), help='select mission')
     parser.add_argument('--undist-img', action='store_true', help='undistort image instead of keypoints')
     parser.add_argument('--use-gimbal', action='store_true', help='gimbal data is ok, use it')
     parser.add_argument('--drifting-gimbal', action='store_true',
@@ -138,11 +138,15 @@ def main():
                     mission.odo.ori_off_q = tools.mean_q([mission.odo.ori_off_q, new_ori_off_q], [0.9, 0.1])
                     ori_offs.append(mission.odo.ori_off_q)
 
-                pts3d_w = np.array([pt.pt3d for pt in mission.odo.state.map3d.values() if pt.active])
-                if len(pts3d_w) > 0:
-                    pts3d_c = tools.q_times_mx(nf.pose.post.quat, pts3d_w) + nf.pose.post.loc
-                    pts_d = np.quantile(pts3d_c[:, 2], (0.01, 0.5, 0.9))
-                    logger.info('tot pts: %d, tree tops: %.1f m, median: %.1f m, ground: %.1f m' % (len(pts3d_w), *pts_d))
+                pts3d = np.array([pt.pt3d for pt in mission.odo.state.map3d.values() if pt.active])
+                if len(pts3d) > 0:
+                    ground_alt = np.quantile(-pts3d[:, 1], 0.2)  # neg-y is altitude in cam frame
+                    drone_alt = -(-nf.pose.post).loc[1]
+                    expected_dist = drone_alt - mission.coord0[2]
+                    modeled_dist = drone_alt - ground_alt
+                    logger.info('ground at %.1f mr (%.1f mr), drone alt %.1f mr (%.1f mr)' % (
+                        ground_alt, mission.coord0[2], modeled_dist, expected_dist
+                    ))
 
                 if args.verbosity > 3:
                     post = np.zeros((len(mission.odo.state.keyframes), 7))
@@ -185,9 +189,8 @@ def main():
             drone_alt = -(-results[-1][0].post).loc[1]        # word
             expected_dist = drone_alt - mission.coord0[2]
             modeled_dist = drone_alt - ground_alt
-            fl_used = (mission.cam.cam_mx[0, 0] + mission.cam.cam_mx[1, 1]) / 2
-            logger.info('ground at %.1f m (%.1f m), drone alt %.1f m (%.1f m), est focal length: %.1f px' % (
-                ground_alt, mission.coord0[2], modeled_dist, expected_dist, fl_used * expected_dist / modeled_dist
+            logger.info('ground at %.1f mr (%.1f mr), drone alt %.1f mr (%.1f mr)' % (
+                ground_alt, mission.coord0[2], modeled_dist, expected_dist
             ))
 
         if args.kapture:
@@ -246,6 +249,9 @@ def plot_results(results=None, map3d=None, frame_names=None, meta_names=None, gr
     import matplotlib.pyplot as plt
     from matplotlib import cm
     from mpl_toolkits.mplot3d import Axes3D
+
+    # TODO: remove override
+    nadir_looking = False
 
     if results is None:
         with open(file, 'rb') as fh:
@@ -359,7 +365,7 @@ def plot_results(results=None, map3d=None, frame_names=None, meta_names=None, gr
             t3 = [results[id2idx[int(id)]][2].timestamp() - t0 for id in ba_errs[:, 0]]
 
             axs[1].plot(t3, ba_errs[:, 1], 'C0', label='repr [px]')
-            axs[1].plot(t3, ba_errs[:, 2], 'C1', label='loc [m]')
+            axs[1].plot(t3, ba_errs[:, 2], 'C1', label='loc [mr]')
             axs[1].plot(t3, ba_errs[:, 3], 'C2', label='ori [deg]')
             axs[1].set_title('BA errors')
             axs[1].legend()
@@ -377,22 +383,24 @@ def plot_results(results=None, map3d=None, frame_names=None, meta_names=None, gr
 
     plt.tight_layout()
 
-    x, y, z = np.array([tools.q_times_v(w2b.quat * b2c.quat, pt.pt3d) for pt in map3d]).T
-    if 1:
-        fig, ax = plt.subplots(1, 1)
-        ax.set_aspect('equal')
-        ax.set_xlabel("east", fontsize=12)
-        ax.set_ylabel("north", fontsize=12)
-        line = ax.scatter(x, y, s=20, c=z, marker='o', vmin=-5., vmax=5., cmap=cm.get_cmap('jet'))
-        fig.colorbar(line)
-        tools.hover_annotate(fig, ax, line, [str(v) for v in z])
-    else:
-        fig = plt.figure()
-        ax = fig.add_subplot(111, projection='3d')
-        ax.plot(x, y, z, '.')
-        ax.set_xlabel("east", fontsize=12)
-        ax.set_ylabel("north", fontsize=12)
-        ax.set_zlabel("alt", fontsize=12)
+    if map3d is not None and len(map3d) > 0:
+        x, y, z = np.array([tools.q_times_v(w2b.quat * b2c.quat, pt.pt3d) for pt in map3d]).T
+
+        if 1:
+            fig, ax = plt.subplots(1, 1)
+            ax.set_aspect('equal')
+            ax.set_xlabel("east", fontsize=12)
+            ax.set_ylabel("north", fontsize=12)
+            line = ax.scatter(x, y, s=20, c=z, marker='o', vmin=-5., vmax=100., cmap=cm.get_cmap('jet'))  #, vmax=20.)
+            fig.colorbar(line)
+            tools.hover_annotate(fig, ax, line, [str(v) for v in z])
+        else:
+            fig = plt.figure()
+            ax = fig.add_subplot(111, projection='3d')
+            ax.plot(x, y, z, '.')
+            ax.set_xlabel("east", fontsize=12)
+            ax.set_ylabel("north", fontsize=12)
+            ax.set_zlabel("alt", fontsize=12)
 
     plt.show()
     print('ok: %.1f%%, delta loc std: %.3e' % (

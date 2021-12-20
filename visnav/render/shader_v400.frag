@@ -92,7 +92,7 @@ void main()
                 float b  = model_coefs[3];   	// -0.42, SPPF asymmetry parameter (sometimes g?)
                 float c  = model_coefs[4];      // - another parameter for a more complex SPPF
                 float B_SH0 = model_coefs[5];   // - or B0, amplitude of shadow-hiding opposition effect (shoe)
-                float hs    = model_coefs[6];   // - or h or k, angular half width of shoe
+                float hs    = model_coefs[6];   // - or h or nl, angular half width of shoe
                 float B_CB0 = model_coefs[7];   // - amplitude of coherent backscatter opposition effect (cboe)
                 float hc = model_coefs[8];      // - angular half width of cboe
                 float mode = model_coefs[9];	 // - extra mode selection: first bit for usage of roughness correction term K

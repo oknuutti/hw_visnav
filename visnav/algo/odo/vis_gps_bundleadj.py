@@ -16,7 +16,7 @@ from scipy.optimize import least_squares
 
 from visnav.algo import tools
 from visnav.algo.odo.base import LogWriter
-
+from visnav.algo.tools import Manifold
 
 GLOBAL_ADJ = 0      # 3: all incl rotation, 2: location and scale, 1: scale only
 FIXED_PITCH_AND_ROLL = 0
@@ -25,13 +25,15 @@ CHECK_JACOBIAN = 0
 ENABLE_DT_ADJ = 0
 USE_WORLD_CAM_FRAME = 0
 USE_OWN_PSEUDO_HUBER_LOSS = 1
+RESTRICT_3D_POINT_Y = False
 
 
 def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, v_pts2d: np.ndarray,
-                       cam_idxs: np.ndarray, pt3d_idxs: np.ndarray, K: np.ndarray, px_err_sd: np.ndarray,
-                       meas_r: np.ndarray, meas_aa: np.ndarray, t_off: np.ndarray, meas_idxs: np.ndarray,
-                       loc_err_sd: float, ori_err_sd: float, dtype=np.float64, px_err_weight=1,
-                       log_writer=None, max_nfev=None, skip_pose_n=1, poses_only=False, huber_coef=False):
+                       cam_idxs: np.ndarray, pt3d_idxs: np.ndarray, K: np.ndarray, dist_coefs: np.ndarray,
+                       px_err_sd: np.ndarray, meas_r: np.ndarray, meas_aa: np.ndarray, t_off: np.ndarray,
+                       meas_idxs: np.ndarray, loc_err_sd: float, ori_err_sd: float, dtype=np.float64, px_err_weight=1,
+                       n_cam_intr=0, log_writer=None, max_nfev=None, skip_pose_n=1, poses_only=False, huber_coef=False,
+                       just_return_r_J=False):
     """
     Returns the bundle adjusted parameters, in this case the optimized rotation and translation vectors.
 
@@ -47,7 +49,7 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
     pts2d with shape (n_observations, 2)
             contains measured 2-D coordinates of points projected on images in each observations.
 
-    cam_idxs with shape (n_observations,)
+    pose_idxs with shape (n_observations,)
             contains indices of cameras (from 0 to n_cameras - 1) involved in each observation.
 
     pt3d_idxs with shape (n_observations,)
@@ -57,7 +59,7 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
     assert len(poses.shape) == 2 and poses.shape[1] == 6, 'wrong shape poses: %s' % (poses.shape,)
     assert len(pts3d.shape) == 2 and pts3d.shape[1] == 3, 'wrong shape pts3d: %s' % (pts3d.shape,)
     assert len(pts2d.shape) == 2 and pts2d.shape[1] == 2, 'wrong shape pts2d: %s' % (pts2d.shape,)
-    assert len(cam_idxs.shape) == 1, 'wrong shape cam_idxs: %s' % (cam_idxs.shape,)
+    assert len(cam_idxs.shape) == 1, 'wrong shape pose_idxs: %s' % (cam_idxs.shape,)
     assert len(pt3d_idxs.shape) == 1, 'wrong shape pt3d_idxs: %s' % (pt3d_idxs.shape,)
     assert K.shape == (3, 3), 'wrong shape K: %s' % (K.shape,)
 
@@ -65,7 +67,11 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
 
     n_cams = poses.shape[0]
     n_pts = pts3d.shape[0]
-    A = _bundle_adjustment_sparsity(n_cams, n_pts, cam_idxs, pt3d_idxs, meas_idxs, poses_only)   # n_cams-a or n_cams?
+    n_dist = 0
+    if dist_coefs is not None:
+        n_dist = np.where(np.array(dist_coefs) != 0)[0][-1] + 1
+
+    A = _bundle_adjustment_sparsity(n_cams, n_pts, n_dist, n_cam_intr, cam_idxs, pt3d_idxs, meas_idxs, poses_only)   # n_cams-a or n_cams?
     if skip_pose_n > 0:
         A = A[:, skip_pose_n * 6:]
 
@@ -86,6 +92,13 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
     if len(meas_idxs) > 1 and GLOBAL_ADJ:
         x0.append(np.array([0] * (7 if GLOBAL_ADJ > 2 else 4)))
 
+    if n_dist > 0:
+        x0.append(dist_coefs[:n_dist])
+
+    if n_cam_intr > 0:
+        x0.append(([K[0, 0] + K[1, 1]] if n_cam_intr != 2 else [])
+                  + ([K[0, 2], K[1, 2]] if n_cam_intr > 1 else []))
+
     x0 = np.hstack(x0)
     I = np.concatenate((
         np.stack((np.ones((len(poses) - skip_pose_n, 3), dtype=bool),
@@ -98,9 +111,9 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
     m1, m2, m3 = cam_idxs.size * 2, meas_idxs.size * 3, meas_idxs.size * 3
     if isinstance(huber_coef, (tuple, list)):
         huber_coef = np.array([huber_coef[0]] * m1 + [huber_coef[1]] * m2 + [huber_coef[2]] * m3, dtype=dtype)
-    weight = 1 if 0 else np.array([px_err_weight] * m1
-                                  + [(m1 / m2) if m2 else 0] * m2
-                                  + [(m1 / m3) if m3 else 0] * m3, dtype=dtype)
+    weight = 1 if 0 else np.array([px_err_weight * (m1 + m2) / m1] * m1
+                                  + [((m1 + m2) / m2) if m2 else 0] * m2
+                                  + [((m1 + m2) / m3) if m3 else 0] * m3, dtype=dtype)
 
     orig_dtype = pts2d.dtype
     if dtype != orig_dtype:
@@ -108,19 +121,20 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
             lambda x: x.astype(dtype), (pose0, fixed_pt3d, pts2d, v_pts2d, K, px_err_sd, meas_r, meas_aa))
 
     if 0:
-        err = _costfun(x0, pose0, fixed_pt3d, n_cams, n_pts, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K, px_err_sd,
-                       meas_r, meas_aa, meas_idxs, loc_err_sd, ori_err_sd, huber_coef)
+        err = _costfun(x0, pose0, fixed_pt3d, n_cams, n_pts, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K, dist_coefs,
+                       px_err_sd, meas_r, meas_aa, meas_idxs, loc_err_sd, ori_err_sd, huber_coef)
         print('ERR: %.4e' % (np.sum(err**2)/2))
-    if CHECK_JACOBIAN and n_cams >= 6:
+    if CHECK_JACOBIAN and n_cams >= 6 and n_dist > 0:
         if 1:
-            jac = _jacobian(x0, pose0, fixed_pt3d, n_cams, n_pts, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K, px_err_sd,
-                            meas_r, meas_aa, meas_idxs, loc_err_sd, ori_err_sd, huber_coef).toarray()
-            jac_ = numerical_jacobian(lambda x: _costfun(x, pose0, fixed_pt3d, n_cams, n_pts, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K, px_err_sd,
-                                      meas_r, meas_aa, meas_idxs, loc_err_sd, ori_err_sd, huber_coef), x0, 1e-4)
+            jac = _jacobian(x0, pose0, fixed_pt3d, n_cams, n_pts, n_dist, n_cam_intr, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K,
+                            px_err_sd, meas_r, meas_aa, meas_idxs, loc_err_sd, ori_err_sd, huber_coef).toarray()
+            jac_ = numerical_jacobian(lambda x: _costfun(x, pose0, fixed_pt3d, n_cams, n_pts, n_dist, n_cam_intr, cam_idxs, pt3d_idxs,
+                                                         pts2d, v_pts2d, K, px_err_sd, meas_r, meas_aa,
+                                                         meas_idxs, loc_err_sd, ori_err_sd, huber_coef), x0, 1e-4)
         else:
-            jac = _rot_pt_jac(x0, pose0, fixed_pt3d, n_cams, n_pts, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K, px_err_sd,
+            jac = _rot_pt_jac(x0, pose0, fixed_pt3d, n_cams, n_pts, n_dist, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K, px_err_sd,
                             meas_r, meas_aa, meas_idxs, loc_err_sd, ori_err_sd, huber_coef)
-            jac_ = numerical_jacobian(lambda x: _rotated_points(x, pose0, fixed_pt3d, n_cams, n_pts, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K, px_err_sd,
+            jac_ = numerical_jacobian(lambda x: _rotated_points(x, pose0, fixed_pt3d, n_cams, n_pts, n_dist, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K, px_err_sd,
                                       meas_r, meas_aa, meas_idxs, loc_err_sd, ori_err_sd, huber_coef), x0, 1e-4)
 
         import matplotlib.pyplot as plt
@@ -133,23 +147,23 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
 
     @lru_cache(1)
     def _cfun(x):
-        return _costfun(x, pose0, fixed_pt3d, n_cams, n_pts, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K, px_err_sd,
-                        meas_r, meas_aa, meas_idxs, loc_err_sd, ori_err_sd, huber_coef)
+        return _costfun(x, pose0, fixed_pt3d, n_cams, n_pts, n_dist, n_cam_intr, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K,
+                        px_err_sd, meas_r, meas_aa, meas_idxs, loc_err_sd, ori_err_sd, huber_coef)
 
-    def cfun(x):
+    def cfun(x, use_own_pseudo_huber_loss=USE_OWN_PSEUDO_HUBER_LOSS):
         err = _cfun(tuple(x))
-        if USE_OWN_PSEUDO_HUBER_LOSS:
+        if use_own_pseudo_huber_loss:
             sqrt_phl_err = np.sqrt(weight * tools.pseudo_huber_loss(err, huber_coef)) if huber_coef is not False else err
         else:
             sqrt_phl_err = err
         return sqrt_phl_err
 
-    def jac(x):
+    def jac(x, use_own_pseudo_huber_loss=USE_OWN_PSEUDO_HUBER_LOSS):
         # apply pseudo huber loss derivative
-        J = _jacobian(x, pose0, fixed_pt3d, n_cams, n_pts, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K, px_err_sd,
-                      meas_r, meas_aa, meas_idxs, loc_err_sd, ori_err_sd, huber_coef)
+        J = _jacobian(x, pose0, fixed_pt3d, n_cams, n_pts, n_dist, n_cam_intr, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K,
+                      px_err_sd, meas_r, meas_aa, meas_idxs, loc_err_sd, ori_err_sd, huber_coef)
 
-        if USE_OWN_PSEUDO_HUBER_LOSS:
+        if use_own_pseudo_huber_loss:
             ## derivative of pseudo huber loss can be applied afterwards by multiplying with the err derivative
             # NOTE: need extra (.)**0.5 term as least_squares applies extra (.)**2 on top of our cost function
             # - d (weight * phl(e))**0.5/dksi = d (weight * phl(e))**0.5/d phl(e) * d phl(e)/de * de/dksi
@@ -163,6 +177,11 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
 
         return J
 
+    if just_return_r_J:
+        return cfun(x0, True), jac(x0, True)
+
+    print('initial mean residual: %.5f' % (np.mean(cfun(x0)[:-m3]),))
+
     tmp = sys.stdout
     sys.stdout = log_writer or LogWriter()
     res = least_squares(cfun, x0, verbose=2, ftol=1e-5, xtol=1e-5, gtol=1e-8, method='trf',
@@ -171,18 +190,20 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
                         # for some reason doesnt work as well as own huber loss
                         # tr_solver='lsmr',
                         loss='linear' if USE_OWN_PSEUDO_HUBER_LOSS else 'huber',  # f_scale=1.0,  #huber_coef,
-                        # args=(pose0, fixed_pt3d, n_cams, n_pts, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K, px_err_sd,
+                        # args=(pose0, fixed_pt3d, n_cams, n_pts, pose_idxs, pt3d_idxs, pts2d, v_pts2d, K, px_err_sd,
                         #       meas_r, meas_aa, meas_idxs, loc_err_sd, ori_err_sd, huber_coef),
                         max_nfev=max_nfev)
     sys.stdout = tmp
 
     assert isinstance(res.x, Manifold), 'somehow manifold lost during optimization'
-    new_poses, new_pts3d, new_t_off = _unpack(res.x.to_array(), n_cams - skip_pose_n,
-                                              0 if poses_only else n_pts, meas_idxs.size,
-                                              meas_r0=None if len(meas_idxs) < 2 else meas_r[0])
+    new_poses, new_pts3d, new_dist, new_cam_intr, new_t_off = _unpack(res.x.to_array(), n_cams - skip_pose_n,
+                                                        0 if poses_only else n_pts, n_dist, n_cam_intr, meas_idxs.size,
+                                                        meas_r0=None if len(meas_idxs) < 2 else meas_r[0])
 
+    print('finished mean residual: %.5f' % (np.mean(res.fun[:-m3]),))
     # return also per frame errors (median repr err, meas loc and ori errs)
     # so that can follow the errors and notice/debug problems
+    res.fun = res.fun / np.sqrt(weight)
     repr_err = np.linalg.norm(res.fun[:cam_idxs.size * 2].reshape((-1, 2)), axis=1)
     with warnings.catch_warnings():
         warnings.filterwarnings(action='ignore', message='Mean of empty slice')
@@ -200,10 +221,10 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
         new_t_off = new_t_off.astype(orig_dtype)
         errs = errs.astype(orig_dtype)
 
-    return new_poses, new_pts3d, new_t_off, errs
+    return new_poses, new_pts3d, new_dist, new_cam_intr, new_t_off, errs
 
 
-def _costfun(params, pose0, fixed_pt3d, n_cams, n_pts, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K, px_err_sd,
+def _costfun(params, pose0, fixed_pt3d, n_cams, n_pts, n_dist, n_cam_intr, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K, px_err_sd,
              meas_r, meas_aa, meas_idxs, loc_err_sd, ori_err_sd, huber_coef):
     """
     Compute residuals.
@@ -213,11 +234,18 @@ def _costfun(params, pose0, fixed_pt3d, n_cams, n_pts, cam_idxs, pt3d_idxs, pts2
         params = np.array(params)
 
     params = np.hstack((pose0, params))
-    poses, pts3d, t_off = _unpack(params, n_cams, n_pts if len(fixed_pt3d) == 0 else 0, meas_idxs.size,
-                                  meas_r0=None if len(meas_idxs) < 2 else meas_r[0])
+    poses, pts3d, dist_coefs, cam_intr, t_off = _unpack(params, n_cams, n_pts if len(fixed_pt3d) == 0 else 0, n_dist,
+                                                        n_cam_intr, meas_idxs.size,
+                                                        meas_r0=None if len(meas_idxs) < 2 else meas_r[0])
+
+    if cam_intr is not None:
+        if len(cam_intr) != 2:
+            K[0, 0] = K[1, 1] = cam_intr[0]
+        if len(cam_intr) > 1:
+            K[0, 2], K[1, 2] = cam_intr[-2:]
 
     points_3d = fixed_pt3d if len(pts3d) == 0 else pts3d
-    points_proj = _project(points_3d[pt3d_idxs], poses[cam_idxs], K)
+    points_proj = _project(points_3d[pt3d_idxs], poses[cam_idxs], K, dist_coefs)
 
     if t_off is not None and len(t_off) > 0:
         d_pts2d = v_pts2d * t_off[cam_idxs]  # for 1st order approximation of where the 2d points would when meas_r recorded
@@ -230,26 +258,26 @@ def _costfun(params, pose0, fixed_pt3d, n_cams, n_pts, cam_idxs, pt3d_idxs, pts2
     #     loc_off = params[d-4:d-1]
     #     scale_off = params[d-1]
     #
-    #     meas_r = _rotate(meas_r - meas_r[0], rot_off) * math.exp(scale_off) + meas_r[0] + loc_off
-    #     meas_aa = _rotate_rotations(np.repeat(rot_off, len(meas_aa), axis=0), meas_aa)
+    #     meas_r = tools.rotate_points_aa(meas_r - meas_r[0], rot_off) * math.exp(scale_off) + meas_r[0] + loc_off
+    #     meas_aa = tools.rotate_rotations_aa(np.repeat(rot_off, len(meas_aa), axis=0), meas_aa)
 
     px_err = (((pts2d + d_pts2d) - points_proj) / px_err_sd[:, None]).ravel()
 
     if USE_WORLD_CAM_FRAME:
         loc_err = ((meas_r - poses[meas_idxs, 3:]) / loc_err_sd).ravel()
-        rot_err_aa = _rotate_rotations(meas_aa, -poses[meas_idxs, :3])
+        rot_err_aa = tools.rotate_rotations_aa(meas_aa, -poses[meas_idxs, :3])
     else:
         cam_rot_wf = -poses[meas_idxs, :3]
-        cam_loc_wf = _rotate(-poses[meas_idxs, 3:6], cam_rot_wf)
+        cam_loc_wf = tools.rotate_points_aa(-poses[meas_idxs, 3:6], cam_rot_wf)
         loc_err = ((meas_r - cam_loc_wf) / loc_err_sd).ravel()
         if 0:
             # TODO: rot_err_aa can be 2*pi shifted, what to do?
-            rot_err_aa = _rotate_rotations(meas_aa, -cam_rot_wf)
+            rot_err_aa = tools.rotate_rotations_aa(meas_aa, -cam_rot_wf)
         else:
             Rm = quaternion.as_rotation_matrix(quaternion.from_rotation_vector(meas_aa))
             Rw = quaternion.as_rotation_matrix(quaternion.from_rotation_vector(poses[meas_idxs, :3]))
             E = np.matmul(Rm, Rw)
-            rot_err_aa = logR(E)
+            rot_err_aa = tools.logR(E)
 
     ori_err = (rot_err_aa / ori_err_sd).ravel()
 
@@ -260,12 +288,14 @@ def _costfun(params, pose0, fixed_pt3d, n_cams, n_pts, cam_idxs, pt3d_idxs, pts2
     return err
 
 
-def _bundle_adjustment_sparsity(n_cams, n_pts, cam_idxs, pt3d_idxs, meas_idxs, poses_only):
+def _bundle_adjustment_sparsity(n_cams, n_pts, n_dist, n_cam_intr, cam_idxs, pt3d_idxs, meas_idxs, poses_only):
     # error term count  (first 2d reprojection errors, then 3d gps measurement error, then 3d orientation meas err)
     m1, m2, m3 = cam_idxs.size * 2, meas_idxs.size * 3, meas_idxs.size * 3
     m = m1 + m2 + m3
 
-    # parameter count (6d poses, n x 3d keypoint locations, 1d time offset)
+    # TODO: take into account n_dist, n_cam_intr
+
+    # parameter count (6d poses, np x 3d keypoint locations, 1d time offset)
     n1 = n_cams * 6
     n2 = (0 if poses_only else n_pts * 3)
     n3 = meas_idxs.size * (1 if ENABLE_DT_ADJ else 0)
@@ -341,8 +371,8 @@ def _bundle_adjustment_sparsity(n_cams, n_pts, cam_idxs, pt3d_idxs, meas_idxs, p
     return A
 
 
-def _jacobian(params, pose0, fixed_pt3d, n_cams, n_pts, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K, px_err_sd,
-              meas_r, meas_aa, meas_idxs, loc_err_sd, ori_err_sd, huber_coef):
+def _jacobian(params, pose0, fixed_pt3d, n_cams, n_pts, n_dist, n_cam_intr, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K,
+              px_err_sd, meas_r, meas_aa, meas_idxs, loc_err_sd, ori_err_sd, huber_coef):
     """
     cost function jacobian, from https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6891346/
     """
@@ -350,25 +380,28 @@ def _jacobian(params, pose0, fixed_pt3d, n_cams, n_pts, cam_idxs, pt3d_idxs, pts
         'analytical jacobian does not support GLOBAL_ADJ or ENABLE_DT_ADJ'
 
     params = np.hstack((pose0, params))
-    poses, pts3d, t_off = _unpack(params, n_cams, n_pts if len(fixed_pt3d) == 0 else 0, meas_idxs.size,
-                                  meas_r0=None if len(meas_idxs) < 2 else meas_r[0])
+    poses, pts3d, dist_coefs, cam_intr, t_off = _unpack(params, n_cams, n_pts if len(fixed_pt3d) == 0 else 0,
+                                                        n_dist, n_cam_intr, meas_idxs.size,
+                                                        meas_r0=None if len(meas_idxs) < 2 else meas_r[0])
 
     poses_only = len(fixed_pt3d) > 0
     points_3d = fixed_pt3d if poses_only else pts3d
-    points_3d_rot = _rotate(points_3d[pt3d_idxs], poses[cam_idxs, :3])
+    points_3d_rot = tools.rotate_points_aa(points_3d[pt3d_idxs], poses[cam_idxs, :3])
     points_3d_cf = points_3d_rot + poses[cam_idxs, 3:6]
 
     # error term count  (first 2d reprojection errors, then 3d gps measurement error, then 3d orientation meas err)
     m1, m2, m3 = cam_idxs.size * 2, meas_idxs.size * 3, meas_idxs.size * 3
     m = m1 + m2 + m3
 
-    # parameter count (6d poses, n x 3d keypoint locations, 1d time offset)
+    # parameter count (6d poses, np x 3d keypoint locations, 1d time offset)
     n1 = n_cams * 6
     n2 = (0 if poses_only else n_pts * 3)
-    n = n1 + n2
+    n3 = (0 if dist_coefs is None else 2)
+    n4 = (0 if cam_intr is None else len(cam_intr))
+    n = n1 + n2 + n3 + n4
     # n3 = meas_idxs.size * (1 if ENABLE_DT_ADJ else 0)
     # n4 = 0 if meas_idxs.size < 2 or not GLOBAL_ADJ else (7 if GLOBAL_ADJ > 2 else 4)
-    # n = n1 + n2 + n3 + n4
+    # np = n1 + n2 + n3 + n4
 
     J = lil_matrix((m, n), dtype=np.float32)
     i = np.arange(cam_idxs.size)
@@ -379,61 +412,178 @@ def _jacobian(params, pose0, fixed_pt3d, n_cams, n_pts, cam_idxs, pt3d_idxs, pts
     #    then translation in rotated coordinates
     #  - https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6891346/  equation (11)
     #  - also https://ingmec.ual.es/~jlblanco/papers/jlblanco2010geometry3D_techrep.pdf, section 10.3.5, eq 10.23
+    #  - U': points in distorted camera coords, Uc: points in undistorted camera coords, U: points in world coords
     #  - ksi: first three location, second three rotation
-    #  - de/dksi = de/dU' * dU'/dksi
-    #  - de/dU' = -[[fx/Zc, 0, -fx*Xc/Zc**2],
-    #               [0, fy/Zc, -fy*Yc/Zc**2]]
-    #  - dU'/dw = [I3 | -[U']^] = [[1, 0, 0, 0, Zr, -Yr],
+    #  - de/dksi = de/dU' * dU'/dUc * dUc/dksi
+    #  - de/dU' = -[[fx, 0],
+    #               [0, fy]]
+    #
+    #  Using SymPy diff on U'(Uc) = Matrix([[Xc/Zc], [Yc/Zc]]) * (1 + k1*R**2 + k2*R**4):
+    #  - dU'/dUc = [[   (R2*k1 + R2**2*k2 + Xn**2*(4*R2*k2 + 2*k1) + 1)/Zc,
+    #                   Xn*Yn*(4*R2*k2 + 2*k1)/Zc,
+    #                   -Xn*(R2*k1 + R2**2*k2 + (Xn**2 + Yn**2)*(4*R2*k2 + 2*k1) + 1)/Zc
+    #               ],
+    #               [   Xn*Yn*(4*R2*k2 + 2*k1)/Zc,
+    #                   (R2*k1 + R2**2*k2 + Yn**2*(4*R2*k2 + 2*k1) + 1)/Zc,
+    #                   -Yn*(R2*k1 + R2**2*k2 + (Xn**2 + Yn**2)*(4*R2*k2 + 2*k1) + 1)/Zc
+    #               ]],
+    #               where R2 = Xn**2 + Yn**2, Xn=Xc/Zc, Yn=Yc/Zc
+    #
+    #  Alternatively, if k1 and k2 are zero because undistorted keypoint measures are used:
+    #  - dU'/dUc = [[1/Zc, 0, -Xc/Zc**2],
+    #               [0, 1/Zc, -Yc/Zc**2]]
+    #
+    #  - dUc/dw = [I3 | -[Uc]^] = [[1, 0, 0, 0, Zr, -Yr],
     #                              [0, 1, 0, -Zr, 0, Xr],
     #                              [0, 0, 1, Yr, -Xr, 0]]
+    #
+    #  if k1 and k2 are zero:
     #  - -[[fx/Zc, 0, -Xc*fx/Zc**2, | -Xc*Yr*fx/Zc**2, Xc*Xr*fx/Zc**2 + fx*Zr/Zc, -Yr*fx/Zc],
     #      [0, fy/Zc, -Yc*fy/Zc**2, | -Yc*Yr*fy/Zc**2 - fy*Zr/Zc, Xr*Yc*fy/Zc**2, Xr*fy/Zc]]    / px_err_sd
+    #
+    #  else:
+    #  - [[-fx*(R2*k1 + R4*k2 + Xn**2*(4*R2*k2 + 2*k1) + 1)/Zc,
+    #      -Xn*Yn*fx*(4*R2*k2 + 2*k1)/Zc,
+    #       Xn*fx*(R2*k1 + R4*k2 + (Xn**2 + Yn**2)*(4*R2*k2 + 2*k1) + 1)/Zc,
+    #        |
+    #       Xn*fx*(Yn*Zr*(4*R2*k2 + 2*k1) + Yr*(R2*k1 + R4*k2 + (Xn**2 + Yn**2)*(4*R2*k2 + 2*k1) + 1))/Zc,
+    #      -fx*(Xn*Xr*(R2*k1 + R4*k2 + (Xn**2 + Yn**2)*(4*R2*k2 + 2*k1) + 1) + Zr*(R2*k1 + R4*k2 + Xn**2*(4*R2*k2 + 2*k1) + 1))/Zc,
+    #       fx*(-Xn*Xr*Yn*(4*R2*k2 + 2*k1) + Yr*(R2*k1 + R4*k2 + Xn**2*(4*R2*k2 + 2*k1) + 1))/Zc
+    #     ],
+    #     [-fy*Xn*Yn*(4*R2*k2 + 2*k1)/Zc,
+    #      -fy*(R2*k1 + R4*k2 + Yn**2*(4*R2*k2 + 2*k1) + 1)/Zc,
+    #       fy*Yn*(R2*k1 + R4*k2 + (Xn**2 + Yn**2)*(4*R2*k2 + 2*k1) + 1)/Zc,
+    #       |
+    #       fy*(Yn*Yr*(R2*k1 + R4*k2 + (Xn**2 + Yn**2)*(4*R2*k2 + 2*k1) + 1) + Zr*(R2*k1 + R4*k2 + Yn**2*(4*R2*k2 + 2*k1) + 1))/Zc,
+    #      -Yn*fy*(Xn*Zr*(4*R2*k2 + 2*k1) + Xr*(R2*k1 + R4*k2 + (Xn**2 + Yn**2)*(4*R2*k2 + 2*k1) + 1))/Zc,
+    #       fy*(Xn*Yn*Yr*(4*R2*k2 + 2*k1) - Xr*(R2*k1 + R4*k2 + Yn**2*(4*R2*k2 + 2*k1) + 1))/Zc
+    #     ]]
 
-    fx, fy = K[0, 0], K[1, 1]
+    # TODO: debug y-px coord at J
+
+    if cam_intr is None or len(cam_intr) == 2:
+        fx, fy = K[0, 0], K[1, 1]
+    else:
+        fx, fy = [cam_intr[0]] * 2
+
     Xr, Yr, Zr = points_3d_rot[:, 0], points_3d_rot[:, 1], points_3d_rot[:, 2]
-    Xc, Yc, iZc = points_3d_cf[:, 0], points_3d_cf[:, 1], 1 / points_3d_cf[:, 2]
-    px_err_sd = px_err_sd.flatten()
+    iZc = 1 / points_3d_cf[:, 2]
+    Xn, Yn = points_3d_cf[:, 0] * iZc, points_3d_cf[:, 1] * iZc
+    iZciSD = iZc / px_err_sd.flatten()
 
-    # camera location
-    J[2 * i + 0, cam_idxs*6 + 3] = -(fx*iZc) / px_err_sd
-    J[2 * i + 0, cam_idxs*6 + 5] = -(-Xc*fx*iZc**2) / px_err_sd
-    J[2 * i + 1, cam_idxs*6 + 4] = -(fy*iZc) / px_err_sd
-    J[2 * i + 1, cam_idxs*6 + 5] = -(-Yc*fy*iZc**2) / px_err_sd
+    if dist_coefs is None:
+        # camera location
+        J[2 * i + 0, cam_idxs*6 + 3] = -fx*iZciSD
+        J[2 * i + 0, cam_idxs*6 + 5] = fx*Xn*iZciSD
+        J[2 * i + 1, cam_idxs*6 + 4] = -fy*iZciSD
+        J[2 * i + 1, cam_idxs*6 + 5] = fy*Yn*iZciSD
 
-    # camera rotation
-    J[2 * i + 0, cam_idxs*6 + 0] = -(-Xc*Yr*fx*iZc**2) / px_err_sd
-    J[2 * i + 0, cam_idxs*6 + 1] = -(Xc*Xr*fx*iZc**2 + fx*Zr*iZc) / px_err_sd
-    J[2 * i + 0, cam_idxs*6 + 2] = -(-Yr*fx*iZc) / px_err_sd
-    J[2 * i + 1, cam_idxs*6 + 0] = -(-Yc*Yr*fy*iZc**2 - fy*Zr*iZc) / px_err_sd
-    J[2 * i + 1, cam_idxs*6 + 1] = -(Xr*Yc*fy*iZc**2) / px_err_sd
-    J[2 * i + 1, cam_idxs*6 + 2] = -(Xr*fy*iZc) / px_err_sd
+        # camera rotation
+        J[2 * i + 0, cam_idxs*6 + 0] = fx*Xn*Yr*iZciSD
+        J[2 * i + 0, cam_idxs*6 + 1] = -fx*(Xn*Xr + Zr)*iZciSD
+        J[2 * i + 0, cam_idxs*6 + 2] = fx*Yr*iZciSD
+        J[2 * i + 1, cam_idxs*6 + 0] = fy*(Yn*Yr + Zr)*iZciSD
+        J[2 * i + 1, cam_idxs*6 + 1] = -fy*Yn*Xr*iZciSD
+        J[2 * i + 1, cam_idxs*6 + 2] = -fy*Xr*iZciSD
+    else:
+        k1, k2 = dist_coefs[:2]
+        R2 = Xn**2 + Yn**2
+        R2k1 = R2 * k1
+        R4k2 = R2 ** 2 * k2
+        alpha_xy = Xn * Yn * (4*R2*k2 + 2*k1)
+        y_gamma_r = Yn * (3*R2k1 + 5*R4k2 + 1)
+        x_gamma_r = Xn * (3*R2k1 + 5*R4k2 + 1)
+        gamma_x = R2k1 + R4k2 + Xn**2*(4*R2*k2 + 2*k1) + 1
+        gamma_y = R2k1 + R4k2 + Yn**2*(4*R2*k2 + 2*k1) + 1
+
+        # camera location
+        J[2 * i + 0, cam_idxs * 6 + 3] = -fx*iZciSD*gamma_x
+        J[2 * i + 0, cam_idxs * 6 + 4] = -fx*iZciSD*alpha_xy
+        J[2 * i + 0, cam_idxs * 6 + 5] =  fx*iZciSD*x_gamma_r
+        J[2 * i + 1, cam_idxs * 6 + 3] = -fy*iZciSD*alpha_xy
+        J[2 * i + 1, cam_idxs * 6 + 4] = -fy*iZciSD*gamma_y
+        J[2 * i + 1, cam_idxs * 6 + 5] =  fy*iZciSD*y_gamma_r
+
+        # camera rotation
+        J[2 * i + 0, cam_idxs * 6 + 0] =  fx*iZciSD*(Zr*alpha_xy + Yr*x_gamma_r)
+        J[2 * i + 0, cam_idxs * 6 + 1] = -fx*iZciSD*(Xr*x_gamma_r + Zr*gamma_x)
+        J[2 * i + 0, cam_idxs * 6 + 2] = -fx*iZciSD*(Xr*alpha_xy - Yr*gamma_x)
+        J[2 * i + 1, cam_idxs * 6 + 0] =  fy*iZciSD*(Yr*y_gamma_r + Zr*gamma_y)
+        J[2 * i + 1, cam_idxs * 6 + 1] = -fy*iZciSD*(Zr*alpha_xy + Xr*y_gamma_r)
+        J[2 * i + 1, cam_idxs * 6 + 2] =  fy*iZciSD*(Yr*alpha_xy - Xr*gamma_y)
 
     # keypoint locations affect reprojection error terms
     ####################################################
-    # similar to above, first separate de/dU => de/dU' * dU'/dU,
-    # first one (de/dU') is [[fx/Z', 0, -fx*X'/Z'**2],
-    #                        [0, fy/Z', -fy*Y'/Z'**2]]
-    # second one (dU'/dU => d/dU (RU + P) = R) is the camera rotation matrix R
-    # => i.e. rotate de/dU' by R^-1
+    # similar to above, first separate de/dU => de/dU' * dU'/dUc * dUc/dU,
+    # first one (de/dU') is -[[fx, 0],
+    #                         [0, fy]]
+    # second one (dU'/dUc) is [[1/Zc, 0, -Xc/Zc**2],
+    #                          [0, 1/Zc, -Yc/Zc**2]]  (or the monstrosity from above if k1 or k2 are non-zero)
+    # third one  (dUc/dU => d/dU (RU + P) = R) is the camera rotation matrix R
+    # => i.e. rotate (de/dU' * dU'/dUc) by R^-1
     if not poses_only:
-        dEu = -np.stack((fx * iZc, np.zeros((len(iZc),)), -fx * Xc * iZc**2), axis=1) / px_err_sd[:, None]
-        dEv = -np.stack((np.zeros((len(iZc),)), fy * iZc, -fy * Yc * iZc**2), axis=1) / px_err_sd[:, None]
-        dEuc = _rotate(dEu, -poses[cam_idxs, :3])
-        dEvc = _rotate(dEv, -poses[cam_idxs, :3])
+        if dist_coefs is None:
+            dEu = -np.stack((fx * np.ones((len(Xn),)), np.zeros((len(Xn),)), -fx * Xn), axis=1) * iZciSD[:, None]
+            dEv = -np.stack((np.zeros((len(Xn),)), fy * np.ones((len(Xn),)), -fy * Yn), axis=1) * iZciSD[:, None]
+        else:
+            dEu = np.zeros((len(Xn), 3))
+            dEv = np.zeros_like(dEu)
+            dEu[:, 0] = -fx*iZciSD*gamma_x
+            dEu[:, 1] = -fx*iZciSD*alpha_xy
+            dEu[:, 2] =  fx*iZciSD*x_gamma_r
+            dEv[:, 0] = -fy*iZciSD*alpha_xy
+            dEv[:, 1] = -fy*iZciSD*gamma_y
+            dEv[:, 2] =  fy*iZciSD*y_gamma_r
+
+        dEuc = tools.rotate_points_aa(dEu, -poses[cam_idxs, :3])
+        dEvc = tools.rotate_points_aa(dEv, -poses[cam_idxs, :3])
         J[2 * i + 0, n1 + pt3d_idxs * 3 + 0] = dEuc[:, 0]
-        J[2 * i + 0, n1 + pt3d_idxs * 3 + 1] = dEuc[:, 1]
+        J[2 * i + 0, n1 + pt3d_idxs * 3 + 1] = 0 if RESTRICT_3D_POINT_Y else dEuc[:, 1]
         J[2 * i + 0, n1 + pt3d_idxs * 3 + 2] = dEuc[:, 2]
         J[2 * i + 1, n1 + pt3d_idxs * 3 + 0] = dEvc[:, 0]
-        J[2 * i + 1, n1 + pt3d_idxs * 3 + 1] = dEvc[:, 1]
+        J[2 * i + 1, n1 + pt3d_idxs * 3 + 1] = 0 if RESTRICT_3D_POINT_Y else dEvc[:, 1]
         J[2 * i + 1, n1 + pt3d_idxs * 3 + 2] = dEvc[:, 2]
+
+    # distortion coefficients (D) affect reprojection error terms
+    ####################################################
+    # similar to above, first separate de/dD => de/dU' * dU'/dD
+    # first one (de/dU') is -[[fx, 0],
+    #                         [0, fy]]
+    #
+    # U'(Uc) = [[Xc/Zc], [Yc/Zc]] * (1 + k1*R2 + k2*R4), so:
+    # second one (dU'/dD) is [[Xc/Zc*R2, Xc/Zc*R4],
+    #                         [Yc/Zc*R2, Yc/Zc*R4]]
+    #
+    # total:
+    # de/dU' = [[-fx*Xc/Zc*R**2, -fx*Xc/Zc*R**4],
+    #           [-fy*Yc/Zc*R**2, -fy*Yc/Zc*R**4]]
+    #
+    if dist_coefs is not None:
+        J[2 * i + 0, n1 + n2 + 0] = tmp = -fx*Xn*R2
+        J[2 * i + 0, n1 + n2 + 1] = tmp * R2
+        J[2 * i + 1, n1 + n2 + 0] = tmp = -fy*Yn*R2
+        J[2 * i + 1, n1 + n2 + 1] = tmp * R2
+
+    # camera intrinsics (I=[fl, cx, cy]) affect reprojection error terms
+    # [[e_u], [e_v]] = [[u - fl*Xn - cx],
+    #                   [v - fl*Yn - cy]]
+    # de/dI = [[-Xn, -1, 0],
+    #          [-Yn, 0, -1]]
+    if n_cam_intr > 0:
+        if n_cam_intr != 2:
+            J[2 * i + 0, n1 + n2 + n3 + 0] = -Xn
+            J[2 * i + 1, n1 + n2 + n3 + 0] = -Yn
+        if n_cam_intr > 1:
+            J[2 * i + 0, n1 + n2 + n3 + (1 if n_cam_intr != 2 else 0)] = -1
+            J[2 * i + 1, n1 + n2 + n3 + (2 if n_cam_intr != 2 else 1)] = -1
 
     # # time offsets affect reprojection error terms (possible to do in a better way?)
     # if ENABLE_DT_ADJ:
     #     p_offset = n1 + n2
-    #     cam2meas = np.ones((np.max(cam_idxs)+1,), dtype=np.int) * -1
+    #     cam2meas = np.ones((np.max(pose_idxs)+1,), dtype=np.int) * -1
     #     cam2meas[meas_idxs] = np.arange(meas_idxs.size)
-    #     i = np.where(cam2meas[cam_idxs] >= 0)[0]
-    #     mc_idxs = cam2meas[cam_idxs[i]]
+    #     i = np.where(cam2meas[pose_idxs] >= 0)[0]
+    #     mc_idxs = cam2meas[pose_idxs[i]]
     #     A[2 * i, p_offset + mc_idxs] = 1
     #     A[2 * i + 1, p_offset + mc_idxs] = 1
 
@@ -484,10 +634,10 @@ def _jacobian(params, pose0, fixed_pt3d, n_cams, n_pts, cam_idxs, pt3d_idxs, pts
     Rm = quaternion.as_rotation_matrix(quaternion.from_rotation_vector(meas_aa))
     Rw0 = quaternion.as_rotation_matrix(quaternion.from_rotation_vector(poses[meas_idxs, :3]))
     for u in range(len(meas_idxs)):
-        D1 = dlogR_dR(Rm[u].dot(Rw0[u]))
-        D2 = np.vstack((-Rm[u].dot(wedge(Rw0[u, :, 0])),
-                        -Rm[u].dot(wedge(Rw0[u, :, 1])),
-                        -Rm[u].dot(wedge(Rw0[u, :, 2]))))
+        D1 = tools.dlogR_dR(Rm[u].dot(Rw0[u]))
+        D2 = np.vstack((-Rm[u].dot(tools.wedge(Rw0[u, :, 0])),
+                        -Rm[u].dot(tools.wedge(Rw0[u, :, 1])),
+                        -Rm[u].dot(tools.wedge(Rw0[u, :, 2]))))
         e_off = m1 + m2 + 3 * u
         p_off = meas_idxs[u] * 6
         J[e_off:e_off + 3, p_off:p_off + 3] = D1.dot(D2) / ori_err_sd
@@ -549,7 +699,29 @@ def numerical_jacobian(fun, x0, eps=1e-4):
     return J
 
 
-def _rotated_points(params, pose0, fixed_pt3d, n_cams, n_pts, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K, px_err_sd,
+def _solve_de_dksi():
+    from sympy import symbols, Matrix, diff
+
+    fx, fy, k1, k2, Xc, Yc, Zc, Xr, Yr, Zr, R = symbols('fx fy k1 k2 Xc Yc Zc Xr Yr Zr R')
+    R = (Xc**2/Zc**2 + Yc**2/Zc**2) ** (1/2)
+
+    de_dU = -Matrix([[fx, 0],
+                     [0, fy]])
+    # dU_dUc = diff(Matrix([[Xc/Zc], [Yc/Zc]]) * (1 + k1 * R**2 + k2 * R**4), Matrix([[Xc, Yc, Zc]]))
+    dU_dUc = Matrix([[1/Zc * (2*Xc**2/Zc**2 * (k1 + 2*k2*R**2) + 1 + k1 * R**2 + k2 * R**4),
+                      2*Xc/Zc**3 * (k1*Yc + 2*k2*Yc*R**2),
+                      -Xc/Zc**2 * (1 + 3*k1*R**2 + 5*k2*R**4)],
+                     [1/Zc * (2*Yc**2/Zc**2 * (k1 + 2*k2*R**2) + 1 + k1 * R**2 + k2 * R**4),
+                      2*Yc/Zc**3 * (k1*Xc + 2*k2*Xc*R**2),
+                      -Yc/Zc**2 * (1 + 3*k1*R**2 + 5*k2*R**4)]])
+    dUc_dksi = Matrix([[1, 0, 0, 0, Zr, -Yr],
+                       [0, 1, 0, -Zr, 0, Xr],
+                       [0, 0, 1, Yr, -Xr, 0]])
+    de_dksi = de_dU * dU_dUc * dUc_dksi
+    return de_dksi
+
+
+def _rotated_points(params, pose0, fixed_pt3d, n_cams, n_pts, n_dist, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K, px_err_sd,
                     meas_r, meas_aa, meas_idxs, loc_err_sd, ori_err_sd, huber_coef):
     """
     Compute residuals.
@@ -559,24 +731,26 @@ def _rotated_points(params, pose0, fixed_pt3d, n_cams, n_pts, cam_idxs, pt3d_idx
         params = np.array(params)
 
     params = np.hstack((pose0, params))
-    poses, pts3d, t_off = _unpack(params, n_cams, n_pts if len(fixed_pt3d) == 0 else 0, meas_idxs.size,
-                                  meas_r0=None if len(meas_idxs) < 2 else meas_r[0])
+    poses, pts3d, dist_coefs, t_off = _unpack(params, n_cams, n_pts if len(fixed_pt3d) == 0 else 0, n_dist,
+                                              meas_idxs.size, meas_r0=None if len(meas_idxs) < 2 else meas_r[0])
 
     points_3d = fixed_pt3d if len(pts3d) == 0 else pts3d
-    points_3d_cf = _rotate(points_3d[pt3d_idxs], poses[cam_idxs, :3]) + poses[cam_idxs, 3:6]
+    points_3d_cf = tools.rotate_points_aa(points_3d[pt3d_idxs], poses[cam_idxs, :3]) + poses[cam_idxs, 3:6]
     return points_3d_cf.flatten()
 
 
-def _rot_pt_jac(params, pose0, fixed_pt3d, n_cams, n_pts, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K, px_err_sd,
+def _rot_pt_jac(params, pose0, fixed_pt3d, n_cams, n_pts, n_dist, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K, px_err_sd,
                 meas_r, meas_aa, meas_idxs, loc_err_sd, ori_err_sd, huber_coef):
 
     params = np.hstack((pose0, params))
-    poses, pts3d, t_off = _unpack(params, n_cams, n_pts if len(fixed_pt3d) == 0 else 0, meas_idxs.size,
-                                  meas_r0=None if len(meas_idxs) < 2 else meas_r[0])
+    poses, pts3d, dist_coefs, t_off = _unpack(params, n_cams, n_pts if len(fixed_pt3d) == 0 else 0, n_dist,
+                                              meas_idxs.size, meas_r0=None if len(meas_idxs) < 2 else meas_r[0])
+
+    # TODO: take into account dist_coefs? or is this function deprecated?
 
     poses_only = len(fixed_pt3d) > 0
     points_3d = fixed_pt3d if poses_only else pts3d
-    points_3d_cf = _rotate(points_3d[pt3d_idxs], poses[cam_idxs, :3]) #+ poses[cam_idxs, 3:6]
+    points_3d_cf = tools.rotate_points_aa(points_3d[pt3d_idxs], poses[cam_idxs, :3]) #+ poses[pose_idxs, 3:6]
 
     # output term count (rotated coords)
     m = cam_idxs.size * 3
@@ -630,14 +804,16 @@ def _rot_pt_jac(params, pose0, fixed_pt3d, n_cams, n_pts, cam_idxs, pt3d_idxs, p
     return J
 
 
-def _unpack(params, n_cams, n_pts, n_meas, meas_r0):
+def _unpack(params, n_cams, n_pts, n_dist, n_cam_intr, n_meas, meas_r0):
     """
     Retrieve camera parameters and 3-D coordinates.
     """
     a = n_cams * 6
     b = a + n_pts * 3
     c = b + n_meas * (1 if ENABLE_DT_ADJ else 0)
-    d = c + (7 if GLOBAL_ADJ > 2 else 4)
+    d = c + (7 if GLOBAL_ADJ > 2 else 44 if GLOBAL_ADJ else 0)
+    e = d + n_dist
+    f = e + n_cam_intr
 
     poses = params[:a].reshape((n_cams, 6))
 
@@ -646,6 +822,7 @@ def _unpack(params, n_cams, n_pts, n_meas, meas_r0):
         poses[:, :2] = 0
 
     pts3d = params[a:b].reshape((n_pts, 3))
+    dist_coefs, cam_intr = None, None
     t_off = params[b:c].reshape((-1,))
 
     if n_meas > 1 and GLOBAL_ADJ:
@@ -655,209 +832,43 @@ def _unpack(params, n_cams, n_pts, n_meas, meas_r0):
 
         # use rot_off, loc_off and scale_off to transform cam_params and pts3d instead of the measurements
         if USE_WORLD_CAM_FRAME:
-            poses[:, :3] = _rotate_rotations(np.repeat(-rot_off, len(poses), axis=0), poses[:, :3])
-            poses[:, 3:] = _rotate(poses[:, 3:] - meas_r0 - loc_off, -rot_off) * math.exp(-scale_off) + meas_r0
-            pts3d = _rotate(pts3d - meas_r0 - loc_off, -rot_off) * math.exp(-scale_off) + meas_r0
+            poses[:, :3] = tools.rotate_rotations_aa(np.repeat(-rot_off, len(poses), axis=0), poses[:, :3])
+            poses[:, 3:] = tools.rotate_points_aa(poses[:, 3:] - meas_r0 - loc_off, -rot_off) * math.exp(-scale_off) + meas_r0
+            pts3d = tools.rotate_points_aa(pts3d - meas_r0 - loc_off, -rot_off) * math.exp(-scale_off) + meas_r0
         else:
             # TODO: debug following, probably wrong
-            cam_loc_wf = _rotate(-poses[:, 3:], -poses[:, :3])
-            cam_loc_wf_adj = _rotate(cam_loc_wf - meas_r0 - loc_off, -rot_off) * math.exp(-scale_off) + meas_r0
-            poses[:, 3:] = _rotate(-cam_loc_wf_adj, poses[:, :3])   # can probably do with fewer calculations
-            poses[:, :3] = _rotate_rotations(np.repeat(rot_off, len(poses), axis=0), poses[:, :3])
-            pts3d = _rotate(pts3d - meas_r0 - loc_off, -rot_off) * math.exp(-scale_off) + meas_r0
+            cam_loc_wf = tools.rotate_points_aa(-poses[:, 3:], -poses[:, :3])
+            cam_loc_wf_adj = tools.rotate_points_aa(cam_loc_wf - meas_r0 - loc_off, -rot_off) * math.exp(-scale_off) + meas_r0
+            poses[:, 3:] = tools.rotate_points_aa(-cam_loc_wf_adj, poses[:, :3])   # can probably do with fewer calculations
+            poses[:, :3] = tools.rotate_rotations_aa(np.repeat(rot_off, len(poses), axis=0), poses[:, :3])
+            pts3d = tools.rotate_points_aa(pts3d - meas_r0 - loc_off, -rot_off) * math.exp(-scale_off) + meas_r0
 
-    return poses, pts3d, t_off
+    if n_dist > 0:
+        dist_coefs = params[d:e].reshape((-1,))
 
+    if n_cam_intr > 0:
+        cam_intr = params[e:f].reshape((-1,))
 
-def _rotate(points, rot_vecs):
-    """Rotate points by given rotation vectors.
-
-    Rodrigues' rotation formula is used.
-    """
-#     return _cached_rotate(tuple(points.flatten()), tuple(rot_vecs.flatten()))
-#
-#@lru_cache(maxsize=1)
-# def _cached_rotate(points, rot_vecs):
-#    points = np.array(points).reshape((-1, 3))
-#    rot_vecs = np.array(rot_vecs).reshape((-1, 3))
-
-    theta = np.linalg.norm(rot_vecs, axis=1)[:, np.newaxis]
-    with np.errstate(invalid='ignore'):
-        k = rot_vecs / theta
-        k = np.nan_to_num(k)
-    dot = np.sum(points * k, axis=1)[:, np.newaxis]
-    cos_theta = np.cos(theta)
-    sin_theta = np.sin(theta)
-
-    rot_points = cos_theta * points + sin_theta * np.cross(k, points) + dot * (1 - cos_theta) * k
-    return rot_points
+    return poses, pts3d, dist_coefs, cam_intr, t_off
 
 
-def _rotate_rotations(rot_vecs_adj, rot_vecs_base):
-    """Rotate rotation vectors by given rotation vectors.
-
-    Rodrigues' rotation formula is used, from
-      https://math.stackexchange.com/questions/382760/composition-of-two-axis-angle-rotations
-    """
-
-    a = np.linalg.norm(rot_vecs_adj, axis=1)[:, np.newaxis]
-    b = np.linalg.norm(rot_vecs_base, axis=1)[:, np.newaxis]
-
-    with np.errstate(invalid='ignore'):
-        sin_a, cos_a = np.sin(0.5 * a), np.cos(0.5 * a)
-        sin_b, cos_b = np.sin(0.5 * b), np.cos(0.5 * b)
-        va = rot_vecs_adj / a
-        vb = rot_vecs_base / b
-        va = np.nan_to_num(va)
-        vb = np.nan_to_num(vb)
-
-    c = 2 * np.arccos(np.clip(cos_a * cos_b - sin_a * sin_b * np.sum(va * vb, axis=1)[:, None], -1, 1))
-    sin_c = np.sin(0.5 * c)
-    with np.errstate(invalid='ignore'):
-        res = (c / sin_c) * (sin_a * cos_b * va +
-                             cos_a * sin_b * vb +
-                             sin_a * sin_b * np.cross(va, vb))
-        res = np.nan_to_num(res)
-
-    return res
-
-
-def _project(pts3d, poses, K):
+def _project(pts3d, poses, K, dist_coefs=None):
     """Convert 3-D points to 2-D by projecting onto images."""
     if USE_WORLD_CAM_FRAME:
-        pts3d_rot = _rotate(pts3d - poses[:, 3:6], -poses[:, 0:3])
+        pts3d_rot = tools.rotate_points_aa(pts3d - poses[:, 3:6], -poses[:, 0:3])
     else:
-        pts3d_rot = _rotate(pts3d, poses[:, 0:3]) + poses[:, 3:6]
+        pts3d_rot = tools.rotate_points_aa(pts3d, poses[:, 0:3]) + poses[:, 3:6]
 
-    # pts2d_proj = _rotate(pts3d, poses[:, :3])
-    # pts2d_proj += poses[:, 3:6]
+    P = pts3d_rot / pts3d_rot[:, 2:3]
 
-    # pts2d_proj = -pts2d_proj[:, :2] / pts2d_proj[:, 2, np.newaxis]
-    # f = poses[:, 6]
-    # k1 = poses[:, 7]
-    # k2 = poses[:, 8]
-    # n = np.sum(pts2d_proj ** 2, axis=1)
-    # r = 1 + k1 * n + k2 * n ** 2
-    # pts2d_proj *= (r * f)[:, np.newaxis]
+    if dist_coefs is not None:
+        k1, k2 = np.pad(dist_coefs[0:2], (0, 2 - len(dist_coefs[0:2])), 'constant')
+        r2 = np.sum(P[:, 0:2] ** 2, axis=1)[:, None]
+        P[:, 0:2] *= (1 + k1 * r2 + k2 * r2 ** 2)
 
-    pts2d_proj = K.dot(pts3d_rot.T).T                    # own addition
-    pts2d_proj = pts2d_proj[:, 0:2] / pts2d_proj[:, 2:3]   # own addition
-
+    pts2d_proj = K[:2, :].dot(P.T).T
     return pts2d_proj
 
 
-def project(pts3d, poses, K):
-    return _project(pts3d, poses, K)
-
-
-def wedge(w):
-    is_mx = len(w.shape) == 2 and w.shape[1] != 1
-    w_ = w.reshape((-1, 3))
-    zero = np.zeros((len(w_),))
-    what = np.array([[zero, -w_[:, 2], w_[:, 1]],
-                     [w_[:, 2], zero, -w_[:, 0]],
-                     [-w_[:, 1], w_[:, 0], zero]]).transpose((2, 0, 1))
-    return what if is_mx else what.squeeze()
-
-
-def vee(R):
-    R_ = R.reshape((-1, 3, 3))
-    x = (R_[:, 2, 1] - R_[:, 1, 2]) / 2
-    y = (R_[:, 0, 2] - R_[:, 2, 0]) / 2
-    z = (R_[:, 1, 0] - R_[:, 0, 1]) / 2
-    w = np.array([x, y, z]).T
-    R_ -= wedge(w)
-#    assert np.any(np.isclose(np.linalg.norm(R_, axis=(1, 2)) / np.linalg.norm(w, axis=1), 0))
-    return w if len(R.shape) == 3 else w.squeeze()
-
-
-def logR(R):
-    ax1, ax2 = list(range(len(R.shape)))[-2:]
-    c = np.clip((np.trace(R, axis1=ax1, axis2=ax2) - 1) / 2, -1, 1)
-    s, th = np.sqrt(1 - c ** 2), np.arccos(c)
-    with np.errstate(invalid='ignore'):
-        tmp = (0.5 * th / s).reshape((-1, *((1,) * ax2)))
-        tmp = np.nan_to_num(tmp)
-    log_R = tmp * (R - R.swapaxes(ax1, ax2))
-    w = vee(log_R)
-    return w
-
-
-def dlogR_dR(R):
-    # from section 10.3.2, eq 10.11, https://ingmec.ual.es/~jlblanco/papers/jlblanco2010geometry3D_techrep.pdf
-    assert R.shape == (3, 3), 'wrong size rotation matrix'
-
-    c = np.clip((np.trace(R) - 1) / 2, -1, 1)
-    if np.isclose(c, 1):
-        S1 = np.array([[0, 0, 0],
-                       [0, 0, -.5],
-                       [0, .5, 0]])
-        S2 = np.array([[0, 0, .5],
-                       [0, 0, 0],
-                       [-.5, 0, 0]])
-        S3 = np.array([[0, -.5, 0],
-                       [.5, 0, 0],
-                       [0, 0, 0]])
-        return np.hstack((S1, S2, S3))
-
-    s, th = np.sqrt(1 - c**2), np.arccos(c)
-    a1, a2, a3 = np.array([R[2, 1] - R[1, 2],
-                           R[0, 2] - R[2, 0],
-                           R[1, 0] - R[0, 1]]) * (0.25 * (th*c - s) / s**3)
-    b = 0.5 * th / s
-    S1 = np.array([[a1, 0, 0],
-                   [a2, 0, -b],
-                   [a3, b, 0]])
-    S2 = np.array([[0, a1, b],
-                   [0, a2, 0],
-                   [-b, a3, 0]])
-    S3 = np.array([[0, -b, a1],
-                   [b, 0, a2],
-                   [0, 0, a3]])
-    return np.hstack((S1, S2, S3))
-
-
-class Manifold(np.ndarray):
-    def __new__(cls, *args, **kwargs):
-        self = super().__new__(cls, *args, **kwargs)
-        # for some strange reason, super().__init__ is called without specifying it
-        self.so3 = None
-        self.not_so3 = None
-        return self
-
-    def set_so3_groups(self, so3):
-        assert isinstance(so3, np.ndarray) and len(so3.shape) == 1 and so3.dtype == bool, \
-                'invalid index array type, must be 1-d bool ndarray'
-        self.so3 = so3.copy()
-        self.not_so3 = np.logical_not(self.so3)
-
-    def copy(self, order='C'):
-        new = super(Manifold, self).copy(order)
-        new.so3 = self.so3.copy()
-        new.not_so3 = self.not_so3.copy()
-        return new
-
-    def __add__(self, other):
-        assert type(other) == np.ndarray, 'Can only sum an ndarray to this Manifold implementation'
-        new = self.to_array(new=True)
-        new[self.not_so3] += other[self.not_so3]
-        new[self.so3] = _rotate_rotations(other[self.so3].reshape((-1, 3)), new[self.so3].reshape((-1, 3))).flatten()
-        new = Manifold(new.shape, buffer=new, dtype=self.dtype)
-        new.set_so3_groups(self.so3)
-        return new
-
-    def __sub__(self, other):
-        assert type(other) in (np.ndarray, Manifold)
-        if type(other) == Manifold:
-            assert np.all(self.so3 == other.so3)
-            return self.__add__(-other.to_array())
-        else:
-            return self.__add__(-other)
-
-    def to_array(self, new=False):
-        return np.frombuffer(np.copy(self) if new else self, dtype=self.dtype)
-
-    def astype(self, dtype, order='K', casting='unsafe', subok=True, copy=True):
-        if dtype in (float, np.float32, np.float64):
-            return self
-        return self.to_array().astype(dtype, order, casting, subok, copy)
+def project(pts3d, poses, K, dist_coefs=None):
+    return _project(pts3d, poses, K, dist_coefs)

@@ -1060,7 +1060,7 @@ if __name__ == '__main__':
             est_v = -tools.q_times_v(tq.conj(), res.loc)
             err_v = est_v - ast_v
 
-            #print('\n')
+            #print('\np')
             # print('rea ypr: %s' % ' '.join('%.1fdeg' % math.degrees(a) for a in tools.q_to_lat_lon_roll(cam_q)))
             # print('est ypr: %s' % ' '.join('%.1fdeg' % math.degrees(a) for a in tools.q_to_lat_lon_roll(res_q)))
             print('rea ypr: %s' % ' '.join('%.1fdeg' % math.degrees(a) for a in tools.q_to_lat_lon_roll(ast_q)))
@@ -1078,13 +1078,13 @@ if __name__ == '__main__':
                 pts3d = tools.q_times_mx(SystemModel.cv2gl_q.conj(), odo.get_3d_map_pts())
                 tools.plot_vectors(pts3d)
                 errs = tools.point_cloud_vs_model_err(pts3d, obj)
-                print('\n3d map err mean=%.3f, sd=%.3f, n=%d' % (
+                print('\n3d map err mean=%.3f, sd=%.3f, np=%d' % (
                     np.mean(errs),
                     np.std(errs),
                     len(odo.state.map3d),
                 ))
 
-            # print('\n')
+            # print('\np')
         else:
             print('no solution\n')
 

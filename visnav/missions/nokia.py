@@ -84,7 +84,7 @@ class NokiaSensor(Mission):
     # body frame: +z down, +x is fw towards north, +y is right wing (east)
     # camera frame: +z into the image plane, -y is up (north), +x is right (east)
     w2b = Pose(None, tools.eul_to_q((np.pi, -np.pi / 2), 'xz'))
-    b2c = Pose(None, tools.eul_to_q((np.pi / 2, np.pi / 2), 'zx'))
+    b2c = Pose(None, tools.eul_to_q((np.pi / 2,), 'z'))
 
     def __init__(self, *args, verbosity=2, high_quality=False, ori_off_q=None,
                  use_gimbal=False, cam_mx=None, cam_dist=None, undist_img=False, **kwargs):
@@ -152,40 +152,35 @@ class NokiaSensor(Mission):
                     gimbal_roll, gimbal_pitch, gimbal_yaw = map(math.radians, gimbal)
 
                     incremental = False
-
-                    if not self.use_gimbal:
-                        roll, pitch = math.radians(0), math.radians(0)
-
-                    b_q = tools.ypr_to_q(yaw, pitch, roll)
+                    nadir_pointing = True
 
                     if incremental:
                         if self.use_gimbal:
                             # seems that gimbal overrides regular (roll, pitch, yaw) instead of being relative to body
+                            b_q = tools.ypr_to_q(yaw, pitch, roll)
                             c_q = tools.ypr_to_q(gimbal_yaw, gimbal_pitch, gimbal_roll)
                             gimbal_yaw, gimbal_pitch, gimbal_roll = tools.q_to_ypr(b_q.conj() * c_q)
                         else:
                             # enable for datasets with no gimbal information
-                            gimbal_roll, gimbal_pitch, gimbal_yaw = 0, math.radians(-89.5), 0
+                            gimbal_roll, gimbal_pitch, gimbal_yaw = 0, math.radians(-90 if nadir_pointing else -20), 0
                     else:
                         if self.use_gimbal:
+                            # TODO: make sure pitch -20 deg => 70 deg
                             yaw, pitch, roll = gimbal_yaw, gimbal_pitch, gimbal_roll
-                            gimbal_yaw, gimbal_pitch, gimbal_roll = 0, 0, 0
-
-                            if 1:
-                                gf_world_cam = Pose(None, tools.ypr_to_q(yaw, pitch, roll))
-                                if 0:
-                                    off_q = tools.ypr_to_q(*map(math.radians, (-1.39653216, -16.87428421, 1.66370009)))
-                                    yaw, pitch, roll = tools.q_to_ypr(gf_world_cam.quat * off_q)
-                                elif 0:
-                                    b2g = Pose(None, tools.ypr_to_q(*map(math.radians, (-3.56934931, 1.1271115, 2.04077157))))
-                                    yaw, pitch, roll = tools.q_to_ypr(gf_world_cam.to_global(b2g).quat)
-                            elif 1:
-                                yaw, pitch, roll = np.array([yaw, pitch, roll]) + np.array(list(map(math.radians,
-                                                   (0.0, -5.5, 7.5))))
+                            # if 1:
+                            #     gf_world_cam = Pose(None, tools.ypr_to_q(yaw, pitch, roll))
+                            #     if 0:
+                            #         off_q = tools.ypr_to_q(*map(math.radians, (-1.39653216, -16.87428421, 1.66370009)))
+                            #         yaw, pitch, roll = tools.q_to_ypr(gf_world_cam.quat * off_q)
+                            #     elif 0:
+                            #         b2g = Pose(None, tools.ypr_to_q(*map(math.radians, (-3.56934931, 1.1271115, 2.04077157))))
+                            #         yaw, pitch, roll = tools.q_to_ypr(gf_world_cam.to_global(b2g).quat)
+                            # elif 1:
+                            #     yaw, pitch, roll = np.array([yaw, pitch, roll]) + np.array(list(map(math.radians,
+                            #                        (0.0, -5.5, 7.5))))
                         else:
-                            c_q = tools.ypr_to_q(0, math.radians(-89.5), 0)
-                            yaw, pitch, roll = tools.q_to_ypr(b_q * c_q)
-                            gimbal_yaw, gimbal_pitch, gimbal_roll = 0, 0, 0
+                            pitch, roll = math.radians(0 if nadir_pointing else 70), 0
+                        gimbal_yaw, gimbal_pitch, gimbal_roll = 0, 0, 0
 
                     meas = Measure(data=np.array([lat, lon, alt, roll, pitch, yaw,
                                                   gimbal_roll, gimbal_pitch, gimbal_yaw]), time_off=t_t - f_t)
@@ -295,10 +290,12 @@ class NokiaSensor(Mission):
 
             'max_keyframes': 50000,
             'max_ba_keyframes': 100,
-            'ba_interval': 8,
+            'ba_interval': 10,
             'max_ba_fun_eval': 100 * 10,
-            'loc_err_sd': np.array([2., 3., 2.]),  # y == alt (was [2, 10, 2])
+            'loc_err_sd': np.inf if 0 else np.array([2., 3., 2.]),  # y == alt (was [2, 10, 2])
             'ori_err_sd': np.inf if 1 else math.radians(10.0),
+
+            'ba_dist_coef': False,
         }
 
         if self.high_quality:

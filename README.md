@@ -20,22 +20,22 @@ Download test data from [here](https://drive.google.com/file/d/1JepyAQa2jZpCBJPf
 Then run:
 
 ```
-python -m unittest tests/odometry.py
+python -mr unittest tests/odometry.py
 ```
 
 or to test rendering with profiling, run:
 ```
-xvfb-run --server-args="-screen 0 1024x768x24" python -m cProfile -o profile.prof -m tests.render
+xvfb-run --server-args="-screen 0 1024x768x24" python -mr cProfile -o profile.prof -mr tests.render
 ```
 
 or to test synthetic photometric feature algo with config set "1", run:
 ```
-xvfb-run --server-args="-screen 0 1024x768x24" python -m cProfile -o profile1.prof tests/splnav.py 1
+xvfb-run --server-args="-screen 0 1024x768x24" python -mr cProfile -o profile1.prof tests/splnav.py 1
 ```
 
 ## For processing drone videos:
 ```
-conda create -n drone -c conda-forge python=3.8 pip numpy numba quaternion scipy opencv python-dateutil tqdm
+conda create -np drone -c conda-forge python=3.8 pip numpy numba quaternion scipy opencv python-dateutil tqdm
 conda activate drone
 pip install pygeodesy
 pip install --no-deps kapture

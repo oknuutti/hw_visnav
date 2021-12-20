@@ -81,7 +81,7 @@ class KeypointAlgo(AlgorithmBase):
         self._fdb_sc_ast_perms = None
         self._fdb_light_perms = None
 
-        self.DEBUG_IMG_POSTFIX = 'k'    # if batch mode, save result image in a file ending like this
+        self.DEBUG_IMG_POSTFIX = 'nl'    # if batch mode, save result image in a file ending like this
 
         self.SCENE_SCALE_STEP = 1.4142  # sqrt(2) scale scene image by this amount if fail
         self.MAX_SCENE_SCALE_STEPS = 5  # from mid range 64km to near range 16km (64/sqrt(2)**(5-1) => 16)
@@ -598,7 +598,7 @@ class KeypointAlgo(AlgorithmBase):
         if new_sc_pos[2]>0:
             tpos = -new_sc_pos
             tdelta_q = cv_cam_delta_q * tools.lat_lon_roll_to_q(0,math.pi,0)
-            # logger.info('Bug with solvePnPRansac, correcting:\n\t%s => %s\n\t%s => %s'%(
+            # logger.info('Bug with solvePnPRansac, correcting:\np\t%s => %s\np\t%s => %s'%(
             #     new_sc_pos, tpos, tools.q_to_lat_lon_roll(cv_cam_delta_q), tools.q_to_lat_lon_roll(tdelta_q)))
             new_sc_pos = tpos
             cv_cam_delta_q = tdelta_q

@@ -114,10 +114,10 @@ class Frame:
 class Keypoint:
     _NEXT_ID = 1
 
-    def __init__(self, id=None):
+    def __init__(self, id=None, pt3d=None):
         self._id = Keypoint._NEXT_ID if id is None else id
         Keypoint._NEXT_ID = max(self._id + 1, Keypoint._NEXT_ID)
-        self.pt3d = None
+        self.pt3d = pt3d
         self.pt3d_added_frame_id = None
         self.total_count = 0
         self.inlier_count = 0
@@ -746,7 +746,7 @@ class VisualOdometry:
             ids, dt_arr, old_kp2d, old_kp2d_norm, old_dscr = list(
                 map(np.array, zip(*tmp) if len(tmp) > 0 else ([],) * 5))
 
-        # # add triangulated features from last n keyframes
+        # # add triangulated features from last np keyframes
         # tmp = [(id, (nf.time - rf.time).total_seconds(), uv, uv_vel, self.state.feat_dscr.get(id, None))
         #        for id, uv in lf.kps_uv.items()]
 
@@ -1288,11 +1288,15 @@ class VisualOdometry:
         else:
             self._bundle_adjustment()
 
+    def _get_ba_keyframes(self):
+        max_keyframes = len(self.state.keyframes)
+        max_keyframes = max_keyframes if self._ba_max_keyframes is None else (self._ba_max_keyframes + 1)
+        keyframes = self.state.keyframes[-max_keyframes:]
+        return keyframes
+
     def _get_visual_ba_args(self, keyframes=None, active_kp_only=False, distorted=False):
         if keyframes is None:
-            max_keyframes = len(self.state.keyframes)
-            max_keyframes = max_keyframes if self._ba_max_keyframes is None else (self._ba_max_keyframes + 1)
-            keyframes = self.state.keyframes[-max_keyframes:]
+            keyframes = self._get_ba_keyframes()
 
         ids = set(pt_id for kf in keyframes for pt_id in kf.kps_uv.keys()
                   if pt_id in self.state.map3d and (not active_kp_only or self.state.map3d[pt_id].active))
@@ -1380,7 +1384,7 @@ class VisualOdometry:
                 # disable for continuous calibration
                 self.cam_calibrated = True
 
-    def _update_poses(self, keyframes, ids, poses_ba, pts3d_ba, skip_pose_n=1, pop_ba_queue=True):
+    def _update_poses(self, keyframes, ids, poses_ba, pts3d_ba, dist_ba=None, skip_pose_n=1, pop_ba_queue=True):
         if np.any(np.isnan(poses_ba)) or np.any(np.isnan(pts3d_ba)):
             logger.warning('bundle adjustment results in invalid 3d points')
             return
@@ -1423,6 +1427,12 @@ class VisualOdometry:
         for kp_id, pt3d in zip(good_ids, good_pts3d):
             if kp_id in self.state.map3d:
                 self.state.map3d[kp_id].pt3d = pt3d
+
+        # update camera model, uv_norms
+        if dist_ba is not None:
+            assert len(dist_ba) == 2, 'invalid length of distortion coefficient array'
+            self.cam.dist_coefs[:2] = dist_ba
+            self.update_uv_norms(keyframes)
 
         # update keyframes that are newer than those included in the bundle adjustment run
         #   - also update recently triangulated new 3d points
@@ -1478,7 +1488,8 @@ class VisualOdometry:
             c_pts2d.append(pts2d[I])
             c_pts3d.append(pts3d[pt3d_idxs[I]])
 
-        flags = cv2.CALIB_USE_INTRINSIC_GUESS
+        # fix principal point as otherwise leads to unstability
+        flags = cv2.CALIB_USE_INTRINSIC_GUESS | cv2.CALIB_FIX_PRINCIPAL_POINT | cv2.CALIB_FIX_ASPECT_RATIO
         if self.online_cam_calib > 5:
             flags |= cv2.CALIB_RATIONAL_MODEL
         if self.online_cam_calib < 5 and self.online_cam_calib != 3:
@@ -1491,8 +1502,20 @@ class VisualOdometry:
         ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(c_pts3d, c_pts2d, (self.cam.width, self.cam.height),
                                                            self.cam.cam_mx.copy(), dist, flags=flags)
         self.cam.cam_mx = mtx
-        print('\n\n\t\tdist: %s, mx: %s\n\n' % (dist, mtx[:2, :3]))
         self.cam.dist_coefs = list(dist)
+        print('\n\n\t\tdist: %s, mx: %s\n\n' % (dist, mtx[:2, :3]))
+
+        # re-undistort keypoints
+        with self._new_frame_lock:
+            frames = {f.id: f for f in (keyframes + self.state.keyframes + [self.state.last_frame])}
+            self.update_uv_norms(frames.values())
+
+    def update_uv_norms(self, frames):
+        for f in frames:
+            tmp = [(id, uv) for id, uv in f.kps_uv.items()]
+            ids, kp2d = list(map(np.array, zip(*tmp) if len(tmp) > 0 else ([], [])))
+            kp2d_norm = self.cam.undistort(np.array(kp2d) / f.img_sc)
+            f.kps_uv_norm = dict(zip(ids, kp2d_norm))
 
     def prune_keyframes(self):
         with self._3d_map_lock:
@@ -1829,7 +1852,7 @@ class VisualOdometry:
         e_w_loc = np.array([p.loc for p in e_w])
         m_w_loc = np.array([p.loc for p in m_w])
 
-        if self._nadir_looking:
+        if self._nadir_looking and False:
             # TODO: better way, now somehow works heuristically
             dq = tools.eul_to_q((-np.pi / 2,), 'y')
             e_b_ypr = np.array([tools.q_to_ypr(dq.conj() * p.quat) for p in e_b])[:, (2, 0, 1)] / np.pi * 180
@@ -1843,7 +1866,7 @@ class VisualOdometry:
         axs = fig.subplots(1, 4, sharex=True)
         i = 0
         if 1:
-            axs[i].set_ylabel('alt [m]')
+            axs[i].set_ylabel('alt [mr]')
             axs[i].plot(e_idxs, e_w_loc[:, 2])
             axs[i].plot(m_idxs, m_w_loc[:, 2])
             i += 1

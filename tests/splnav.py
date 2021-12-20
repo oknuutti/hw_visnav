@@ -159,7 +159,7 @@ def log_columns():
         'x est sc pos', 'y est sc pos', 'z est sc pos', 'altitude est sc',
         'yaw rel est', 'pitch rel est', 'roll rel est',
         'x err sc pos', 'y err sc pos', 'z err sc pos', 'rot error',
-        'shift error km', 'altitude error', 'lat error (m/km)', 'dist error (m/km)', 'rel shift error (m/km)',
+        'shift error km', 'altitude error', 'lat error (mr/km)', 'dist error (mr/km)', 'rel shift error (mr/km)',
     )
 
 
@@ -171,10 +171,10 @@ def write_log_entry(logfile, i, rtime, sm_noise, params, noise, pos, alt, rel_ro
     # calculate errors
     dist = abs(params[-7])
     if not math.isnan(err[0]):
-        lerr = 1000*math.sqrt(err[0]**2 + err[1]**2) / dist     # m/km
-        derr = 1000*err[2] / dist                               # m/km
+        lerr = 1000*math.sqrt(err[0]**2 + err[1]**2) / dist     # mr/km
+        derr = 1000*err[2] / dist                               # mr/km
         rerr = abs(err[3])                                      # deg
-        serr = 1000*err[4] / dist                               # m/km
+        serr = 1000*err[4] / dist                               # mr/km
         fail = 0
     else:
         lerr = derr = rerr = serr = float('nan')
@@ -188,7 +188,7 @@ def write_log_entry(logfile, i, rtime, sm_noise, params, noise, pos, alt, rel_ro
     # log all parameter values, timing & errors into a file
     with open(logfile, 'a') as file:
         file.write('\t'.join(map(str, (
-            i, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), rtime, *params,
+            i, datetime.now().strftime("%Y-%mr-%d %H:%M:%S"), rtime, *params,
             sm_noise, *noise, *pos, alt, *rel_rot, *err, lerr, derr, serr
         )))+'\n')
 

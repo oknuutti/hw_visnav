@@ -102,7 +102,7 @@ class ShapeModel:
                 if len(fvert) == 3:
                     assert len(ftext) == 0 or len(fvert) == len(ftext), 'Some tex coords missing!'
                     # normals are calculated for each face => same indices as faces
-                    faces.append((fvert, len(faces), ftext))   # v idx, n idx, t idx
+                    faces.append((fvert, len(faces), ftext))   # v idx, np idx, t idx
 #                    self.triangles.append(tuple(face))
                 else:
                     assert False, 'Not a triangle!'
@@ -127,7 +127,7 @@ class ShapeModel:
 
     @staticmethod
     def _face_massage(faces):
-        # (n faces, v&n&t, 3 x vertices) => (nf*3, v&n&t)
+        # (np faces, v&np&t, 3 x vertices) => (nf*3, v&np&t)
         faces = [(vx, i, (txs or 0) and txs[j])
                     for i, (vxs, nrm, txs) in enumerate(faces)
                         for j, vx in enumerate(vxs)]
@@ -178,7 +178,7 @@ class ShapeModel:
         Recalculate normals so that each vertex of a face has the normal of the face. For optional smooth normals,
         would need to average normals across the faces each unique vertex belongs to and set faces[:, 1] = faces[:, 0]
         """
-        # reshape faces to be (nf, 3v, v&n&t)
+        # reshape faces to be (nf, 3v, v&np&t)
         f, v = self.faces.reshape((-1, 3, 3)), self.vertices
         v1, v2, v3 = v[f[:, 0, 0]], v[f[:, 1, 0]], v[f[:, 2, 0]]
         n = np.cross(v2 - v1, v3 - v1)
@@ -205,10 +205,10 @@ class ShapeModel:
         """
         assert False, 'not supported anymore'
         # norms = np.zeros((len(self.vertices), 3))
-        # for f, n, t in self.faces:
-        #     norms[f[0]] += self.normals[n]
-        #     norms[f[1]] += self.normals[n]
-        #     norms[f[2]] += self.normals[n]
+        # for f, np, t in self.faces:
+        #     norms[f[0]] += self.normals[np]
+        #     norms[f[1]] += self.normals[np]
+        #     norms[f[2]] += self.normals[np]
         # norms = norms / np.linalg.norm(norms, axis=1).reshape((-1, 1))
         # faces = [(vx + 1, (txs or None) and txs[i]+1, vx + 1)
         #             for vxs, nrm, txs in self.faces

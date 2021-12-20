@@ -1,10 +1,11 @@
 import math
 import time
 import logging
+
 import dateutil.parser as dparser
 
 import numpy as np
-#import numba as nb
+import numba as nb
 import quaternion  # adds to numpy  # noqa # pylint: disable=unused-import
 
 # import scipy
@@ -28,10 +29,12 @@ class PositioningException(Exception):
 class Stopwatch:
     # from https://www.safaribooksonline.com/library/view/python-cookbook-3rd/9781449357337/ch13s13.html
 
-    def __init__(self, elapsed=0.0, func=time.perf_counter):
+    def __init__(self, elapsed=0.0, func=time.perf_counter, start=False):
         self._elapsed = elapsed
         self._func = func
         self._start = None
+        if start:
+            self.start()
 
     @property
     def elapsed(self):
@@ -48,9 +51,15 @@ class Stopwatch:
         end = self._func()
         self._elapsed += end - self._start
         self._start = None
+        return self.elapsed
 
     def reset(self):
-        self._elapsed = 0.0
+        if self.running:
+            self.stop()
+        elapsed = self.elapsed
+        self._elapsed = 0
+        self.start()
+        return elapsed
 
     @property
     def running(self):
@@ -131,6 +140,55 @@ class DeltaPose(Pose):
     """
     Separate class for the result of "pose1 - pose0" in order to prevent wrong usage
     """
+
+
+class Manifold(np.ndarray):
+    def __new__(cls, *args, **kwargs):
+        self = super().__new__(cls, *args, **kwargs)
+        # for some strange reason, super().__init__ is called without specifying it
+        self.so3 = None
+        return self
+
+    def set_so3_groups(self, so3):
+        assert isinstance(so3, np.ndarray) and so3.shape == self.shape and so3.dtype == bool, \
+                'invalid index array type, must be same shape bool ndarray'
+        self.so3 = so3.copy()
+
+    def copy(self, order='C'):
+        new = super(Manifold, self).copy(order)
+        new.so3 = self.so3.copy()
+        return new
+
+    def __add__(self, other):
+        assert type(other) == np.ndarray, 'Can only sum an ndarray to this Manifold implementation'
+        new = self.to_array(new=True)
+        not_so3 = np.logical_not(self.so3)
+        new[not_so3] += other[not_so3]
+        new[self.so3] = rotate_rotations_aa(other[self.so3].reshape((-1, 3)), new[self.so3].reshape((-1, 3))).flatten()
+        new = Manifold(new.shape, buffer=new, dtype=self.dtype)
+        new.set_so3_groups(self.so3)
+        return new
+
+    def reshape(self, shape):
+        new = super(Manifold, self).reshape(shape)
+        new.so3 = self.so3.reshape(shape)
+        return new
+
+    def __sub__(self, other):
+        assert type(other) in (np.ndarray, Manifold)
+        if type(other) == Manifold:
+            assert np.all(self.so3 == other.so3)
+            return self.__add__(-other.to_array())
+        else:
+            return self.__add__(-other)
+
+    def to_array(self, new=False):
+        return np.frombuffer(np.copy(self) if new else self, dtype=self.dtype).reshape(self.shape)
+
+    def astype(self, dtype, order='K', casting='unsafe', subok=True, copy=True):
+        if dtype in (float, np.float32, np.float64):
+            return self
+        return self.to_array().astype(dtype, order, casting, subok, copy)
 
 
 def sphere_angle_radius(loc, r):
@@ -244,8 +302,16 @@ def vector_projection(a, b):
     return a.dot(b) / b.dot(b) * b
 
 
+def vector_projection_mx(A, B):
+    return (np.einsum('ij,ij->i', A, B) / np.einsum('ij,ij->i', B, B))[:, None] * B
+
+
 def vector_rejection(a, b):
     return a - vector_projection(a, b)
+
+
+def vector_rejection_mx(A, B):
+    return A - vector_projection_mx(A, B)
 
 
 def parallax(f0, f1, pt):
@@ -262,7 +328,7 @@ def to_cartesian(lat, lon, alt, lat0, lon0, alt0):
 
 
 def get_logger(name, level=logging.INFO, fmt='%(asctime)s %(levelname)-8s %(message)s',
-               date_fmt='%Y-%m-%d %H:%M:%S'):
+               date_fmt='%Y-%mr-%d %H:%M:%S'):
     logger = logging.getLogger(name)
     logger.setLevel(level)
     logger.propagate = False
@@ -301,7 +367,7 @@ def angle_between_mx(A, B):
 
 
 def angle_between_rows(A, B, normalize=True):
-    assert A.shape[1] == 3 and B.shape[1] == 3, 'matrices need to be of shape (n, 3) and (m, 3)'
+    assert A.shape[1] == 3 and B.shape[1] == 3, 'matrices need to be of shape (np, 3) and (mr, 3)'
     if A.shape[0] == B.shape[0]:
         # from https://stackoverflow.com/questions/50772176/calculate-the-angle-between-the-rows-of-two-matrices-in-numpy/50772253
         cos_angles = np.einsum('ij,ij->i', A, B)
@@ -489,7 +555,7 @@ def mean_q(qs, ws=None):
 # ~3.5x slower than cv2.triangulatePoints, seems to be less accurate?
 def triangulate_nviews(P, ip):
     """
-    Triangulate a point visible in n camera views.
+    Triangulate a point visible in np camera views.
     P is a list of camera projection matrices.
     ip is a list of homogenised image points. eg [ [x, y, 1], [x, y, 1] ], OR,
     ip is a 2d array - shape nx3 - [ [x, y, 1], [x, y, 1] ]
@@ -580,7 +646,7 @@ def solar_elongation(ast_v, sc_q):
     if USE_ICRS:
         try:
             sc = SkyCoord(x=ast_v[0], y=ast_v[1], z=ast_v[2], frame='icrs',
-                          unit='m', representation_type='cartesian', obstime='J2000') \
+                          unit='mr', representation_type='cartesian', obstime='J2000') \
                 .transform_to('hcrs') \
                 .represent_as('cartesian')
             ast_v = np.array([sc.x.value, sc.y.value, sc.z.value])
@@ -962,7 +1028,7 @@ def interp2(array, x, y, max_val=None, max_dist=30, idxs=None, discard_bg=False)
             dist = np.linalg.norm(idxs - np.array((y, x)), axis=1)
             i = np.argmin(dist)
             val = array[idxs[i, 0], idxs[i, 1]]
-            # print('\n%s, %s, %s, %s, %s, %s, %s'%(v, x,y,dist[i],idxs[i,1],idxs[i,0],val))
+            # print('\np%s, %s, %s, %s, %s, %s, %s'%(v, x,y,dist[i],idxs[i,1],idxs[i,0],val))
             fallback = dist[i] > max_dist
 
         if fallback:
@@ -1138,9 +1204,155 @@ def pseudo_huber_loss(a, delta):
     return delta ** 2 * (np.sqrt(1 + a ** 2 / (delta ** 2 + 1e-15)) - 1 + 1e-15)
 
 
+def rotate_points_aa(points, rot_vecs):
+    """Rotate points by given rotation vectors.
+
+    Rodrigues' rotation formula is used.
+    """
+    theta = np.linalg.norm(rot_vecs, axis=1)[:, None]
+    with np.errstate(invalid='ignore'):
+        k = rot_vecs / theta
+        k = np.nan_to_num(k)
+    dot = np.sum(points * k, axis=1)[:, None]
+    cos_theta = np.cos(theta)
+    sin_theta = np.sin(theta)
+
+    rot_points = cos_theta * points + sin_theta * np.cross(k, points) + dot * (1 - cos_theta) * k
+    return rot_points
+
+
+def rotate_rotations_aa(rot_vecs_adj, rot_vecs_base):
+    """Rotate rotation vectors by given rotation vectors.
+
+    Rodrigues' rotation formula is used, from
+      https://math.stackexchange.com/questions/382760/composition-of-two-axis-angle-rotations
+    """
+
+    a = np.linalg.norm(rot_vecs_adj, axis=1)[:, np.newaxis]
+    b = np.linalg.norm(rot_vecs_base, axis=1)[:, np.newaxis]
+
+    with np.errstate(invalid='ignore'):
+        sin_a, cos_a = np.sin(0.5 * a), np.cos(0.5 * a)
+        sin_b, cos_b = np.sin(0.5 * b), np.cos(0.5 * b)
+        va = rot_vecs_adj / a
+        vb = rot_vecs_base / b
+        va = np.nan_to_num(va)
+        vb = np.nan_to_num(vb)
+
+    c = 2 * np.arccos(np.clip(cos_a * cos_b - sin_a * sin_b * np.sum(va * vb, axis=1)[:, None], -1, 1))
+    sin_c = np.sin(0.5 * c)
+    with np.errstate(invalid='ignore'):
+        res = (c / sin_c) * (sin_a * cos_b * va +
+                             cos_a * sin_b * vb +
+                             sin_a * sin_b * np.cross(va, vb))
+        res = np.nan_to_num(res)
+
+    return res
+
+
+def wedge(w):
+    is_mx = len(w.shape) == 2 and w.shape[1] != 1
+    w_ = w.reshape((-1, 3))
+    zero = np.zeros((len(w_),))
+    what = np.array([[zero, -w_[:, 2], w_[:, 1]],
+                     [w_[:, 2], zero, -w_[:, 0]],
+                     [-w_[:, 1], w_[:, 0], zero]]).transpose((2, 0, 1))
+    return what if is_mx else what.squeeze()
+
+
+def vee(R):
+    R_ = R.reshape((-1, 3, 3))
+    x = (R_[:, 2, 1] - R_[:, 1, 2]) / 2
+    y = (R_[:, 0, 2] - R_[:, 2, 0]) / 2
+    z = (R_[:, 1, 0] - R_[:, 0, 1]) / 2
+    w = np.array([x, y, z]).T
+    R_ -= wedge(w)
+#    assert np.any(np.isclose(np.linalg.norm(R_, axis=(1, 2)) / np.linalg.norm(w, axis=1), 0))
+    return w if len(R.shape) == 3 else w.squeeze()
+
+
+def logR(R):
+    ax1, ax2 = list(range(len(R.shape)))[-2:]
+    c = np.clip((np.trace(R, axis1=ax1, axis2=ax2) - 1) / 2, -1, 1)
+    s, th = np.sqrt(1 - c ** 2), np.arccos(c)
+    with np.errstate(invalid='ignore'):
+        tmp = (0.5 * th / s).reshape((-1, *((1,) * ax2)))
+        tmp = np.nan_to_num(tmp)
+    log_R = tmp * (R - R.swapaxes(ax1, ax2))
+    w = vee(log_R)
+    return w
+
+
+def dlogR_dR(R):
+    # from section 10.3.2, eq 10.11, https://ingmec.ual.es/~jlblanco/papers/jlblanco2010geometry3D_techrep.pdf
+    assert R.shape == (3, 3), 'wrong size rotation matrix'
+
+    c = np.clip((np.trace(R) - 1) / 2, -1, 1)
+    if np.isclose(c, 1):
+        S1 = np.array([[0, 0, 0],
+                       [0, 0, -.5],
+                       [0, .5, 0]])
+        S2 = np.array([[0, 0, .5],
+                       [0, 0, 0],
+                       [-.5, 0, 0]])
+        S3 = np.array([[0, -.5, 0],
+                       [.5, 0, 0],
+                       [0, 0, 0]])
+        return np.hstack((S1, S2, S3))
+
+    s, th = np.sqrt(1 - c**2), np.arccos(c)
+    a1, a2, a3 = np.array([R[2, 1] - R[1, 2],
+                           R[0, 2] - R[2, 0],
+                           R[1, 0] - R[0, 1]]) * (0.25 * (th*c - s) / s**3)
+    b = 0.5 * th / s
+    S1 = np.array([[a1, 0, 0],
+                   [a2, 0, -b],
+                   [a3, b, 0]])
+    S2 = np.array([[0, a1, b],
+                   [0, a2, 0],
+                   [-b, a3, 0]])
+    S3 = np.array([[0, -b, a1],
+                   [b, 0, a2],
+                   [0, 0, a3]])
+    return np.hstack((S1, S2, S3))
+
+
+@nb.njit(nogil=True, parallel=False, cache=True)
+def make_givens(a, b):
+    # based on https://www.math.usm.edu/lambers/mat610/sum10/lecture9.pdf
+
+    if a > b:
+        if a == 0:
+            c, s = 0, 1
+        else:
+            tau = b / a
+            c = 1 / math.sqrt(1 + tau ** 2)
+            s = c * tau
+    elif b > a:
+        if b == 0:
+            s, c = 0, 1
+        else:
+            tau = a / b
+            s = 1 / math.sqrt(1 + tau ** 2)
+            c = s * tau
+    else:
+        s = c = 1 / math.sqrt(2)
+
+    return np.array([[c, -s],
+                     [s, c]])
+
+
+@nb.njit(nogil=True, parallel=False, cache=True)
+def apply_givens(A, G, i, j):
+    I = np.array((i, j), dtype=np.int32)
+    A[I, :] = G.dot(A[I, :])
+
+
 def fixed_precision(val, precision, as_str=False):
     if val == 0:
         return ('%%.%df' % precision) % val if as_str else val
+    elif np.isnan(val):
+        return 'nan'
     d = math.ceil(math.log10(abs(val))) - precision
     c = 10 ** d
     fp_val = round(val / c) * c

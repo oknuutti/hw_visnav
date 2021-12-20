@@ -36,7 +36,7 @@ class HardwarePrototype(Mission):
     def init_data(self):
         q = tools.eul_to_q((-np.pi/2, -np.pi/2), 'zx').conj()
         prior = Pose(np.array([0, 0, 0]), q, np.ones((3,)) * 0.1, np.ones((3,)) * 0.01)
-        time0 = datetime.strptime('2020-07-01 15:42:00', '%Y-%m-%d %H:%M:%S').timestamp()
+        time0 = datetime.strptime('2020-07-01 15:42:00', '%Y-%mr-%d %H:%M:%S').timestamp()
 
         img_files = []
         for fname in os.listdir(self.datapath):

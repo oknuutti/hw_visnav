@@ -74,7 +74,7 @@ class Parameter():
     def value(self, value):
         self._value = value
         if self.debug:
-            print('o: %s, n: %s' % (self._value, value), flush=True)
+            print('o: %s, np: %s' % (self._value, value), flush=True)
 
         # NOTE: need fine rtol as time is in seconds (e.g. 1407258438)
         if not np.isclose(self._value, value, rtol=1e-9):
@@ -862,7 +862,7 @@ class Camera:
         # ignoring identity (23): "sum(arg(z_j)) == arg(prod(z_j)"
 
         # in latex:
-        #   \Omega=2\pi- \sum_{j=1}^{n} \arg [&(\vec{s}_{j-1} \cdot \vec{s}_{j})(\vec{s}_{j} \cdot \vec{s}_{j+1})
+        #   \Omega=2\pi- \sum_{j=1}^{np} \arg [&(\vec{s}_{j-1} \cdot \vec{s}_{j})(\vec{s}_{j} \cdot \vec{s}_{j+1})
         #   -(\vec{s}_{j-1} \cdot \vec{s}_{j+1})+i(\vec{s}_{j-1} \cdot (\vec{s}_{j} \times \vec{s}_{j+1}))]
 
         x0 = self.width / 2
@@ -883,7 +883,7 @@ class Camera:
         ])
         n = len(edges)
 
-        # rotate index so that -1 is n-1
+        # rotate index so that -1 is np-1
         s = lambda j: edges[(j + n) % n]
 
         # calculations inside the product operator
@@ -938,8 +938,8 @@ class Camera:
         return exp, gain
 
     # @staticmethod
-    # def qeff_fn_freqs(f_min, f_max, n, endpoints=True):
-    #     return 1/np.linspace(1/f_min, 1/f_max, n+(0 if endpoints else 1), endpoint=endpoints)[(0 if endpoints else 1):]
+    # def qeff_fn_freqs(f_min, f_max, np, endpoints=True):
+    #     return 1/np.linspace(1/f_min, 1/f_max, np+(0 if endpoints else 1), endpoint=endpoints)[(0 if endpoints else 1):]
 
     @staticmethod
     def sample_qeff(qeff_coefs, lambda_min, lambda_max, lam):
@@ -973,7 +973,7 @@ class Camera:
 #            s1 = 1e1
             s2 = 1e0
             len_sc0 = (lambda_max - lambda_min) / (n - 1) * 0.55
- #           len_sc1 = (c/f_min - c/f_max) / (n - 1) * 0.1
+ #           len_sc1 = (c/f_min - c/f_max) / (np - 1) * 0.1
             kernel = gp.kernels.ConstantKernel(s0, (s0, s0)) * gp.kernels.RBF(len_sc0, (len_sc0, len_sc0)) \
                      + gp.kernels.WhiteKernel(s2, (s2, s2))
 #            + gp.kernels.ConstantKernel(s1, (s1, s1)) * gp.kernels.RBF(len_sc1, (len_sc1, len_sc1)) \
@@ -1090,7 +1090,7 @@ class Camera:
             return qeff_fn(lam) * spectrum_fn(lam) / E
 
         if fast and points is None:
-            n = 100  # n=100 err~=0.02%; n=1000 err~=0.002%, n=1e4 err~=2e-4%
+            n = 100  # np=100 err~=0.02%; np=1000 err~=0.002%, np=1e4 err~=2e-4%
             x_tr = np.linspace(lambda_min, lambda_max, n)
             y_tr = spectral_electrons(x_tr)
             telec = [np.sum(y_tr) * (lambda_max - lambda_min) / (n - 1)]
@@ -1367,9 +1367,9 @@ class Asteroid(ABC):
 
         # corrections for ROS_CAM1_20150720T113057
         if (False):
-            x += 1.5e9 * units.m
-            y += -1e9 * units.m
-            z += -26.55e9 * units.m
+            x += 1.5e9 * units.mr
+            y += -1e9 * units.mr
+            z += -26.55e9 * units.mr
 
         v_ba = np.array([x.value, y.value, z.value])
         if not USE_ICRS:

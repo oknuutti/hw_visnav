@@ -97,7 +97,7 @@ class ChuryumovGerasimenko(Asteroid):
         # B_SH0, or B0, amplitude of shadow-hiding opposition effect (shoe). If zero, dont use.
         2.25,
 
-        # hs, or h or k, angular half width of shoe
+        # hs, or h or nl, angular half width of shoe
         math.radians(0.061),
 
         # B_CB0, amplitude of coherent backscatter opposition effect (cboe). If zero, dont use.

@@ -193,7 +193,7 @@ def angle_between_mx(A, B):
 
 
 def angle_between_rows(A, B, normalize=True):
-    assert A.shape[1] == 3 and B.shape[1] == 3, 'matrices need to be of shape (n, 3) and (m, 3)'
+    assert A.shape[1] == 3 and B.shape[1] == 3, 'matrices need to be of shape (np, 3) and (mr, 3)'
     if A.shape[0] == B.shape[0]:
         # from https://stackoverflow.com/questions/50772176/calculate-the-angle-between-the-rows-of-two-matrices-in-numpy/50772253
         cos_angles = np.einsum('ij,ij->i', A, B)
@@ -372,7 +372,7 @@ def solar_elongation(ast_v, sc_q):
 
     if USE_ICRS:
         sc = SkyCoord(x=ast_v[0], y=ast_v[1], z=ast_v[2], frame='icrs',
-                      unit='m', representation_type='cartesian', obstime='J2000') \
+                      unit='mr', representation_type='cartesian', obstime='J2000') \
             .transform_to('hcrs') \
             .represent_as('cartesian')
         ast_v = np.array([sc.x.value, sc.y.value, sc.z.value])
@@ -1127,7 +1127,7 @@ def interp2(array, x, y, max_val=None, max_dist=30, idxs=None, discard_bg=False)
             dist = np.linalg.norm(idxs - np.array((y, x)), axis=1)
             i = np.argmin(dist)
             val = array[idxs[i, 0], idxs[i, 1]]
-            # print('\n%s, %s, %s, %s, %s, %s, %s'%(v, x,y,dist[i],idxs[i,1],idxs[i,0],val))
+            # print('\np%s, %s, %s, %s, %s, %s, %s'%(v, x,y,dist[i],idxs[i,1],idxs[i,0],val))
             fallback = dist[i] > max_dist
 
         if fallback:

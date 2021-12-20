@@ -69,7 +69,7 @@ class TestOdometry(unittest.TestCase):
             results = []
 
         cam_q = quaternion.one
-        orig_time = datetime.strptime('2020-07-01 15:42:00', '%Y-%m-%d %H:%M:%S').timestamp()
+        orig_time = datetime.strptime('2020-07-01 15:42:00', '%Y-%mr-%d %H:%M:%S').timestamp()
 
         for i, (img, cam_obj_v, cam_obj_q) in enumerate(inputs):
             time = datetime.fromtimestamp(orig_time + i*60)

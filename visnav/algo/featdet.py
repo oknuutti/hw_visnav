@@ -1,10 +1,10 @@
 import numpy as np
-
+import cv2
 
 # TODO: implement better non max suppression? e.g. like this: https://github.com/BAILOOL/ANMS-Codes
 
 
-def detect_gridded(detector, img, mask, rows, cols, k):
+def detect_gridded(detector, img, mask, rows, cols, k, refine=True):
     assert mask is None or img.shape[:2] == mask.shape, 'wrong size mask'
     ks = k // (rows * cols)
     if getattr(detector, 'setMaxFeatures', None) is not None:
@@ -26,11 +26,22 @@ def detect_gridded(detector, img, mask, rows, cols, k):
             # sort if too many
             if len(kps) > ks:  # and kps[0].response != 0.0:
                 kps = sorted(kps, key=lambda x: -x.response)
+                kps = kps[:ks]
 
-            for kp in kps[:ks]:
-                kp.pt = kp.pt[0]+x1, kp.pt[1]+y1
+            kp_arr = np.array([kp.pt for kp in kps], dtype=np.float32).reshape((-1, 1, 2))
 
-            keypoints.extend(kps[:ks])
+            if refine:
+                win_size = (5, 5)
+                zero_zone = (-1, -1)
+                criteria = (cv2.TERM_CRITERIA_EPS + cv2.TermCriteria_COUNT, 40, 0.001)
+                kp_arr = cv2.cornerSubPix(img[y1:y2, x1:x2], kp_arr, win_size, zero_zone, criteria)
+
+            kp_arr += np.array([x1, y1]).reshape((1, 1, 2))
+
+            for i, kp in enumerate(kps):
+                kp.pt = tuple(kp_arr[i, 0, :])
+
+            keypoints.extend(kps)
 
     if getattr(detector, 'setMaxFeatures', None) is not None:
         detector.setMaxFeatures(old_k)
