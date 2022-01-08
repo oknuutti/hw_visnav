@@ -26,8 +26,8 @@ class VisualGPSNav(VisualOdometry):
     def initialize_frame(self, time, image, measure):
         nf = super(VisualGPSNav, self).initialize_frame(time, image, measure)
         if nf.measure:
-            ta = [kf.measure.time_adj for kf in self.state.keyframes if kf.measure]
-            nf.measure.time_adj = ta[-1] if len(ta) > 0 else 0
+            old_kf = [kf for kf in self.state.keyframes if kf.measure]
+            nf.measure.time_adj = old_kf[-1].measure.time_adj if len(old_kf) > 0 else 0
 
             geodetic_origin = self.geodetic_origin
             lat, lon, alt = nf.measure.data[0:3]
@@ -46,6 +46,10 @@ class VisualGPSNav(VisualOdometry):
                 b2c_bf_q = tools.ypr_to_q(b2c_yaw, b2c_pitch, b2c_roll)
                 yaw, pitch, roll = tools.q_to_ypr(w2b_bf_q * b2c_bf_q * (self.ori_off_q or quaternion.one))
                 cf_w2c = tools.lla_ypr_to_loc_quat(geodetic_origin, [lat, lon, alt], [yaw, pitch, roll], b2c=self.bf2cf)
+                if len(old_kf) > 0:
+                    cf_w2c.vel = (cf_w2c.loc - (-old_kf[-1].pose.prior).loc) / (nf.time - old_kf[-1].time).total_seconds()
+                else:
+                    cf_w2c.vel = np.array([0, 0, 0])
                 nf.pose.prior = -cf_w2c
             else:
                 wf_body_r = tools.to_cartesian(lat, lon, alt, *geodetic_origin)
@@ -146,9 +150,11 @@ class VisualGPSNav(VisualOdometry):
             if not skip_meas:
                 meas_idxs = np.array([i for i, kf in enumerate(keyframes) if kf.measure is not None], dtype=int)
                 meas_q = {i: keyframes[i].pose.prior.quat.conj() for i in meas_idxs}
-                meas_r = np.array([tools.q_times_v(meas_q[i], -keyframes[i].pose.prior.loc) for i in meas_idxs], dtype=np.float32)
-                meas_aa = np.array([tools.q_to_angleaxis(meas_q[i], compact=True) for i in meas_idxs], dtype=np.float32)
-                t_off = np.array([keyframes[i].measure.time_off + keyframes[i].measure.time_adj for i in meas_idxs], dtype=np.float32)
+                meas_r = np.array([tools.q_times_v(meas_q[i], -keyframes[i].pose.prior.loc) for i in meas_idxs])
+                meas_aa = np.array([tools.q_to_angleaxis(meas_q[i], compact=True) for i in meas_idxs])
+                t_off = np.array([keyframes[i].measure.time_off + keyframes[i].measure.time_adj for i in meas_idxs]).reshape((-1, 1))
+                if 1:  # use velocity measure instead of pixel vel
+                    v_pts2d = np.array([tools.q_times_v(meas_q[i], -keyframes[i].pose.prior.vel) for i in meas_idxs])
             else:
                 meas_idxs, meas_r, meas_aa, t_off = [np.empty(0)] * 4
 

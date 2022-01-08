@@ -86,17 +86,17 @@ class Time:
 
 
 class Pose:
-    def __init__(self, loc, quat: quaternion):
+    def __init__(self, loc, quat: quaternion, vel=None):
         self.loc = np.array(loc).flatten() if loc is not None else np.zeros((3,))
         self.quat = quat if quat is not None else quaternion.one
+        self.vel = np.array([0, 0, 0]) if vel is None else vel
 
     def __add__(self, pose: 'DeltaPose') -> 'Pose':
         """ rotations added using space-fixed convention """
         assert isinstance(pose, DeltaPose), 'can only add DeltaPose to Pose'
         return Pose(
             q_times_v(pose.quat, self.loc) + pose.loc,
-            (pose.quat * self.quat).normalized()
-        )
+            (pose.quat * self.quat).normalized())
 
     def __sub__(self, pose) -> 'Pose':
         """ works together with __add__ so that p0 + (p1 - p0) == p1 """
@@ -104,22 +104,32 @@ class Pose:
         return DeltaPose(d.loc, d.quat)
 
     def __neg__(self) -> 'Pose':
-        return Pose(q_times_v(self.quat.conj(), -self.loc), self.quat.conj())
+        return Pose(
+            q_times_v(self.quat.conj(), -self.loc),
+            self.quat.conj(),
+            q_times_v(self.quat.conj(), -self.vel))
 
     def to_global(self, global_to_local_frame_transf_pose: 'Pose', is_rot=True) -> 'Pose':
         """ transform pose from local to global frame """
         # TODO: debug p.loc impact
         p = global_to_local_frame_transf_pose
-        return Pose(q_times_v(p.quat, self.loc) + p.loc, p.quat * self.quat * (p.quat.conj() if is_rot else 1))
+        return Pose(q_times_v(p.quat, self.loc) + p.loc,
+                    p.quat * self.quat * (p.quat.conj() if is_rot else 1),
+                    q_times_v(p.quat, self.vel))
 
     def to_local(self, global_to_local_frame_transf_pose: 'Pose', is_rot=True) -> 'Pose':
         """ transform pose from global to local frame """
         # TODO: debug p.loc impact
         p = global_to_local_frame_transf_pose
-        return Pose(q_times_v(p.quat.conj(), self.loc - p.loc),  p.quat.conj() * self.quat * (p.quat if is_rot else 1))
+        return Pose(q_times_v(p.quat.conj(), self.loc - p.loc),
+                    p.quat.conj() * self.quat * (p.quat if is_rot else 1),
+                    q_times_v(p.quat.conj(), self.vel))
 
     def to_array(self):
         return np.array(list(self.loc) + list(self.quat.components))
+
+    def to_mx(self):
+        return np.hstack((quaternion.as_rotation_matrix(self.quat), self.loc.reshape((-1, 1))))
 
     def __repr__(self):
         return 'loc: %s\nori: %s (ypr: %s)' % (self.loc, self.quat, np.array(q_to_ypr(self.quat))/np.pi*180)
@@ -128,8 +138,7 @@ class Pose:
         assert False, 'deprecated'
         return Pose(
             q_times_v(dq, self.loc) + dr,
-            (dq * self.quat).normalized(),
-        )
+            (dq * self.quat).normalized())
 
     @classproperty
     def identity(cls) -> 'Pose':
@@ -328,7 +337,7 @@ def to_cartesian(lat, lon, alt, lat0, lon0, alt0):
 
 
 def get_logger(name, level=logging.INFO, fmt='%(asctime)s %(levelname)-8s %(message)s',
-               date_fmt='%Y-%mr-%d %H:%M:%S'):
+               date_fmt='%Y-%m-%d %H:%M:%S'):
     logger = logging.getLogger(name)
     logger.setLevel(level)
     logger.propagate = False

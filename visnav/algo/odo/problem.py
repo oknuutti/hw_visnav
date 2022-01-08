@@ -104,12 +104,12 @@ class Problem:
         jacs = [(Jrb, Jrp, Jrl)]
 
         if self.meas_r is not None and len(self.meas_r) > 0:
-            Jxb = self.jacobian_loc_batch(fmt_b)
-            Jxp = self.jacobian_loc_frame(fmt_p)
+            Jxb = self.jacobian_loc_batch(fmt_b, True)
+            Jxp = self.jacobian_loc_frame(fmt_p, True)
             jacs.append((Jxb, Jxp, None))
         if self.meas_aa is not None and len(self.meas_aa) > 0:
-            Jab = self.jacobian_ori_batch(fmt_b)
-            Jap = self.jacobian_ori_frame(fmt_p)
+            Jab = self.jacobian_ori_batch(fmt_b, True)
+            Jap = self.jacobian_ori_frame(fmt_p, True)
             jacs.append((Jab, Jap, None))
 
         if parts:
@@ -438,11 +438,11 @@ class Problem:
 
         return J
 
-    def jacobian_loc_batch(self, fmt):
+    def jacobian_loc_batch(self, fmt, tight=True):
         # could use this to estimate the abs loc frame -> cam frame transformation
         return None
 
-    def jacobian_loc_frame(self, fmt):
+    def jacobian_loc_frame(self, fmt, tight=True):
         # frame loc affect loc measurement error terms (x~x, y~y, z~z only)
         ###################################################################
         # need to convert cam-to-world pose into world-cam location so that can compare
@@ -457,16 +457,17 @@ class Problem:
         #  ###                                                 * d/dw R(w0)R(w)
         #  ###=> -[R(w0)R(w)]' * (-P/loc_err_sd) * R(w0) * np.vstack([-e1^, -e2^, -e3^])
 
-        m, n = self.meas_r.size, len(self.poses) * self.pose_size
+        m, n = self.meas_r.size, (len(self.meas_idxs) if tight else len(self.poses)) * self.pose_size
         J = self._init_J('_Jlf', m, n, fmt)
         i = np.arange(len(self.meas_idxs))
+        meas_idxs = i if tight else self.meas_idxs
 
         # cam locations affecting location measurement error
         iR = quaternion.as_rotation_matrix(quaternion.from_rotation_vector(-self.poses[self.meas_idxs, :3]))
         iRs = iR / self.loc_err_sd
         for s in range(3):
             for r in range(3):
-                J[3 * i + s, self.meas_idxs * 6 + 3 + r] = iRs[:, s, r]
+                J[3 * i + s, meas_idxs * 6 + 3 + r] = iRs[:, s, r]
 
         # cam orientations affecting location measurement error
         R = quaternion.as_rotation_matrix(quaternion.from_rotation_vector(self.poses[self.meas_idxs, :3]))
@@ -475,15 +476,15 @@ class Problem:
             for r in range(3):
                 a, b = [1, 0, 0][r], [2, 2, 1][r]
                 sign = -1 if r == 1 else 1
-                J[3 * i + s, self.meas_idxs * 6 + r] = sign * (Rs[:, a, s] * self.poses[self.meas_idxs, 3 + b].to_array()
-                                                               - Rs[:, b, s] * self.poses[self.meas_idxs, 3 + a].to_array())
+                J[3 * i + s, meas_idxs * 6 + r] = sign * (Rs[:, a, s] * self.poses[self.meas_idxs, 3 + b].to_array()
+                                                          - Rs[:, b, s] * self.poses[self.meas_idxs, 3 + a].to_array())
         return J
 
-    def jacobian_ori_batch(self, fmt):
+    def jacobian_ori_batch(self, fmt, tight=True):
         # could use this to estimate the abs ori frame -> cam frame transformation
         return None
 
-    def jacobian_ori_frame(self, fmt):
+    def jacobian_ori_frame(self, fmt, tight=True):
         # orientation components affect ori measurement error terms
         ###########################################################
         # dw_e = log(Rm*exp(w)*R(w0)) / ori_err_sd
@@ -496,8 +497,9 @@ class Problem:
         # 1) d/dR log(R) = <see the source, long expression>  (3x9, section 10.3.2, eq 10.11)
         # 2) d/dw Rm*exp(w)*R(w0) = [-Rm*dc1^, -Rm*dc2^, -Rm*dc3^].T  (9x3, section 10.3.7, eq 10.28)
 
-        m, n = self.meas_aa.size, len(self.poses) * self.pose_size
+        m, n = self.meas_aa.size, (len(self.meas_idxs) if tight else len(self.poses)) * self.pose_size
         J = self._init_J('_Jof', m, n, fmt)
+        meas_idxs = np.arange(len(self.meas_idxs)) if tight else self.meas_idxs
 
         Rm = quaternion.as_rotation_matrix(quaternion.from_rotation_vector(self.meas_aa))
         Rw0 = quaternion.as_rotation_matrix(quaternion.from_rotation_vector(self.poses[self.meas_idxs, :3]))
@@ -507,7 +509,7 @@ class Problem:
                             -Rm[u].dot(tools.wedge(Rw0[u, :, 1])),
                             -Rm[u].dot(tools.wedge(Rw0[u, :, 2]))))
             e_off = 3 * u
-            p_off = self.meas_idxs[u] * 6
+            p_off = meas_idxs[u] * 6
             J[e_off:e_off + 3, p_off:p_off + 3] = D1.dot(D2) / self.ori_err_sd
 
         # if n4 > 0:

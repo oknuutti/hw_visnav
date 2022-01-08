@@ -362,7 +362,7 @@ def get_ba_params(path, ff, lf, results, kapt, sensor_id):
     # f_uv = {id_f: {id3: uv_map[id_f][id2, :]
     #                     for id3 in range(len(pts3d))
     #                         for id2 in range(len(uv_map[id_f]))
-    #                             if (fname, id2) in kapt.observations.get(id3, {}).get(FEATURE_NAME, {})}
+    #                             if (fname, id2) in kapt.observations.get(id3, {}).get(VO_FEATURE_NAME, {})}
     #         for id_f, fname in frames}
 
     obs_kp = list(set.union(*[set(m.keys()) for m in f_uv.values()]))

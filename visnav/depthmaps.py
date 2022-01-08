@@ -250,6 +250,17 @@ def get_cam_params(kapt, sensor_name):
     return (sid,) + tuple(map(int, sp[1:3])) + tuple(map(float, sp[3:]))
 
 
+def set_cam_params(kapt, sensor_name, sensor_params):
+    sid = None
+    for id, s in kapt.sensors.items():
+        if s.name == sensor_name:
+            s.sensor_params[1:len(sensor_params) + 1] = sensor_params
+            sid = id
+            break
+    assert sid is not None, 'Sensor %s not found' % sensor_name
+    return sid
+
+
 def unit_aflow(W, H):
     return np.stack(np.meshgrid(np.arange(W, dtype=np.float32), np.arange(H, dtype=np.float32)), axis=2)
 

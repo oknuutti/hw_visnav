@@ -23,6 +23,7 @@ FIXED_PITCH_AND_ROLL = 0
 ANALYTICAL_JACOBIAN = 1
 CHECK_JACOBIAN = 0
 ENABLE_DT_ADJ = 0
+DT_ADJ_MEAS_VEL = 1
 USE_WORLD_CAM_FRAME = 0
 USE_OWN_PSEUDO_HUBER_LOSS = 1
 RESTRICT_3D_POINT_Y = False
@@ -80,14 +81,14 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
     pose0 = poses[0:skip_pose_n].ravel()
     x0 = [poses[skip_pose_n:].ravel()]
 
+    if ENABLE_DT_ADJ:
+        x0.append(t_off.ravel())
+
     if poses_only:
         fixed_pt3d = pts3d
     else:
         fixed_pt3d = np.zeros((0, 3))
         x0.append(pts3d.ravel())
-
-    if ENABLE_DT_ADJ:
-        x0.append(t_off.ravel())
 
     if len(meas_idxs) > 1 and GLOBAL_ADJ:
         x0.append(np.array([0] * (7 if GLOBAL_ADJ > 2 else 4)))
@@ -109,11 +110,12 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
     x0.set_so3_groups(I)
 
     m1, m2, m3 = cam_idxs.size * 2, meas_idxs.size * 3, meas_idxs.size * 3
+    m = m1 + m2 + m3
     if isinstance(huber_coef, (tuple, list)):
         huber_coef = np.array([huber_coef[0]] * m1 + [huber_coef[1]] * m2 + [huber_coef[2]] * m3, dtype=dtype)
-    weight = 1 if 0 else np.array([px_err_weight * (m1 + m2) / m1] * m1
-                                  + [((m1 + m2) / m2) if m2 else 0] * m2
-                                  + [((m1 + m2) / m3) if m3 else 0] * m3, dtype=dtype)
+    weight = 1 if 0 else np.array([px_err_weight * m / m1] * m1
+                                  + [(m / m2) if m2 else 0] * m2
+                                  + [(m / m3) if m3 else 0] * m3, dtype=dtype)
 
     orig_dtype = pts2d.dtype
     if dtype != orig_dtype:
@@ -124,7 +126,7 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
         err = _costfun(x0, pose0, fixed_pt3d, n_cams, n_pts, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K, dist_coefs,
                        px_err_sd, meas_r, meas_aa, meas_idxs, loc_err_sd, ori_err_sd, huber_coef)
         print('ERR: %.4e' % (np.sum(err**2)/2))
-    if CHECK_JACOBIAN and n_cams >= 6 and n_dist > 0:
+    if CHECK_JACOBIAN and n_cams >= 6: #  and n_dist > 0:
         if 1:
             jac = _jacobian(x0, pose0, fixed_pt3d, n_cams, n_pts, n_dist, n_cam_intr, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K,
                             px_err_sd, meas_r, meas_aa, meas_idxs, loc_err_sd, ori_err_sd, huber_coef).toarray()
@@ -180,7 +182,7 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
     if just_return_r_J:
         return cfun(x0, True), jac(x0, True)
 
-    print('initial mean residual: %.5f' % (np.mean(cfun(x0)[:-m3]),))
+    # print('initial mean residual: %.5f' % (np.mean(cfun(x0)[:-m3]),))
 
     tmp = sys.stdout
     sys.stdout = log_writer or LogWriter()
@@ -200,7 +202,7 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
                                                         0 if poses_only else n_pts, n_dist, n_cam_intr, meas_idxs.size,
                                                         meas_r0=None if len(meas_idxs) < 2 else meas_r[0])
 
-    print('finished mean residual: %.5f' % (np.mean(res.fun[:-m3]),))
+    # print('finished mean residual: %.5f' % (np.mean(res.fun[:-m3]),))
     # return also per frame errors (median repr err, meas loc and ori errs)
     # so that can follow the errors and notice/debug problems
     res.fun = res.fun / np.sqrt(weight)
@@ -247,7 +249,7 @@ def _costfun(params, pose0, fixed_pt3d, n_cams, n_pts, n_dist, n_cam_intr, cam_i
     points_3d = fixed_pt3d if len(pts3d) == 0 else pts3d
     points_proj = _project(points_3d[pt3d_idxs], poses[cam_idxs], K, dist_coefs)
 
-    if t_off is not None and len(t_off) > 0:
+    if t_off is not None and len(t_off) > 0 and not DT_ADJ_MEAS_VEL:
         d_pts2d = v_pts2d * t_off[cam_idxs]  # for 1st order approximation of where the 2d points would when meas_r recorded
     else:
         d_pts2d = 0
@@ -267,9 +269,14 @@ def _costfun(params, pose0, fixed_pt3d, n_cams, n_pts, n_dist, n_cam_intr, cam_i
         loc_err = ((meas_r - poses[meas_idxs, 3:]) / loc_err_sd).ravel()
         rot_err_aa = tools.rotate_rotations_aa(meas_aa, -poses[meas_idxs, :3])
     else:
+        if t_off is not None and len(t_off) > 0 and DT_ADJ_MEAS_VEL:
+            d_meas_r = v_pts2d * t_off
+        else:
+            d_meas_r = 0
+
         cam_rot_wf = -poses[meas_idxs, :3]
         cam_loc_wf = tools.rotate_points_aa(-poses[meas_idxs, 3:6], cam_rot_wf)
-        loc_err = ((meas_r - cam_loc_wf) / loc_err_sd).ravel()
+        loc_err = ((meas_r + d_meas_r - cam_loc_wf) / loc_err_sd).ravel()
         if 0:
             # TODO: rot_err_aa can be 2*pi shifted, what to do?
             rot_err_aa = tools.rotate_rotations_aa(meas_aa, -cam_rot_wf)
@@ -376,8 +383,8 @@ def _jacobian(params, pose0, fixed_pt3d, n_cams, n_pts, n_dist, n_cam_intr, cam_
     """
     cost function jacobian, from https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6891346/
     """
-    assert not GLOBAL_ADJ and not ENABLE_DT_ADJ, \
-        'analytical jacobian does not support GLOBAL_ADJ or ENABLE_DT_ADJ'
+    assert not GLOBAL_ADJ and (not ENABLE_DT_ADJ or DT_ADJ_MEAS_VEL), \
+        'analytical jacobian does not support GLOBAL_ADJ or ENABLE_DT_ADJ with pixel velocity'
 
     params = np.hstack((pose0, params))
     poses, pts3d, dist_coefs, cam_intr, t_off = _unpack(params, n_cams, n_pts if len(fixed_pt3d) == 0 else 0,
@@ -395,10 +402,11 @@ def _jacobian(params, pose0, fixed_pt3d, n_cams, n_pts, n_dist, n_cam_intr, cam_
 
     # parameter count (6d poses, np x 3d keypoint locations, 1d time offset)
     n1 = n_cams * 6
-    n2 = (0 if poses_only else n_pts * 3)
-    n3 = (0 if dist_coefs is None else 2)
-    n4 = (0 if cam_intr is None else len(cam_intr))
-    n = n1 + n2 + n3 + n4
+    n2 = meas_idxs.size * (1 if ENABLE_DT_ADJ else 0)
+    n3 = (0 if poses_only else n_pts * 3)
+    n4 = (0 if dist_coefs is None else 2)
+    n5 = (0 if cam_intr is None else len(cam_intr))
+    n = n1 + n2 + n3 + n4 + n5
     # n3 = meas_idxs.size * (1 if ENABLE_DT_ADJ else 0)
     # n4 = 0 if meas_idxs.size < 2 or not GLOBAL_ADJ else (7 if GLOBAL_ADJ > 2 else 4)
     # np = n1 + n2 + n3 + n4
@@ -537,12 +545,12 @@ def _jacobian(params, pose0, fixed_pt3d, n_cams, n_pts, n_dist, n_cam_intr, cam_
 
         dEuc = tools.rotate_points_aa(dEu, -poses[cam_idxs, :3])
         dEvc = tools.rotate_points_aa(dEv, -poses[cam_idxs, :3])
-        J[2 * i + 0, n1 + pt3d_idxs * 3 + 0] = dEuc[:, 0]
-        J[2 * i + 0, n1 + pt3d_idxs * 3 + 1] = 0 if RESTRICT_3D_POINT_Y else dEuc[:, 1]
-        J[2 * i + 0, n1 + pt3d_idxs * 3 + 2] = dEuc[:, 2]
-        J[2 * i + 1, n1 + pt3d_idxs * 3 + 0] = dEvc[:, 0]
-        J[2 * i + 1, n1 + pt3d_idxs * 3 + 1] = 0 if RESTRICT_3D_POINT_Y else dEvc[:, 1]
-        J[2 * i + 1, n1 + pt3d_idxs * 3 + 2] = dEvc[:, 2]
+        J[2 * i + 0, n1 + n2 + pt3d_idxs * 3 + 0] = dEuc[:, 0]
+        J[2 * i + 0, n1 + n2 + pt3d_idxs * 3 + 1] = 0 if RESTRICT_3D_POINT_Y else dEuc[:, 1]
+        J[2 * i + 0, n1 + n2 + pt3d_idxs * 3 + 2] = dEuc[:, 2]
+        J[2 * i + 1, n1 + n2 + pt3d_idxs * 3 + 0] = dEvc[:, 0]
+        J[2 * i + 1, n1 + n2 + pt3d_idxs * 3 + 1] = 0 if RESTRICT_3D_POINT_Y else dEvc[:, 1]
+        J[2 * i + 1, n1 + n2 + pt3d_idxs * 3 + 2] = dEvc[:, 2]
 
     # distortion coefficients (D) affect reprojection error terms
     ####################################################
@@ -559,10 +567,10 @@ def _jacobian(params, pose0, fixed_pt3d, n_cams, n_pts, n_dist, n_cam_intr, cam_
     #           [-fy*Yc/Zc*R**2, -fy*Yc/Zc*R**4]]
     #
     if dist_coefs is not None:
-        J[2 * i + 0, n1 + n2 + 0] = tmp = -fx*Xn*R2
-        J[2 * i + 0, n1 + n2 + 1] = tmp * R2
-        J[2 * i + 1, n1 + n2 + 0] = tmp = -fy*Yn*R2
-        J[2 * i + 1, n1 + n2 + 1] = tmp * R2
+        J[2 * i + 0, n1 + n2 + n3 + 0] = tmp = -fx*Xn*R2
+        J[2 * i + 0, n1 + n2 + n3 + 1] = tmp * R2
+        J[2 * i + 1, n1 + n2 + n3 + 0] = tmp = -fy*Yn*R2
+        J[2 * i + 1, n1 + n2 + n3 + 1] = tmp * R2
 
     # camera intrinsics (I=[fl, cx, cy]) affect reprojection error terms
     # [[e_u], [e_v]] = [[u - fl*Xn - cx],
@@ -571,11 +579,11 @@ def _jacobian(params, pose0, fixed_pt3d, n_cams, n_pts, n_dist, n_cam_intr, cam_
     #          [-Yn, 0, -1]]
     if n_cam_intr > 0:
         if n_cam_intr != 2:
-            J[2 * i + 0, n1 + n2 + n3 + 0] = -Xn
-            J[2 * i + 1, n1 + n2 + n3 + 0] = -Yn
+            J[2 * i + 0, n1 + n2 + n3 + n4 + 0] = -Xn
+            J[2 * i + 1, n1 + n2 + n3 + n4 + 0] = -Yn
         if n_cam_intr > 1:
-            J[2 * i + 0, n1 + n2 + n3 + (1 if n_cam_intr != 2 else 0)] = -1
-            J[2 * i + 1, n1 + n2 + n3 + (2 if n_cam_intr != 2 else 1)] = -1
+            J[2 * i + 0, n1 + n2 + n3 + n4 + (1 if n_cam_intr != 2 else 0)] = -1
+            J[2 * i + 1, n1 + n2 + n3 + n4 + (2 if n_cam_intr != 2 else 1)] = -1
 
     # # time offsets affect reprojection error terms (possible to do in a better way?)
     # if ENABLE_DT_ADJ:
@@ -618,7 +626,13 @@ def _jacobian(params, pose0, fixed_pt3d, n_cams, n_pts, n_dist, n_cam_intr, cam_
             a, b = [1, 0, 0][r], [2, 2, 1][r]
             sign = -1 if r == 1 else 1
             J[m1 + 3 * i + s, meas_idxs * 6 + r] = sign * (Rs[:, a, s] * poses[meas_idxs, 3 + b]
-                                                         - Rs[:, b, s] * poses[meas_idxs, 3 + a])
+                                                               - Rs[:, b, s] * poses[meas_idxs, 3 + a])
+
+    # time offset affecting location measurement error
+    if t_off is not None and len(t_off) > 0 and DT_ADJ_MEAS_VEL:
+        v_pts3d = (v_pts2d / loc_err_sd).flatten()
+        for s in range(3):
+            J[m1 + 3 * i + s, n1 + i] = v_pts3d[3 * i + s]
 
     # orientation components affect ori measurement error terms
     ###########################################################
@@ -809,9 +823,9 @@ def _unpack(params, n_cams, n_pts, n_dist, n_cam_intr, n_meas, meas_r0):
     Retrieve camera parameters and 3-D coordinates.
     """
     a = n_cams * 6
-    b = a + n_pts * 3
-    c = b + n_meas * (1 if ENABLE_DT_ADJ else 0)
-    d = c + (7 if GLOBAL_ADJ > 2 else 44 if GLOBAL_ADJ else 0)
+    b = a + n_meas * (1 if ENABLE_DT_ADJ else 0)
+    c = b + n_pts * 3
+    d = c + (7 if GLOBAL_ADJ > 2 else 4 if GLOBAL_ADJ else 0)
     e = d + n_dist
     f = e + n_cam_intr
 
@@ -821,9 +835,9 @@ def _unpack(params, n_cams, n_pts, n_dist, n_cam_intr, n_meas, meas_r0):
         poses[:, 2] = np.sign(poses[:, 2]) * np.linalg.norm(poses[:, :3], axis=1)
         poses[:, :2] = 0
 
-    pts3d = params[a:b].reshape((n_pts, 3))
+    t_off = params[a:b].reshape((-1, 1))
+    pts3d = params[b:c].reshape((n_pts, 3))
     dist_coefs, cam_intr = None, None
-    t_off = params[b:c].reshape((-1,))
 
     if n_meas > 1 and GLOBAL_ADJ:
         rot_off = np.array([[0, 0, 0]]) if GLOBAL_ADJ < 3 else params[d-7:d-4].reshape((1, 3))
