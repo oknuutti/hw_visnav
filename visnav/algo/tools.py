@@ -107,7 +107,7 @@ class Pose:
         return Pose(
             q_times_v(self.quat.conj(), -self.loc),
             self.quat.conj(),
-            q_times_v(self.quat.conj(), -self.vel))
+            q_times_v(self.quat.conj(), -getattr(self, 'vel', np.array([0, 0, 0]))))
 
     def to_global(self, global_to_local_frame_transf_pose: 'Pose', is_rot=True) -> 'Pose':
         """ transform pose from local to global frame """

@@ -541,7 +541,7 @@ class VisualOdometry:
                                       new_kp2d[:, 0, 0] <= w - self.no_kp_border,
                                       new_kp2d[:, 0, 1] <= h - self.no_kp_border))
 
-        if not self.orb_feature_tracking:
+        if not self.orb_feature_tracking and np.sum(mask) > 1:
             # check that not too close to each other
             idxs = np.where(mask)[0]
             D = tools.distance_mx(new_kp2d[idxs].squeeze())

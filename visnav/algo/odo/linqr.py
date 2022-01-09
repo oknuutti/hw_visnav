@@ -426,7 +426,8 @@ class ResidualBlock:
         if self.Jl is not None:
             Q, R = np.linalg.qr(self.Jl, 'complete')
             self._S = np.zeros((self.m + self.nl, self.nb + self.np + self.nl + 1), dtype=Q.dtype)
-            self._S[:self.m, :self.nb + self.np] = Q.T.dot(np.concatenate((self.Jb, self.Jp), axis=1))
+            Jbp = self.Jp if self.Jb is None else np.concatenate((self.Jb, self.Jp), axis=1)
+            self._S[:self.m, :self.nb + self.np] = Q.T.dot(Jbp)
             self._S[:self.m, self.nb + self.np:-1] = R
             self._S[:self.m, -1:] = Q.T.dot(self.r)
             # self._S = np.concatenate((

@@ -123,10 +123,7 @@ class NokiaSensor(Mission):
             f_id, t_id, t_t, f_t_raw1 = 0, 0, 0, None
             last_measure, ret = False, True
 
-            while cap.isOpened() and ret:
-                if last_measure:
-                    break
-
+            while cap.isOpened() and ret and not last_measure:
                 f_id += 1
                 ret, img = cap.read()
                 if not ret or img is None:
@@ -146,7 +143,10 @@ class NokiaSensor(Mission):
                 # read a measurement
                 meas = None
                 if t_t <= f_t + 0.5/fps:
-                    t_id = np.where(t_time > f_t + 0.5 / fps)[0][0] - 1
+                    later_measures = np.where(t_time > f_t + 0.5 / fps)[0]
+                    if len(later_measures) <= 1:
+                        last_measure = True
+                    t_id = later_measures[0] - 1
                     t_t = t_time[t_id]
                     lat, lon, alt, roll, pitch, yaw, *gimbal = t_data[t_id]
                     gimbal_roll, gimbal_pitch, gimbal_yaw = map(math.radians, gimbal)

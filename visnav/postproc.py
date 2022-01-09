@@ -87,10 +87,8 @@ def main():
     parser.add_argument('--normalize-images', action='store_true',
                         help='After all is done, normalize images based on current camera params')
     parser.add_argument('--fe-n', type=int, default=10, help='Extract AKAZE features every n frames')
+    parser.add_argument('--fe-triang-int', type=int, default=5, help='AKAZE feature triangulation interval in keyframes')
     args = parser.parse_args()
-
-    assert args.fix_fl and args.fix_pp and args.fix_dist and not args.abs_loc_r and not args.abs_ori_r, \
-        'not implemented'
 
     if not args.skip_fe:
         run_fe(args)
@@ -113,12 +111,34 @@ def run_fe(args):
         kapt = kapture_from_dir(kapt_path)
         sensor_id, width, height, fl_x, fl_y, pp_x, pp_y, *dist_coefs = cam_params = get_cam_params(kapt, SENSOR_NAME)
 
+        if kapt.keypoints is None:
+            kapt.keypoints = {}
+        if kapt.descriptors is None:
+            kapt.descriptors = {}
+
         if EXTRACTED_FEATURE_NAME in kapt.keypoints:
             # remove all previous features of same type
             for img_file in kapt.keypoints[EXTRACTED_FEATURE_NAME]:
                 os.unlink(get_keypoints_fullpath(EXTRACTED_FEATURE_NAME, kapt_path, img_file))
                 os.unlink(get_descriptors_fullpath(EXTRACTED_FEATURE_NAME, kapt_path, img_file))
+            # remove also related 3d-points and observations
+            rem_pt3d = []
+            for pt3d_id, obs in kapt.observations.items():
+                if EXTRACTED_FEATURE_NAME in obs:
+                    obs.pop(EXTRACTED_FEATURE_NAME)
+                    if len(obs) == 0:
+                        rem_pt3d.append(pt3d_id)
+            for pt3d_id in rem_pt3d:
+                kapt.observations.pop(pt3d_id)
+            if len(rem_pt3d) > 0:
+                min_id, max_id, tot_ids = np.min(rem_pt3d), np.max(rem_pt3d), len(rem_pt3d)
+                assert max_id - min_id + 1 == tot_ids and len(kapt.points3d) - 1 == max_id, \
+                       'can only remove all the 3d-points after a certain index'
+                kapt.points3d = kapt.points3d[:min_id, :]
+
         kapt.keypoints[EXTRACTED_FEATURE_NAME] = kt.Keypoints(EXTRACTED_FEATURE_NAME, np.float32, 2)
+        kapt.descriptors[EXTRACTED_FEATURE_NAME] = kt.Descriptors(EXTRACTED_FEATURE_NAME, np.uint8, 61,
+                                                                  EXTRACTED_FEATURE_NAME, 'hamming')
 
         logger.info('Extracting %s-features from every %dth frame' % (EXTRACTED_FEATURE_NAME, args.fe_n))
         records = list(kapt.records_camera.values())
@@ -143,14 +163,15 @@ def run_fe(args):
                 for (img_file, kps, descs), idx in zip(d, (idx1, idx2)):
                     # write keypoints and descriptors to kapture
                     kapt.keypoints[EXTRACTED_FEATURE_NAME].add(img_file)
+                    kapt.descriptors[EXTRACTED_FEATURE_NAME].add(img_file)
                     image_keypoints_to_file(get_keypoints_fullpath(EXTRACTED_FEATURE_NAME, kapt_path, img_file),
                                             kps[idx, :])
                     image_descriptors_to_file(get_descriptors_fullpath(EXTRACTED_FEATURE_NAME, kapt_path, img_file),
                                               descs[idx, :])
 
                     # write observations to kapture
-                    for kp_id, uv in enumerate(kps[idx, :]):
-                        k.observations.add(pt3d_id_start + kp_id, EXTRACTED_FEATURE_NAME, img_file, idx)
+                    for id in range(len(idx)):
+                        kapt.observations.add(pt3d_id_start + id, EXTRACTED_FEATURE_NAME, img_file, id)
 
         kapture_to_dir(kapt_path, kapt)
 
@@ -195,27 +216,29 @@ def find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d
         if path in cam_params:
             continue
 
-        kapt = kapture_from_dir(os.path.join(path, 'kapture'))
+        kapt_path = os.path.join(path, 'kapture')
+        kapt = kapture_from_dir(kapt_path)
         cam_params[path] = get_cam_params(kapt, SENSOR_NAME)
 
         sensor_id, cam = cam_params[path][0], cam_obj(cam_params[path])
         img2fid = dict([(fname[sensor_id], id) for id, fname in kapt.records_camera.items()])
-        ftype = kapt.keypoints[EXTRACTED_FEATURE_NAME]
+        kp_type = kapt.keypoints[EXTRACTED_FEATURE_NAME]
+        ds_type = kapt.descriptors[EXTRACTED_FEATURE_NAME]
 
         for img_file in kapt.keypoints[EXTRACTED_FEATURE_NAME]:
             frame_id = img2fid[img_file]
             traj = kapt.trajectories[(frame_id, sensor_id)]
             poses[(path, frame_id)] = Pose(traj.t, traj.r)
             pts2d[(path, frame_id)] = cam.undistort(image_keypoints_from_file(
-                get_keypoints_fullpath(EXTRACTED_FEATURE_NAME, path, img_file), ftype.dtype, ftype.dsize))
+                get_keypoints_fullpath(EXTRACTED_FEATURE_NAME, kapt_path, img_file), kp_type.dtype, kp_type.dsize))
             descr[(path, frame_id)] = image_descriptors_from_file(
-                get_descriptors_fullpath(EXTRACTED_FEATURE_NAME, path, img_file), ftype.dtype, ftype.dsize)
+                get_descriptors_fullpath(EXTRACTED_FEATURE_NAME, kapt_path, img_file), ds_type.dtype, ds_type.dsize)
 
             # {feat_id: pt3d_id, ...}
-            feat_to_pt3d = {t[EXTRACTED_FEATURE_NAME][1]: pt3d_id
-                            for pt3d_id, t in kapt.observations.items()
-                            if EXTRACTED_FEATURE_NAME in t}
-            obser.update({(path, frame_id, feat_id): kapt.points3d[pt3d_id]
+            feat_to_pt3d = {feat_id: pt3d_id
+                            for pt3d_id, t in kapt.observations.items() if EXTRACTED_FEATURE_NAME in t
+                            for f, feat_id in t[EXTRACTED_FEATURE_NAME] if f == img_file}
+            obser.update({(path, frame_id, feat_id): kapt.points3d[pt3d_id][:3]
                           for feat_id, pt3d_id in feat_to_pt3d.items()})
 
     # TODO: in some distant future, find closest pose based on GFTT/AKAZE locations instead of drone location
@@ -260,8 +283,8 @@ def run_ba(args):
         ini_vee=2.0,
         vee_factor=2.0,
         thread_n=1,
-        max_iters=30,
-        max_time=300,   # in sec
+        max_iters=50,
+        max_time=1000,   # in sec
         min_step_quality=0,
         xtol=0,
         rtol=0,
@@ -302,14 +325,25 @@ def run_ba(args):
         dist_coefs = dist_coefs[:dist_n]
 
         cam_params = (fl_x, fl_y, pp_x, pp_y, *dist_coefs)
-        cam_param_idxs = np.array([0, 2, 3, 4, 5], dtype=int)    # what params to optimize
+
+        # what params to optimize
+        cam_param_idxs = [0, 2, 3, 4, 5]
+        if args.fix_fl:
+            cam_param_idxs.remove(0)
+        if args.fix_pp:
+            cam_param_idxs.remove(2)
+            cam_param_idxs.remove(3)
+        if args.fix_dist:
+            cam_param_idxs.remove(4)
+            cam_param_idxs.remove(5)
+        cam_param_idxs = np.array(cam_param_idxs, dtype=int)
 
         logger.info('loading poses and keypoints...')
         poses, pts3d, pts2d, pose_idxs, pt3d_idxs, meas_r, meas_aa, meas_idxs, _ = \
-            get_ba_params(path, results, kapt, sensor_id)
+            get_ba_params(kapt_path, results, kapt, sensor_id)
 
-        _meas_r = meas_r if 1 else None   # enable/disable loc measurements
-        _meas_aa = meas_aa if 0 else None  # enable/disable ori measurements
+        _meas_r = meas_r if args.abs_loc_r else None   # enable/disable loc measurements
+        _meas_aa = meas_aa if args.abs_ori_r else None  # enable/disable ori measurements
         _meas_idxs = None if meas_r is None and meas_aa is None else meas_idxs
 
         problem = Problem(pts2d, cam_params, cam_param_idxs, poses, pose_idxs, pts3d, pt3d_idxs, _meas_r, _meas_aa,
@@ -365,28 +399,31 @@ def run_ba(args):
             plot_results(results, map3d, frame_names, meta_names, nadir_looking=args.nadir_looking)
 
 
-def get_ba_params(path, results, kapt, sensor_id):
+def get_ba_params(kapt_path, results, kapt, sensor_id):
     frames = [(id, fname[sensor_id]) for id, fname in kapt.records_camera.items()]
     fname2id = {fname: id for id, fname in frames}
 
     poses = np.array([[*tools.q_to_angleaxis(kapt.trajectories[id][sensor_id].r, True),
                        *kapt.trajectories[id][sensor_id].t] for id, fname in frames]).astype(float)
 
-    pts3d = kapt.points3d[:, :3]
     feat = kapt.keypoints[VO_FEATURE_NAME]
     uv_map = {}
     for id_f, fname in frames:
-        uvs = image_keypoints_from_file(get_keypoints_fullpath(VO_FEATURE_NAME, path, fname), feat.dtype, feat.dsize)
+        uvs = image_keypoints_from_file(get_keypoints_fullpath(VO_FEATURE_NAME, kapt_path, fname), feat.dtype, feat.dsize)
         uv_map[id_f] = uvs
 
+    max_pt3d_id = -1
     f_uv = {}
     for id3, r in kapt.observations.items():
-        for fname, id2 in r[VO_FEATURE_NAME]:
-            if fname in fname2id:
-                id_f = fname2id[fname]
-                f_uv.setdefault(id_f, {})[id3] = uv_map[id_f][id2, :]
+        if VO_FEATURE_NAME in r:
+            for fname, id2 in r[VO_FEATURE_NAME]:
+                if fname in fname2id:
+                    id_f = fname2id[fname]
+                    f_uv.setdefault(id_f, {})[id3] = uv_map[id_f][id2, :]
+                    max_pt3d_id = max(max_pt3d_id, id3)
 
     obs_kp = list(set.union(*[set(m.keys()) for m in f_uv.values()]))
+    pts3d = kapt.points3d[:max_pt3d_id+1, :3]
 
     cam_idxs, pt3d_idxs, pts2d = list(map(np.array, zip(*[
         (i, id3, uv.flatten())
@@ -437,13 +474,13 @@ def triangulate(kapt, cam_params, img_file1, kps1, descs1, img_file2, kps2, desc
 
     # match features based on descriptors, cross check for validity, sort keypoints so that indices indicate matches
     matcher = cv2.BFMatcher(cv2.NORM_HAMMING, True)
-    matches = matcher.match(descs1, descs2)
+    matches = np.array(matcher.match(descs1, descs2))
     kps1 = kps1[[m.queryIdx for m in matches], :]
     kps2 = kps2[[m.trainIdx for m in matches], :]
 
     # get camera parameters, undistort keypoints
     sensor_id, cam = cam_params[0], cam_obj(cam_params)
-    kps1, kps2 = map(lambda x: cam.undistort(x), (kps1, kps2))
+    kps1, kps2 = map(lambda x: cam.undistort(x).squeeze(), (kps1, kps2))
 
     # get camera frame pose matrices
     img2fid = dict([(fname[sensor_id], id) for id, fname in kapt.records_camera.items()])
@@ -453,19 +490,21 @@ def triangulate(kapt, cam_params, img_file1, kps1, descs1, img_file2, kps2, desc
     # triangulate matched keypoints
     kps4d = cv2.triangulatePoints(cam.cam_mx.dot(pose1), cam.cam_mx.dot(pose2),
                                   kps1.reshape((-1, 1, 2)), kps2.reshape((-1, 1, 2)))
-    pts3d = (kps4d.T[:, :3] / kps4d.T[:, 3:])[0]
+    pts3d = (kps4d.T[:, :3] / kps4d.T[:, 3:])
 
     # filter out bad triangulation results
     mask = np.ones((len(matches),), dtype=bool)
     for pose, kps in zip((pose1, pose2), (kps1, kps2)):
+        pose44 = np.eye(4)
+        pose44[:3, :] = pose
 
         # check that points are in front of the cam
-        kps4d_l = pose.dot(kps4d)
-        kps3d_l = kps4d_l[:, :3] / kps4d_l[:, 3:]
-        mask = np.logical_and(mask, kps3d_l[:, 2] < 0)
+        kps4d_l = pose44.dot(kps4d)
+        kps3d_l = kps4d_l.T[:, :3] / kps4d_l.T[:, 3:]
+        mask = np.logical_and(mask, kps3d_l[:, 2] > 0)  # camera borehole towards +z axis
 
         # check that reprojection error is not too large
-        repr_kps = cam.cam_mx.dot(pose).dot(kps4d_l.T).T
+        repr_kps = cam.cam_mx.dot(kps3d_l.T).T
         repr_kps = repr_kps[:, :2] / repr_kps[:, 2:]
         repr_err = np.linalg.norm(kps - repr_kps, axis=1)
         mask = np.logical_and(mask, repr_err < MAX_REPR_ERROR)
