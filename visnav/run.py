@@ -139,7 +139,7 @@ def main():
                     ori_offs.append(mission.odo.ori_off_q)
 
                 pts3d = np.array([pt.pt3d for pt in mission.odo.state.map3d.values() if pt.active])
-                if len(pts3d) > 0:
+                if len(pts3d) > 0 and nf.pose.post:
                     ground_alt = np.quantile(-pts3d[:, 1], 0.2)  # neg-y is altitude in cam frame
                     drone_alt = -(-nf.pose.post).loc[1]
                     expected_dist = drone_alt - mission.coord0[2]

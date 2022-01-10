@@ -55,6 +55,7 @@ logger = tools.get_logger("main")
 
 
 # TODO: the following:
+#  - debug pose kapture saving, currently saves badly as cost < 1 but when run again starts at cost > 1000
 #  - debug feature extraction
 #  - debug feature matching across flights
 #  - (5) implement truly global ba by joining given flights
@@ -401,6 +402,7 @@ def run_ba(args):
 
 def get_ba_params(kapt_path, results, kapt, sensor_id):
     frames = [(id, fname[sensor_id]) for id, fname in kapt.records_camera.items()]
+    frames = sorted(frames, key=lambda x: x[0])
     fname2id = {fname: id for id, fname in frames}
 
     poses = np.array([[*tools.q_to_angleaxis(kapt.trajectories[id][sensor_id].r, True),
@@ -442,10 +444,11 @@ def get_ba_params(kapt_path, results, kapt, sensor_id):
 def update_kapture(kapt_path, kapt, cam_params, poses, pts3d):
     cam_id = set_cam_params(kapt, SENSOR_NAME, cam_params)
 
-    for frame_num, pose in enumerate(poses):
-        kapt.trajectories[(frame_num, cam_id)] = kt.PoseTransform(r=pose.quat.components, t=pose.loc)
+    frame_ids = sorted(list(kapt.records_camera.keys()))
+    for frame_id, pose in zip(frame_ids, poses):
+        kapt.trajectories[(frame_id, cam_id)] = kt.PoseTransform(r=pose.quat.components, t=pose.loc)
 
-    kapt.points3d = kt.Points3d(np.concatenate((pts3d, np.ones_like(pts3d)*128), axis=1))
+    kapt.points3d[:len(pts3d), :] = np.concatenate((pts3d, np.ones_like(pts3d)*128), axis=1)
 
     kapture_to_dir(kapt_path, kapt)
 
