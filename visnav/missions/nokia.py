@@ -288,14 +288,15 @@ class NokiaSensor(Mission):
             'new_kf_min_displ_fov_ratio': 0.016,
             'ini_kf_triangulation_trigger': 40,
 
-            'max_keyframes': 50000,
-            'max_ba_keyframes': 100,
+            'max_keyframes': 90,
             'ba_interval': 10,
             'max_ba_fun_eval': 100 * 10,
-            'loc_err_sd': np.inf if 0 else np.array([2., 3., 2.]),  # y == alt (was [2, 10, 2])
+            'loc_err_sd': np.inf if 0 else np.array([2., 2., 2.]),  # y == alt (was [2, 10, 2])
             'ori_err_sd': np.inf if 1 else math.radians(10.0),
 
-            'ba_dist_coef': False,
+            'ba_dist_coef': True,          # optimize k1, k2
+            'ba_n_cam_intr': 2,            # optimize principal point, not focal length
+            'enable_marginalization': True,
         }
 
         if self.high_quality:

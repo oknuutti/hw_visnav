@@ -149,9 +149,10 @@ def main():
                     ))
 
                 if args.verbosity > 3:
-                    post = np.zeros((len(mission.odo.state.keyframes), 7))
-                    k, prior = 0, np.zeros((len(mission.odo.state.keyframes), 7))
-                    for j, kf in enumerate([kf for kf in mission.odo.state.keyframes if kf.pose.post]):
+                    keyframes = mission.odo.all_keyframes()
+                    post = np.zeros((len(keyframes), 7))
+                    k, prior = 0, np.zeros((len(keyframes), 7))
+                    for j, kf in enumerate([kf for kf in keyframes if kf.pose.post]):
                         post[j, :] = (-kf.pose.post).to_global(NokiaSensor.b2c).to_global(NokiaSensor.w2b).to_array()
                         if kf.measure is not None:
                             prior[k, :] = (-kf.pose.prior).to_global(NokiaSensor.b2c).to_global(NokiaSensor.w2b).to_array()
@@ -201,7 +202,7 @@ def main():
     except AttributeError as e:
         if 0:
             map3d = None
-            results = [(kf.pose, None, kf.time, kf.id) for kf in mission.odo.state.keyframes]
+            results = [(kf.pose, None, kf.time, kf.id) for kf in mission.odo.all_keyframes()]
         else:
             raise e
 

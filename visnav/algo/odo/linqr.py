@@ -89,7 +89,7 @@ class InnerLinearizerQR:
             self._a_block = ResidualBlock(None, self.problem.meas_idxs, ra, Jab, Jap, None, psize=self._pose_size)
             self._total_error += err
 
-        safe = True
+        safe = False    # safe is very slow, unsafe is dangerous as bugs won't be found
         index = lambda A, i, j: A[i, j] if safe else A._get_arrayXarray(i, j)
 
         # make landmark blocks

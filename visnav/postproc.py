@@ -28,7 +28,7 @@ from visnav.depthmaps import get_cam_params, set_cam_params
 from visnav.missions.nokia import NokiaSensor
 from visnav.run import plot_results
 
-DEBUG = 0
+DEBUG = 1
 PX_ERR_SD = 1.0
 LOC_ERR_SD = (3.0, 10.0, 3.0) if 1 else (np.inf,)
 ORI_ERR_SD = (math.radians(1.0) if 0 else np.inf,)
@@ -55,9 +55,6 @@ logger = tools.get_logger("main")
 
 
 # TODO: the following:
-#  - debug pose kapture saving, currently saves badly as cost < 1 but when run again starts at cost > 1000
-#  - debug feature extraction
-#  - debug feature matching across flights
 #  - (5) implement truly global ba by joining given flights
 #  - debug global ba
 #  - (6) implement image normalization and cam idealization for depth map estimation (here or at depthmaps.py?)
@@ -192,8 +189,8 @@ def run_fm(args):
     descr = {}  # {(flight-id, frame-id): [descr, ...], ...}          # feature-id is the index of the inner list
     obser = {}  # {(flight-id, frame-id, feature-id): 3d-point, ...}
 
-    res_pts3d = []  # [[(flight-id, pt3d-id), ...], [3d-point, [(frame-id, feature-id), ...]]...}
-    res_obser = []  # [(flight-id, frame-id, feature-id, pt3d-id), ...]  # pt3d-id is the index of list res_pts3d
+    res_pts3d = []  # [[3d-point, ...], ...]
+    res_obser = {}  # {(flight-id, frame-id, feature-id): pt3d-id, ...}  # pt3d-id is the index of list res_pts3d
 
     k = 0
     for i, path1 in enumerate(args.path):
@@ -204,7 +201,7 @@ def run_fm(args):
             find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d, res_obser)
 
     # calculate mean of each entry in res_pts3d
-    res_pts3d = [np.mean(np.array(pts3d), axis=0) for pts3d in res_pts3d]
+    res_pts3d = np.array([np.mean(np.array(pts3d), axis=0) for pts3d in res_pts3d])
 
     # save res_pts3d, res_obser so that can use for global ba
     with open(args.matches_path, 'wb') as fh:
@@ -213,6 +210,9 @@ def run_fm(args):
 
 def find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d, res_obser):
     # find all frames with akaze features, load poses and observations
+    if DEBUG:
+        img_files = {}
+
     for path in (path1, path2):
         if path in cam_params:
             continue
@@ -242,6 +242,9 @@ def find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d
             obser.update({(path, frame_id, feat_id): kapt.points3d[pt3d_id][:3]
                           for feat_id, pt3d_id in feat_to_pt3d.items()})
 
+            if DEBUG:
+                img_files[(path, frame_id)] = os.path.join(kapt_path, 'sensors', 'records_data', img_file)
+
     # TODO: in some distant future, find closest pose based on GFTT/AKAZE locations instead of drone location
     #       (similar to what is done in navex/datasets/preproc)
     # for each pose in flight1, find closest pose from flight2 (based on location only)
@@ -251,28 +254,41 @@ def find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d
     d, idxs2 = tree.query(locs1)
 
     # loop through matched frames
-    for fid1, idx2 in zip(fids1, idxs2):
+    successes = 0
+    pbar = tqdm(zip(fids1, idxs2), total=len(fids1))
+    for fid1, idx2 in pbar:
         if idx2 < len(fids2):
             # match features, verify with 3d-2d-ransac both ways, add 3d points to list
             d = []
             for path, fid in zip((path1, path2), (fid1, fids2[idx2])):
                 cam = cam_obj(cam_params[path])
-                pts3d = [obser[(path, fid, i)] for i in range(len(pts2d[(path, fid)]))]
+                pts3d = np.array([obser[(path, fid, i)] for i in range(len(pts2d[(path, fid)]))])
                 d.append((cam.cam_mx, pts2d[(path, fid)], descr[(path, fid)], pts3d))
 
             matches1, matches2 = match_and_validate(*d[0], *d[1])
 
             if matches1 is not None:
-                for path, fid, feat_ids in zip((path1, path2), (fid1, fids2[idx2]), (matches1, matches2)):
-                    for feat_id in feat_ids:
-                        key = (path, fid, feat_id)
-                        if key in res_obser:
-                            pt3d_id = res_obser[key]
-                            res_pts3d[pt3d_id].append(obser[key])
-                        else:
-                            pt3d_id = len(res_pts3d)
-                            res_pts3d.append([obser[key]])
-                        res_obser[key] = pt3d_id
+                for feat_id1, feat_id2 in zip(matches1, matches2):
+                    key1 = (path1, fid1, feat_id1)
+                    key2 = (path2, fids2[idx2], feat_id2)
+                    pt3d_id = None
+                    if key1 in res_obser:
+                        pt3d_id = res_obser[key1]
+                    if pt3d_id is None and key2 in res_obser:
+                        pt3d_id = res_obser[key2]
+                    if pt3d_id is None:
+                        pt3d_id = len(res_pts3d)
+                        res_pts3d.append([])
+                    res_pts3d[pt3d_id].append(obser[key1])
+                    res_pts3d[pt3d_id].append(obser[key2])
+                    res_obser[key1] = pt3d_id
+                    res_obser[key2] = pt3d_id
+
+                successes += 1
+                pbar.set_postfix({'successful matches': successes})
+                if DEBUG:
+                    plot_matches(img_files[(path1, fid1)], img_files[(path2, fids2[idx2])],
+                                 d[0][1][matches1, ...], d[1][1][matches2, ...])
 
 
 def run_ba(args):
@@ -285,11 +301,11 @@ def run_ba(args):
         vee_factor=2.0,
         thread_n=1,
         max_iters=50,
-        max_time=1000,   # in sec
+        max_time=20000,   # in sec
         min_step_quality=0,
         xtol=0,
         rtol=0,
-        ftol=1e-5,
+        ftol=3e-4,
 
         jacobi_scaling_eps=0,
         lin_cg_maxiter=500,
@@ -297,13 +313,13 @@ def run_ba(args):
         preconditioner_type=LinearizerQR.PRECONDITIONER_TYPE_SCHUR_JACOBI,
 
         huber_coefs=HUBER_COEFS,
-        use_weighted_residuals=False,
+        use_weighted_residuals=True,
     )
 
     # TODO: (5) update so that also loads AKAZE features, joins separate flights before running truly global BA
     for i, path in enumerate(args.path):
         with open(os.path.join(path, 'result.pickle'), 'rb') as fh:
-            results, map3d, frame_names, meta_names, gt, ba_errs = pickle.load(fh)
+            orig_results, map3d, frame_names, meta_names, gt, ba_errs = pickle.load(fh)
 
         kapt_path = os.path.join(path, 'kapture')
         kapt = kapture_from_dir(kapt_path)
@@ -341,7 +357,7 @@ def run_ba(args):
 
         logger.info('loading poses and keypoints...')
         poses, pts3d, pts2d, pose_idxs, pt3d_idxs, meas_r, meas_aa, meas_idxs, _ = \
-            get_ba_params(kapt_path, results, kapt, sensor_id)
+            get_ba_params(kapt_path, orig_results, kapt, sensor_id)
 
         _meas_r = meas_r if args.abs_loc_r else None   # enable/disable loc measurements
         _meas_aa = meas_aa if args.abs_ori_r else None  # enable/disable ori measurements
@@ -350,7 +366,33 @@ def run_ba(args):
         problem = Problem(pts2d, cam_params, cam_param_idxs, poses, pose_idxs, pts3d, pt3d_idxs, _meas_r, _meas_aa,
                           _meas_idxs, PX_ERR_SD, LOC_ERR_SD, ORI_ERR_SD, dtype=np.float64)
 
-        if 0:
+        def save_and_plot(problem, log=False, save=False, plot=False):
+            cam_params, poses, pts3d = map(lambda x: getattr(problem, x), ('cam_params', 'poses', 'pts3d'))
+
+            results = orig_results[:len(poses)]
+            poses = [Pose(poses[j, 3:], tools.angleaxis_to_q(poses[j, :3])) for j in range(len(results))]
+            for j, pose in enumerate(poses):
+                results[j][0].post = pose
+            map3d = [Keypoint(pt3d=pts3d[j, :]) for j in range(len(pts3d))]
+
+            if log:
+                fl_x, fl_y, pp_x, pp_y, *dist_coefs = cam_params
+                logger.info('new fl: %s, cx: %s, cy: %s, k1, k2: %s' % (
+                    fl_x / args.img_sc, pp_x / args.img_sc, pp_y / args.img_sc, dist_coefs))
+
+            if save:
+                with open(os.path.join(path, 'global-ba-result.pickle'), 'wb') as fh:
+                    pickle.dump((results, map3d, frame_names, meta_names, gt, ba_errs), fh)
+
+                update_kapture(kapt_path, kapt, [width, height] + list(cam_params), poses, pts3d)
+
+            if plot:
+                plot_results(results, map3d, frame_names, meta_names, nadir_looking=args.nadir_looking)
+
+        if 1:
+            solver.solve(problem, callback=lambda x: save_and_plot(x, plot=True) if DEBUG else None)
+            save_and_plot(problem, log=True, save=True, plot=args.plot)
+        else:
             J = problem.jacobian()
             r = problem.residual()
 
@@ -376,28 +418,6 @@ def run_ba(args):
             plt.show()
 
             exit()
-
-        solver.solve(problem)
-
-        cam_params, poses, pts3d = map(lambda x: getattr(problem, x), ('cam_params', 'poses', 'pts3d'))
-
-        results = results[:len(poses)]
-        poses = [Pose(poses[j, 3:], tools.angleaxis_to_q(poses[j, :3])) for j in range(len(results))]
-        for j, pose in enumerate(poses):
-            results[j][0].post = pose
-        map3d = [Keypoint(pt3d=pts3d[j, :]) for j in range(len(pts3d))]
-
-        with open(os.path.join(path, 'global-ba-result.pickle'), 'wb') as fh:
-            pickle.dump((results, map3d, frame_names, meta_names, gt, ba_errs), fh)
-
-        fl_x, fl_y, pp_x, pp_y, *dist_coefs = cam_params
-        logger.info('new fl: %s, cx: %s, cy: %s, k1, k2: %s' % (
-            fl_x / args.img_sc, pp_x / args.img_sc, pp_y / args.img_sc, dist_coefs))
-
-        update_kapture(kapt_path, kapt, [width, height] + list(cam_params), poses, pts3d)
-
-        if args.plot:
-            plot_results(results, map3d, frame_names, meta_names, nadir_looking=args.nadir_looking)
 
 
 def get_ba_params(kapt_path, results, kapt, sensor_id):
@@ -521,7 +541,7 @@ def triangulate(kapt, cam_params, img_file1, kps1, descs1, img_file2, kps2, desc
 def match_and_validate(cam_mx1, kps1, descr1, pts3d1, cam_mx2, kps2, descr2, pts3d2):
     # match features based on descriptors, cross check for validity, sort keypoints so that indices indicate matches
     matcher = cv2.BFMatcher(cv2.NORM_HAMMING, True)
-    matches = matcher.match(descr1, descr2)
+    matches = np.array(matcher.match(descr1, descr2))
     kps1, pts3d1 = map(lambda x: x[[m.queryIdx for m in matches], :], (kps1, pts3d1))
     kps2, pts3d2 = map(lambda x: x[[m.trainIdx for m in matches], :], (kps2, pts3d2))
 
@@ -529,15 +549,26 @@ def match_and_validate(cam_mx1, kps1, descr1, pts3d1, cam_mx2, kps2, descr2, pts
 
     # 3d-2d ransac on both, need same features to be inliers
     inliers = set(range(len(kps1)))
-    for pts3d, cam_mx, kps in ((pts3d1, pts3d2), (cam_mx2, cam_mx1), (kps2, kps1)):
+    for pts3d, cam_mx, kps in zip((pts3d1, pts3d2), (cam_mx2, cam_mx1), (kps2, kps1)):
         ok, rv, r, inl = cv2.solvePnPRansac(pts3d, kps, cam_mx, None, iterationsCount=10000,
                                             reprojectionError=MAX_REPR_ERROR, flags=cv2.SOLVEPNP_AP3P)
-        inliers = inliers.intersection(inl)
+        inliers = inliers.intersection(inl.flatten())
 
     if len(inliers) < MIN_INLIERS:
         return None, None
 
-    return (*zip(*[[m.queryIdx, m.trainIdx] for m in matches[inliers]]),)
+    return (*zip(*[[m.queryIdx, m.trainIdx] for m in matches[list(inliers)]]),)
+
+
+def plot_matches(img_path1, img_path2, kps1, kps2):
+    def arr2kp(arr, size=7):
+        return [cv2.KeyPoint(p[0, 0], p[0, 1], size) for p in arr]
+
+    matches = [cv2.DMatch(i, i, 0, 0) for i in range(len(kps1))]
+    img1, img2 = map(lambda x: cv2.imread(x), (img_path1, img_path2))
+    img = cv2.drawMatches(img1, arr2kp(kps1), img2, arr2kp(kps2), matches, None)
+    cv2.imshow('matches', img)
+    cv2.waitKey()
 
 
 if __name__ == '__main__':

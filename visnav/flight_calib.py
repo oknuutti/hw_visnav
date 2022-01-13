@@ -30,7 +30,7 @@ TAKEOFF_LAWN_ALT = -0.2  # in meters
 SET_3D_POINT_ALT = False
 
 N_CAM_INTR = 0
-PRE_BA_DIST_ENABLED = True
+PRE_BA_DIST_ENABLED = False
 
 (
     ERROR_TYPE_ALTITUDE,
@@ -298,7 +298,7 @@ def run_ba(width, height, pp_x, pp_y, fl, dist_coefs, poses, pts3d, pts2d, cam_i
         poses, pts3d, norm_pts2d, np.zeros((0, 1)), cam_idxs, pt3d_idxs, cam.intrinsic_camera_mx(), dist_coefs,
         np.array([PX_ERR_SD]), meas_r, meas_aa, np.zeros((0, 1)), meas_idxs,
         np.array(LOC_ERR_SD), np.array(ORI_ERR_SD), px_err_weight=np.array([1]), n_cam_intr=n_cam_intr,
-        log_writer=None, max_nfev=1000, skip_pose_n=1, poses_only=False, huber_coef=(1, 5, 0.5))
+        log_writer=None, max_nfev=5, skip_pose_n=1, poses_only=False, huber_coef=(1, 5, 0.5))
     new_poses = np.concatenate((poses[:1, :], new_poses), axis=0)
     return new_poses, new_pts3d, dist_ba, cam_intr_ba, ba_errs
 

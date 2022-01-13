@@ -168,6 +168,17 @@ class Manifold(np.ndarray):
         new.so3 = self.so3.copy()
         return new
 
+    def __getitem__(self, key):
+        value = super(Manifold, self).__getitem__(key)
+        if isinstance(value, Manifold):
+            value.so3 = self.so3[key]
+        return value
+
+    def __setitem__(self, key, value):
+        super(Manifold, self).__setitem__(key, value)
+        if isinstance(value, Manifold):
+            self.so3[key] = value.so3[key]
+
     def __add__(self, other):
         assert type(other) == np.ndarray, 'Can only sum an ndarray to this Manifold implementation'
         new = self.to_array(new=True)

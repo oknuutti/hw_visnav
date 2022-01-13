@@ -6,22 +6,35 @@ import quaternion
 
 from visnav.algo import tools
 from visnav.algo.tools import Pose
-from visnav.algo.odo.base import VisualOdometry
+from visnav.algo.odo.base import VisualOdometry, State
 from visnav.algo.odo.vis_gps_bundleadj import vis_gps_bundle_adj
 
 logger = logging.getLogger("odo").getChild("visgps")
+
+
+class VisualGPSState(State):
+    def __init__(self):
+        super(VisualGPSState, self).__init__()
+        self.ba_prior = (None,) * 4
+        self.ba_prior_fids = np.array([])
 
 
 class VisualGPSNav(VisualOdometry):
     DEF_LOC_ERR_SD = 10     # in meters
     DEF_ORI_ERR_SD = math.radians(10)
     DEF_BA_DIST_COEF = False
+    DEF_BA_N_CAM_INTR = 0
+    DEF_ENABLE_MARGINALIZATION = False
 
     def __init__(self, *args, geodetic_origin=None, ori_off_q=None, ba_err_logger=None, **kwargs):
         super(VisualGPSNav, self).__init__(*args, **kwargs)
         self.geodetic_origin = geodetic_origin    # (lat, lon, height)
         self.ori_off_q = ori_off_q
         self.ba_err_logger = ba_err_logger
+
+    @staticmethod
+    def get_new_state():
+        return VisualGPSState()
 
     def initialize_frame(self, time, image, measure):
         nf = super(VisualGPSNav, self).initialize_frame(time, image, measure)
@@ -117,11 +130,11 @@ class VisualGPSNav(VisualOdometry):
                 if current_only:
                     keyframes = self.state.keyframes[-1:]
                 else:
-                    keyframes = self._get_ba_keyframes()
+                    keyframes = self.state.keyframes
 
         # possibly do camera calibration before bundle adjustment
-        if not self.cam_calibrated and len(keyframes) >= self.ba_interval:  #  self.ba_interval, self.max_ba_keyframes
-            # experimental, doesnt work
+        if not self.cam_calibrated and len(keyframes) >= self.ba_interval:  #  self.ba_interval, self.max_keyframes
+            # experimental, doesnt work0
             self.calibrate_cam(keyframes)
             if 0:
                 # disable for continuous calibration
@@ -139,7 +152,7 @@ class VisualGPSNav(VisualOdometry):
 
         with self._new_frame_lock:
             dist_coefs = None
-            if self.ba_dist_coef and not current_only and len(keyframes) >= self.max_ba_keyframes:
+            if self.ba_dist_coef and not current_only and len(keyframes) >= self.max_keyframes:
                 assert np.where(np.array(self.cam.dist_coefs) != 0)[0][-1] + 1 <= 2, 'too many distortion coefficients'
                 dist_coefs = self.cam.dist_coefs[:2]
 
@@ -158,27 +171,54 @@ class VisualGPSNav(VisualOdometry):
             else:
                 meas_idxs, meas_r, meas_aa, t_off = [np.empty(0)] * 4
 
+            if not current_only:
+                rem_kf_ids = self.prune_keyframes()
+                rem_kp_ids = self.prune_map3d(rem_kf_ids, active_only=False)
+
         meas_idxs = meas_idxs.astype(int)
         meas_r = meas_r.reshape((-1, 3))
         meas_aa = meas_aa.reshape((-1, 3))
 
-        args = (poses_mx, pts3d, pts2d, v_pts2d, cam_idxs, pt3d_idxs, self.cam_mx, dist_coefs, px_err_sd, meas_r,
+        args = (poses_mx, pts3d, pts2d, v_pts2d, cam_idxs, pt3d_idxs, self.cam.cam_mx, dist_coefs, px_err_sd, meas_r,
                 meas_aa, t_off, meas_idxs, self.loc_err_sd, self.ori_err_sd)
         kwargs = dict(max_nfev=self.max_ba_fun_eval, skip_pose_n=skip_pose_n, huber_coef=(1, 5, 0.5), poses_only=current_only)
 
-        poses_ba, pts3d_ba, dist_ba, cam_intr, t_off, errs = self._call_ba(vis_gps_bundle_adj, args, kwargs, parallize=not same_thread)
+        if self.ba_n_cam_intr and not current_only and len(keyframes) >= self.max_keyframes:
+            kwargs['n_cam_intr'] = self.ba_n_cam_intr
+
+        if self.enable_marginalization and not current_only:
+            kf_ids = [kf.id for kf in keyframes]
+            kwargs.update(dict(
+                prior_k=self.state.ba_prior[0],
+                prior_x=self.state.ba_prior[1],
+                prior_r=self.state.ba_prior[2],
+                prior_J=self.state.ba_prior[3],
+                prior_cam_idxs=np.where(np.in1d(self.state.ba_prior_fids, kf_ids))[0],
+                marginalize_pose_idxs=np.where(np.in1d(kf_ids, rem_kf_ids))[0],
+                marginalize_pt3d_idxs=np.where(np.in1d(ids, rem_kp_ids))[0],
+            ))
+
+        poses_ba, pts3d_ba, dist_ba, cam_intr, t_off, new_prior, errs = \
+            self._call_ba(vis_gps_bundle_adj, args, kwargs, parallize=not same_thread)
+
+        if self.enable_marginalization and not current_only:
+            self.state.ba_prior = new_prior
+            self.state.ba_prior_fids = kf_ids
 
         if dist_ba is not None:
             print('\nDIST: %s\n' % dist_ba)
         if cam_intr is not None:
-            # TODO: update camera matrix based on this
             print('\nCAM INTR: %s\n' % cam_intr)
 
         with self._new_frame_lock:
             for i, dt in zip(meas_idxs, t_off):
                 keyframes[i].measure.time_adj = dt - keyframes[i].measure.time_off
 
-            self._update_poses(keyframes, ids, poses_ba, pts3d_ba, dist_ba, skip_pose_n=skip_pose_n, pop_ba_queue=not same_thread)
+            self._update_poses(keyframes, ids, poses_ba, pts3d_ba, dist_ba, cam_intr, skip_pose_n=skip_pose_n, pop_ba_queue=not same_thread)
+
+            if not current_only:
+                self.del_keyframes(rem_kf_ids)
+                self.del_keypoints(rem_kp_ids)
 
         if self.ba_err_logger is not None and not current_only:
             self.ba_err_logger(keyframes[-1].id, errs)

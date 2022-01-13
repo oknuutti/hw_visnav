@@ -72,7 +72,7 @@ class RootBundleAdjuster:
         self._linearizer = None
         self._prev_x = None
 
-    def solve(self, prob):
+    def solve(self, prob, callback=None):
         self._timer = Stopwatch(start=True)
         self._lambda = self.ini_lambda
         self._lambda_vee = self.ini_vee
@@ -88,16 +88,26 @@ class RootBundleAdjuster:
                 i, stats.time, stats.cost, stats.delta_f, stats.l_diff, stats.step_quality,
                 tools.fixed_precision(stats.tr_rad, 3, True)))
 
+            if callback is not None:
+                callback(prob)
+
             if i == 0:
                 continue
             if stats.delta_f < self.ftol:
+                logger.info('ftol reached: %f < %f' % (stats.delta_f, self.ftol))
                 break
             if stats.delta_r < self.rtol:
+                logger.info('rtol reached: %f < %f' % (stats.delta_r, self.rtol))
                 break
             if stats.delta_x < self.xtol:
+                logger.info('xtol reached: %f < %f' % (stats.delta_x, self.xtol))
                 break
             if self._timer.elapsed > self.max_time:
+                logger.info('max time reached: %.0fs > %.0fs' % (self._timer.elapsed, self.max_time))
                 break
+
+        if i + 1 == self.max_iters:
+            logger.info('max iters (%d) reached' % self.max_iters)
 
         # TODO: return stats or something?
         return

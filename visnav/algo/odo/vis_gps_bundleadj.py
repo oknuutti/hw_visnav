@@ -11,7 +11,8 @@ import warnings
 import numpy as np
 import quaternion
 
-from scipy.sparse import lil_matrix
+import scipy.sparse as sp
+import scipy.linalg as spl
 from scipy.optimize import least_squares
 
 from visnav.algo import tools
@@ -32,7 +33,11 @@ RESTRICT_3D_POINT_Y = False
 def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, v_pts2d: np.ndarray,
                        cam_idxs: np.ndarray, pt3d_idxs: np.ndarray, K: np.ndarray, dist_coefs: np.ndarray,
                        px_err_sd: np.ndarray, meas_r: np.ndarray, meas_aa: np.ndarray, t_off: np.ndarray,
-                       meas_idxs: np.ndarray, loc_err_sd: float, ori_err_sd: float, dtype=np.float64, px_err_weight=1,
+                       meas_idxs: np.ndarray, loc_err_sd: float, ori_err_sd: float,
+                       prior_r: np.ndarray = None, prior_J: np.ndarray = None, prior_x: np.ndarray = None,
+                       prior_k: np.ndarray = None, prior_cam_idxs: np.ndarray = None,
+                       marginalize_pose_idxs: np.ndarray = None, marginalize_pt3d_idxs: np.ndarray = None,
+                       dtype=np.float64, px_err_weight=1,
                        n_cam_intr=0, log_writer=None, max_nfev=None, skip_pose_n=1, poses_only=False, huber_coef=False,
                        just_return_r_J=False):
     """
@@ -122,6 +127,30 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
         pose0, fixed_pt3d, pts2d, v_pts2d, K, px_err_sd, meas_r, meas_aa = map(
             lambda x: x.astype(dtype), (pose0, fixed_pt3d, pts2d, v_pts2d, K, px_err_sd, meas_r, meas_aa))
 
+    curr_prior_J, prior_x_idxs = None, None
+    if prior_J is not None and len(prior_r) > 0:
+        a = n_cams * 6
+        b = a + len(meas_idxs) * (1 if ENABLE_DT_ADJ else 0)
+        c = b + n_pts * 3
+        d = c + (7 if GLOBAL_ADJ > 2 else 4 if GLOBAL_ADJ else 0)
+        e = d + n_dist
+        f = e + n_cam_intr
+
+        prior_x_idxs = np.zeros((len(x0),), dtype=bool)
+        pa = 6 * len(prior_cam_idxs)
+        for i, j in enumerate(prior_cam_idxs):
+            prior_x_idxs[i*6: (i+1)*6] = prior_k[j*6: (j+1)*6]
+        if ENABLE_DT_ADJ:
+            mi = np.where(np.in1d(meas_idxs, prior_cam_idxs))[0]    # TODO: debug, probably wrong
+            prior_x_idxs[a + mi] = prior_k[pa: pa + len(mi)]
+            pa += len(mi)
+        if f - c > 0:
+            prior_x_idxs[-(f - c):] = prior_k[-(f - c):]
+
+        curr_prior_J = sp.lil_matrix((len(prior_r), len(x0)), dtype=dtype)
+        curr_prior_J[:, prior_x_idxs] = prior_J
+        curr_prior_J = curr_prior_J.tocsr()
+
     if 0:
         err = _costfun(x0, pose0, fixed_pt3d, n_cams, n_pts, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K, dist_coefs,
                        px_err_sd, meas_r, meas_aa, meas_idxs, loc_err_sd, ori_err_sd, huber_coef)
@@ -158,6 +187,11 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
             sqrt_phl_err = np.sqrt(weight * tools.pseudo_huber_loss(err, huber_coef)) if huber_coef is not False else err
         else:
             sqrt_phl_err = err
+
+        if prior_x_idxs is not None:
+            prior_r_current = prior_r + prior_J.dot(x[prior_x_idxs] - prior_x)
+            sqrt_phl_err = np.concatenate((sqrt_phl_err, prior_r_current), axis=0)
+
         return sqrt_phl_err
 
     def jac(x, use_own_pseudo_huber_loss=USE_OWN_PSEUDO_HUBER_LOSS):
@@ -176,6 +210,9 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
             phl_err = tools.pseudo_huber_loss(err, huber_coef)
             dhuber = 0.5 * np.sqrt(weight / phl_err) * err / np.sqrt(1 + err ** 2 / huber_coef ** 2)
             J = J.multiply(dhuber.reshape((-1, 1)))
+
+        if curr_prior_J is not None:
+            J = sp.vstack((J, curr_prior_J))
 
         return J
 
@@ -202,6 +239,14 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
                                                         0 if poses_only else n_pts, n_dist, n_cam_intr, meas_idxs.size,
                                                         meas_r0=None if len(meas_idxs) < 2 else meas_r[0])
 
+    new_prior = (None,) * 4
+    if marginalize_pose_idxs is not None and len(marginalize_pose_idxs) + len(marginalize_pt3d_idxs) > 0:
+        new_prior = marginalize(res.x, res.fun, res.jac, marginalize_pose_idxs, marginalize_pt3d_idxs,
+                                n_cams, n_pts, n_dist, n_cam_intr, meas_idxs)
+
+    if prior_r is not None and len(prior_r) > 0:
+        res.fun = res.fun[:-len(prior_r)]
+
     # print('finished mean residual: %.5f' % (np.mean(res.fun[:-m3]),))
     # return also per frame errors (median repr err, meas loc and ori errs)
     # so that can follow the errors and notice/debug problems
@@ -223,7 +268,7 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
         new_t_off = new_t_off.astype(orig_dtype)
         errs = errs.astype(orig_dtype)
 
-    return new_poses, new_pts3d, new_dist, new_cam_intr, new_t_off, errs
+    return new_poses, new_pts3d, new_dist, new_cam_intr, new_t_off, new_prior, errs
 
 
 def _costfun(params, pose0, fixed_pt3d, n_cams, n_pts, n_dist, n_cam_intr, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K, px_err_sd,
@@ -309,7 +354,7 @@ def _bundle_adjustment_sparsity(n_cams, n_pts, n_dist, n_cam_intr, cam_idxs, pt3
     n4 = 0 if meas_idxs.size < 2 or not GLOBAL_ADJ else (7 if GLOBAL_ADJ > 2 else 4)
     n = n1 + n2 + n3 + n4
 
-    A = lil_matrix((m, n), dtype=int)
+    A = sp.lil_matrix((m, n), dtype=int)
     i = np.arange(cam_idxs.size)
 
     # poses affect reprojection error terms
@@ -411,7 +456,7 @@ def _jacobian(params, pose0, fixed_pt3d, n_cams, n_pts, n_dist, n_cam_intr, cam_
     # n4 = 0 if meas_idxs.size < 2 or not GLOBAL_ADJ else (7 if GLOBAL_ADJ > 2 else 4)
     # np = n1 + n2 + n3 + n4
 
-    J = lil_matrix((m, n), dtype=np.float32)
+    J = sp.lil_matrix((m, n), dtype=np.float32)
     i = np.arange(cam_idxs.size)
 
     # poses affect reprojection error terms
@@ -886,3 +931,68 @@ def _project(pts3d, poses, K, dist_coefs=None):
 
 def project(pts3d, poses, K, dist_coefs=None):
     return _project(pts3d, poses, K, dist_coefs)
+
+
+def marginalize(x, r, J, marginalize_pose_idxs, marginalize_kp3d_idxs,
+                n_cams, n_pts, n_dist, n_cam_intr, measure_idxs):
+
+    a = n_cams * 6
+    b = a + len(measure_idxs) * (1 if ENABLE_DT_ADJ else 0)
+    c = b + n_pts * 3
+    d = c + (7 if GLOBAL_ADJ > 2 else 4 if GLOBAL_ADJ else 0)
+    e = d + n_dist
+    f = e + n_cam_intr
+
+    # determine idxs of x that will be marginalized
+    m_x = np.zeros((f,), dtype=bool)
+    for i in marginalize_pose_idxs:
+        m_x[i*6: (i+1)*6] = True
+    if ENABLE_DT_ADJ:
+        m_x[a + np.where(np.in1d(measure_idxs, marginalize_pose_idxs))[0]] = True
+    for i in marginalize_kp3d_idxs:
+        m_x[b + i*3: b + (i+1)*3] = True
+
+    k_x = np.logical_not(m_x)   # idxs that will be kept (κ-vars + u-vars)
+
+    # from the article:
+    # "To preserve sparsity in the landmark-landmark Hessian block, we drop observations of landmarks that will stay
+    #  active in frames which are about to be marginalized, before calculating H~ and ~b. This means that landmarks are
+    #  never part of the κ-variables."
+    k_x[b:c] = False            # κ-vars + u-vars, without landmark related cols
+
+    if sp.issparse(J):
+        nzr, nzc = J.nonzero()
+        J_rows = np.zeros((J.shape[0],), dtype=bool)
+        J_cols = np.zeros((J.shape[1],), dtype=bool)
+        J_rows[nzr[m_x[nzc]]] = True
+        J_cols[nzc[J_rows[nzr]]] = True      # mu-vars + κ-vars
+    else:
+        J_rows = np.any(np.logical_not(np.isclose(J[:, m_x], 0)), axis=1)     # rows affected by marginalized (mu-) vars
+        J_cols = np.any(np.logical_not(np.isclose(J[J_rows, :], 0)), axis=0)  # cols affecting above rows (mu-vars + κ-vars)
+
+    k_x = np.logical_and(J_cols, k_x)   # now only κ-vars
+    J_cols_m = np.where(m_x)[0]         # col indices related to mu-vars
+    J_cols_k = np.where(k_x)[0]         # col indices related to κ-vars
+    J_cols = np.concatenate((J_cols_m, J_cols_k), axis=0)
+
+    Js = J[np.ix_(J_rows, J_cols)]
+    rs = r[J_rows]
+
+    # TODO: use specialized, flat QR decomposition as in "Square Root Marginalization for Sliding-Window Bundle Adjustment"
+    Q, R = np.linalg.qr(Js.toarray() if sp.issparse(Js) else Js, 'complete')
+
+    n_m = len(J_cols_m)
+    R2k = R[n_m:, n_m:]
+    Q2 = Q[:, n_m:]
+    Q2Tr = Q2.T.dot(rs)
+
+    n_zeros = np.where(np.flip(np.any(np.logical_not(np.isclose(R2k, 0)), axis=1)))[0]
+    if len(n_zeros) > 0 and n_zeros[0] > 0:
+        R2k = R2k[:-n_zeros[0], :]
+        Q2Tr = Q2Tr[:-n_zeros[0]]
+
+    new_k = k_x
+    new_x = x[k_x]
+    new_r = Q2Tr
+    new_J = R2k
+    return new_k, new_x, new_r, new_J
