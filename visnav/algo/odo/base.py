@@ -536,7 +536,10 @@ class VisualOdometry:
             else:
                 F, mask2 = cv2.findFundamentalMat(old_kp2d_norm, new_kp2d_norm, cv2.FM_RANSAC, 1, #self.repr_err(new_frame),
                                                   self.est_2d2d_prob)
-            mask = np.logical_and(mask, mask2.flatten())
+            if mask2 is None:
+                mask[:] = False
+            else:
+                mask = np.logical_and(mask, mask2.flatten())
 
         # check that not too close to image border
         w, h = self.img_width, round(new_frame.image.shape[0] * self.img_width / new_frame.image.shape[1])

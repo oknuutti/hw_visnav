@@ -37,7 +37,7 @@ class InnerLinearizerQR:
         self.nb = len(self.problem.cam_param_idxs)
         self.np = self._pose_size * self._pose_n
         self.nl = 3
-        self.mr = 2 * len(self.problem.pts2d)
+        # self.mr = 2 * len(self.problem.pts2d)
         self.mm = ((3 if self.problem.meas_r is not None and len(self.problem.meas_r) > 0 else 0)
                    + (3 if self.problem.meas_aa is not None and len(self.problem.meas_aa) > 0 else 0)
                   ) * (len(self.problem.meas_idxs) if self.problem.meas_idxs is not None else 0)
@@ -98,6 +98,11 @@ class InnerLinearizerQR:
             r_idxs = np.where(self.problem.pt3d_idxs == i)[0]
             pose_idxs = self.problem.pose_idxs[r_idxs]
             blk_np = len(r_idxs)
+
+            if blk_np < 2:
+                # too few observations of this 3d-point
+                self.problem.valid_pts3d[i] = False
+                continue
 
             # indexing sparse array faster this way instead of Jl[v_i, i:i+3]
             _, _, Jrl_i, Jrl_j = self._block_indexing(r_idxs, np.ones((len(r_idxs),)) * i, 2, 3)
@@ -179,6 +184,12 @@ class InnerLinearizerQR:
             total_error += err
 
         return total_error / (nr + nx + na)
+
+    def filter(self, max_repr_err):
+        n_obs = len(self.problem.pts2d)
+        obs_idx = self.problem.filter(max_repr_err)
+        cost = self.current_cost()
+        return len(obs_idx)/n_obs, cost
 
     def set_pose_damping(self, _lambda):
         self._pose_damping = _lambda

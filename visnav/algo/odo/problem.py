@@ -22,6 +22,7 @@ class Problem:
 
         self.pts3d = pts3d.astype(dtype)
         self.pt3d_idxs = pt3d_idxs
+        self.valid_pts3d = np.ones((len(self.pts3d),), dtype=bool)
 
         self.meas_r = np.array([], dtype=dtype) if meas_r is None else meas_r.astype(dtype)
         self.meas_aa = np.array([], dtype=dtype) if meas_aa is None else meas_aa.astype(dtype)
@@ -37,6 +38,7 @@ class Problem:
         self.restrict_3d_point_y = False    # don't allow 3d point adjustment in y-direction
         self.cache = None
         self._J_cache = None
+        self._cached_repr_err = None
 
     def _get_so3_grouping(self, n):
         return np.concatenate((np.ones((n, 3), dtype=bool), np.zeros((n, 3), dtype=bool)), axis=1)
@@ -67,11 +69,11 @@ class Problem:
 
     @property
     def xl(self):
-        return self.pts3d.reshape((-1, 1))
+        return self.pts3d[self.valid_pts3d, :].reshape((-1, 1))
 
     @xl.setter
     def xl(self, new_xl):
-        self.pts3d = new_xl.reshape((-1, self.landmark_size))
+        self.pts3d[self.valid_pts3d, :] = new_xl.reshape((-1, self.landmark_size))
         self.clear_cache()
 
     @property
@@ -84,6 +86,19 @@ class Problem:
         self.xb = new_x[:m1]
         self.xp = new_x[m1:m1+m2]
         self.xl = new_x[m1+m2:]
+
+    def filter(self, max_repr_err):
+        # for now, just remove difficult to fit 3d point observations
+        rr = self._cached_repr_err if self._cached_repr_err is not None else self.residual_repr()
+        I = np.linalg.norm(rr.reshape((-1, 2)), axis=1) <= max_repr_err
+        self.pt3d_idxs = self.pt3d_idxs[I]
+        self.pose_idxs = self.pose_idxs[I]
+        self.pts2d = self.pts2d[I, :]
+        rr = rr.reshape((-1, 2))[I].reshape((-1, 1))
+        self._cached_repr_err = rr
+        self._J_cache = None
+        self.cache = None
+        return np.where(np.logical_not(I))[0]
 
     def residual(self, parts=False):
         self.maybe_populate_cache()
@@ -139,6 +154,7 @@ class Problem:
 
     def clear_cache(self):
         self.cache = None
+        self._cached_repr_err = None
 
     def maybe_populate_cache(self):
         if self.cache is not None:
@@ -178,6 +194,10 @@ class Problem:
 
     def residual_repr(self):
         """Convert 3-D points to 2-D by projecting onto images."""
+        if self._cached_repr_err is not None:
+            return self._cached_repr_err
+        self.maybe_populate_cache()
+
         c = self.cache
         P = c.pts3d_norm
 
@@ -186,6 +206,7 @@ class Problem:
 
         pts2d_proj = c.K[:2, :2].dot(P.T).T + c.K[:2, 2:3].T
         repr_err = ((self.pts2d - pts2d_proj) / self.px_err_sd[:, None]).reshape((-1, 1))
+        self._cached_repr_err = repr_err
         return repr_err
 
     def residual_loc(self):

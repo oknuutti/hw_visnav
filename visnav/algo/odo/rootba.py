@@ -43,8 +43,8 @@ class RootBundleAdjuster:
     MAX_INNER_ITERS = np.inf
 
     def __init__(self, ini_tr_rad, min_tr_rad, max_tr_rad, ini_vee, vee_factor, thread_n, max_iters, max_time,
-                 min_step_quality, xtol, rtol, ftol, jacobi_scaling_eps, lin_cg_maxiter, lin_cg_tol,
-                 preconditioner_type, huber_coefs, use_weighted_residuals):
+                 min_step_quality, xtol, rtol, ftol, max_repr_err, jacobi_scaling_eps,
+                 lin_cg_maxiter, lin_cg_tol, preconditioner_type, huber_coefs, use_weighted_residuals):
         self.ini_lambda = 1 / ini_tr_rad
         self.min_lambda = 1 / max_tr_rad
         self.max_lambda = 1 / min_tr_rad
@@ -57,6 +57,7 @@ class RootBundleAdjuster:
         self.xtol = xtol
         self.rtol = rtol
         self.ftol = ftol
+        self.max_repr_err = max_repr_err
         self.lin_opt = dict(
             jacobi_scaling_eps=jacobi_scaling_eps,
             lin_cg_maxiter=lin_cg_maxiter,
@@ -77,6 +78,12 @@ class RootBundleAdjuster:
         self._lambda = self.ini_lambda
         self._lambda_vee = self.ini_vee
         self._linearizer = LinearizerQR(prob, **self.lin_opt)
+
+        if 0 in self.max_repr_err:
+            n_obs = len(prob.pts2d)
+            obs_idxs = prob.filter(self.max_repr_err[0])
+            logger.info('Before starting, filtered out %.3f%% of all observations as initial repr err > %.0f' % (
+                len(obs_idxs) / n_obs * 100, self.max_repr_err[0]))
 
         iter_stats = []
 
@@ -131,7 +138,7 @@ class RootBundleAdjuster:
 
         j = 0
         while True:
-            cost1 = self._inner_step(stats)
+            cost1 = self._inner_step(stats, i)
             j += 1
             if j >= self.MAX_INNER_ITERS:
                 break
@@ -146,7 +153,7 @@ class RootBundleAdjuster:
         stats.time = timer.stop()
         return stats
 
-    def _inner_step(self, stats: IterationStats):
+    def _inner_step(self, stats: IterationStats, i):
         # solve damped linear system
         delta_xbp = stats.delta_xbp = self._linearizer.solve(self._lambda)
 
@@ -177,6 +184,10 @@ class RootBundleAdjuster:
             self._lambda = max(self.min_lambda, self._lambda * max(1/3, 1-(2*stats.step_quality-1)**3))
             self._lambda_vee = self.ini_vee
             # self._linearizer.finish_iter()
+            if i in self.max_repr_err:
+                filtered_ratio, cost1 = self._linearizer.filter(self.max_repr_err[i])
+                logger.debug('...filtered out %.3f%% of all observations as repr err > %.0f, cost %.5f => %.5f' % (
+                    filtered_ratio * 100, self.max_repr_err[i], stats.cost, cost1))
         else:
             self._lambda *= self._lambda_vee
             self._lambda_vee *= self.vee_factor
@@ -343,3 +354,6 @@ class LinearizerQR:
 
     def current_cost(self):
         return self._lqr.current_cost()
+
+    def filter(self, max_repr_err):
+        return self._lqr.filter(max_repr_err)

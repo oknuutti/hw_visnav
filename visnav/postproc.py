@@ -2,10 +2,12 @@ import argparse
 import pickle
 import os
 import math
+from typing import List
 
 import cv2
 import numpy as np
 import quaternion
+from kapture import Kapture
 from scipy.spatial.ckdtree import cKDTree
 
 import matplotlib.pyplot as plt
@@ -28,11 +30,11 @@ from visnav.depthmaps import get_cam_params, set_cam_params
 from visnav.missions.nokia import NokiaSensor
 from visnav.run import plot_results
 
-DEBUG = 1
+DEBUG = 0
 PX_ERR_SD = 1.0
 LOC_ERR_SD = (3.0, 10.0, 3.0) if 1 else (np.inf,)
 ORI_ERR_SD = (math.radians(1.0) if 0 else np.inf,)
-HUBER_COEFS = (1.0, 5.0, 0.5)
+HUBER_COEFS = (2.0, 5.0, 0.5)
 SENSOR_NAME = 'cam'
 VO_FEATURE_NAME = 'gftt'
 EXTRACTED_FEATURE_NAME = 'akaze'
@@ -300,12 +302,15 @@ def run_ba(args):
         ini_vee=2.0,
         vee_factor=2.0,
         thread_n=1,
-        max_iters=50,
+        max_iters=30,
         max_time=20000,   # in sec
         min_step_quality=0,
         xtol=0,
         rtol=0,
         ftol=3e-4,
+
+        # filter out observations with large reprojection errors at these iterations
+        max_repr_err={0: 320, 1: 64, 2: 32, 3: 16, 4: 12, 6: 8},
 
         jacobi_scaling_eps=0,
         lin_cg_maxiter=500,
@@ -324,6 +329,9 @@ def run_ba(args):
         kapt_path = os.path.join(path, 'kapture')
         kapt = kapture_from_dir(kapt_path)
         sensor_id, width, height, fl_x, fl_y, pp_x, pp_y, *dist_coefs = get_cam_params(kapt, SENSOR_NAME)
+
+        # if DEBUG:
+        #     replay_kapt(kapt_path, kapt)
 
         if args.ini_fl:
             fl_x = fl_y = args.ini_fl * args.img_sc
@@ -356,7 +364,7 @@ def run_ba(args):
         cam_param_idxs = np.array(cam_param_idxs, dtype=int)
 
         logger.info('loading poses and keypoints...')
-        poses, pts3d, pts2d, pose_idxs, pt3d_idxs, meas_r, meas_aa, meas_idxs, _ = \
+        frames, poses, pts3d, pts2d, pose_idxs, pt3d_idxs, meas_r, meas_aa, meas_idxs, _ = \
             get_ba_params(kapt_path, orig_results, kapt, sensor_id)
 
         _meas_r = meas_r if args.abs_loc_r else None   # enable/disable loc measurements
@@ -392,6 +400,8 @@ def run_ba(args):
         if 1:
             solver.solve(problem, callback=lambda x: save_and_plot(x, plot=True) if DEBUG else None)
             save_and_plot(problem, log=True, save=True, plot=args.plot)
+            if 1:
+                replay_kapt(kapt_path, kapt)
         else:
             J = problem.jacobian()
             r = problem.residual()
@@ -425,9 +435,6 @@ def get_ba_params(kapt_path, results, kapt, sensor_id):
     frames = sorted(frames, key=lambda x: x[0])
     fname2id = {fname: id for id, fname in frames}
 
-    poses = np.array([[*tools.q_to_angleaxis(kapt.trajectories[id][sensor_id].r, True),
-                       *kapt.trajectories[id][sensor_id].t] for id, fname in frames]).astype(float)
-
     feat = kapt.keypoints[VO_FEATURE_NAME]
     uv_map = {}
     for id_f, fname in frames:
@@ -439,26 +446,34 @@ def get_ba_params(kapt_path, results, kapt, sensor_id):
     for id3, r in kapt.observations.items():
         if VO_FEATURE_NAME in r:
             for fname, id2 in r[VO_FEATURE_NAME]:
-                if fname in fname2id:
-                    id_f = fname2id[fname]
-                    f_uv.setdefault(id_f, {})[id3] = uv_map[id_f][id2, :]
-                    max_pt3d_id = max(max_pt3d_id, id3)
+                id_f = fname2id[fname]
+                f_uv.setdefault(id_f, {})[id3] = uv_map[id_f][id2, :]
+                max_pt3d_id = max(max_pt3d_id, id3)
 
     obs_kp = list(set.union(*[set(m.keys()) for m in f_uv.values()]))
     pts3d = kapt.points3d[:max_pt3d_id+1, :3]
 
     cam_idxs, pt3d_idxs, pts2d = list(map(np.array, zip(*[
         (i, id3, uv.flatten())
-        for i, (id_f, kps_uv) in enumerate(f_uv.items())
-            for id3, uv in kps_uv.items()
+        for i, (id_f, fname) in enumerate(frames) if id_f in f_uv
+            for id3, uv in f_uv[id_f].items()
     ])))
 
-    meas_idxs = np.array([i for i, r in enumerate(results) if r[1] is not None and i < len(poses)], dtype=int)
-    meas_q = {i: results[i][0].prior.quat.conj() for i in meas_idxs}
-    meas_r = np.array([tools.q_times_v(meas_q[i], -results[i][0].prior.loc) for i in meas_idxs], dtype=np.float32)
-    meas_aa = np.array([tools.q_to_angleaxis(meas_q[i], compact=True) for i in meas_idxs], dtype=np.float32)
+    # NOTE: there's poses that have no observations! i.e. id_f not always in f_uv, all poses needed for cam_idxs to work
+    # TODO: should remove unobservable poses (and 3d-points), maybe after initial ba?
 
-    return poses, pts3d, pts2d, cam_idxs, pt3d_idxs, meas_r, meas_aa, meas_idxs, obs_kp
+    poses = np.array([[*tools.q_to_angleaxis(kapt.trajectories[id][sensor_id].r, True),
+                       *kapt.trajectories[id][sensor_id].t] for id, fname in frames]).astype(float)
+
+    if results is not None:
+        meas_idxs = np.array([i for i, r in enumerate(results) if r[1] is not None and i < len(poses)], dtype=int)
+        meas_q = {i: results[i][0].prior.quat.conj() for i in meas_idxs}
+        meas_r = np.array([tools.q_times_v(meas_q[i], -results[i][0].prior.loc) for i in meas_idxs], dtype=np.float32)
+        meas_aa = np.array([tools.q_to_angleaxis(meas_q[i], compact=True) for i in meas_idxs], dtype=np.float32)
+    else:
+        meas_r, meas_aa, meas_idxs = [None] * 3
+
+    return frames, poses, pts3d, pts2d, cam_idxs, pt3d_idxs, meas_r, meas_aa, meas_idxs, obs_kp
 
 
 def update_kapture(kapt_path, kapt, cam_params, poses, pts3d):
@@ -569,6 +584,50 @@ def plot_matches(img_path1, img_path2, kps1, kps2):
     img = cv2.drawMatches(img1, arr2kp(kps1), img2, arr2kp(kps2), matches, None)
     cv2.imshow('matches', img)
     cv2.waitKey()
+
+
+def replay_probem(img_paths: List[str], p: Problem):
+    replay(img_paths, p.pts2d, p.cam_params, p.poses, p.pose_idxs, p.pts3d, p.pt3d_idxs)
+
+
+def replay_kapt(kapt_path: str, kapt: Kapture = None):
+    if kapt is None:
+        kapt = kapture_from_dir(kapt_path)
+    cam_params = get_cam_params(kapt, SENSOR_NAME)
+    frames, poses, pts3d, pts2d, pose_idxs, pt3d_idxs, *_ = get_ba_params(kapt_path, None, kapt, cam_params[0])
+    img_paths = [os.path.join(kapt_path, 'sensors', 'records_data', f[1]) for f in frames]
+    replay(img_paths, pts2d, cam_params, poses, pose_idxs, pts3d, pt3d_idxs)
+
+
+def replay(img_paths, pts2d, cam_params, poses, pose_idxs, pts3d, pt3d_idxs):
+    assert len(img_paths) == len(poses)
+    assert len(pts2d) == len(pose_idxs)
+    assert len(pts2d) == len(pt3d_idxs)
+    cam = cam_obj(cam_params)
+    kp_size, kp_color = 5, (0, 200, 0)
+
+    # TODO: poses are 5 keyframes ahead compared to keypoint observations!
+
+    for i, (img_path, pose) in enumerate(zip(img_paths, poses)):
+        I = pose_idxs == i
+        if np.sum(I) == 0:
+            continue
+
+        image = cv2.imread(img_path)
+        p_pts2d = (pts2d[I, :] + 0.5).astype(int)
+        p_pts3d = pts3d[pt3d_idxs[I], :]
+
+        q_cf = tools.angleaxis_to_q(pose[:3])
+        pts3d_cf = tools.q_times_mx(q_cf, p_pts3d) + pose[3:]
+        pts2d_proj = (cam.project(pts3d_cf.astype(np.float32)) + 0.5).astype(int)
+
+        for (x, y), (xp, yp) in zip(p_pts2d, pts2d_proj):
+            image = cv2.circle(image, (x, y), kp_size, kp_color, 1)   # negative thickness => filled circle
+            image = cv2.rectangle(image, (xp-2, yp-2), (xp+2, yp+2), kp_color, 1)
+            image = cv2.line(image, (xp, yp), (x, y), kp_color, 1)
+
+        cv2.imshow('keypoint reprojection', image)
+        cv2.waitKey()
 
 
 if __name__ == '__main__':
