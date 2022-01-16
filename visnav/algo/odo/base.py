@@ -123,6 +123,7 @@ class Keypoint:
         self.inlier_count = 0
         self.inlier_time = None
         self.active = True
+        self.bad_qlt = False
 
     @property
     def id(self):
@@ -1202,7 +1203,7 @@ class VisualOdometry:
 
         with self._3d_map_lock:
             for kp_id in removals:
-                self.del_keypoint(kp_id)
+                self.del_keypoint(kp_id, bad_qlt=True)
 
             for kp_id, pt3d in zip(inl_ids, inl_pts3d):
                 kp = self.state.map2d.pop(kp_id)
@@ -1423,7 +1424,7 @@ class VisualOdometry:
 
         for kp_id in rem_ids:
             if kp_id in self.state.map3d:
-                self.del_keypoint(kp_id)
+                self.del_keypoint(kp_id, bad_qlt=True)
 
         # transform 3d map so that consistent with first frame being unchanged
         for kp_id, pt3d in zip(good_ids, good_pts3d):
@@ -1561,14 +1562,17 @@ class VisualOdometry:
                     rem_ids.append(id)
         return rem_ids
 
-    def del_keypoints(self, ids, kf_lim=None):
+    def del_keypoints(self, ids, kf_lim=None, bad_qlt=False):
         with self._3d_map_lock:
             removed = 0
             for id in ids:
-                removed += self.del_keypoint(id, kf_lim=kf_lim)
+                removed += self.del_keypoint(id, kf_lim=kf_lim, bad_qlt=bad_qlt)
             logger.info('%d 3d keypoints removed or marked as inactive' % removed)
 
-    def del_keypoint(self, id, kf_lim=None):
+    def del_keypoint(self, id, kf_lim=None, bad_qlt=False):
+        if id in self.state.map3d and bad_qlt:
+            self.state.map3d[id].bad_qlt = True
+
         if kf_lim is not None and id in self.state.map3d:
             if len([1 for f in self.state.keyframes[-self.max_keyframes:] if id in f.kps_uv]) >= kf_lim:
                 ret = int(self.state.map3d[id].active)
@@ -1576,7 +1580,7 @@ class VisualOdometry:
                 return ret
 
         ret = int(id in self.state.map3d)
-        if ret:
+        if ret and not bad_qlt:
             self.removed_keypoints.append(self.state.map3d[id])
             # TODO: (*) save f.kps_uv, f.kps_uv_norm  (and uncomment below part where removal happens)
 
@@ -1826,8 +1830,9 @@ class VisualOdometry:
         measures = []
         traj_b = []
         for kf in self.all_keyframes() + ([] if new_frame is not self.state.keyframes[-1] else [new_frame]):
-            ub1, vb1, _ = pose2uvc(kf.pose.post, (0, 0, 255))
-            traj_b.append([ub1, vb1])
+            if kf.pose.post is not None:
+                ub1, vb1, _ = pose2uvc(kf.pose.post, (0, 0, 255))
+                traj_b.append([ub1, vb1])
             if kf.measure is not None:
                 measures.append(kf.pose.prior)
 

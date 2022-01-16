@@ -72,7 +72,7 @@ class KaptureIO:
             k.observations = kt.Observations()
 
         def check_kp(kp):
-            return kp.inlier_count > self.min_pt3d_obs and kp.inlier_count/kp.total_count > self.min_pt3d_ratio
+            return not kp.bad_qlt and kp.inlier_count > self.min_pt3d_obs and kp.inlier_count/kp.total_count > self.min_pt3d_ratio
 
         kp_ids, pts3d = zip(*[(kp.id, kp.pt3d) for kp in points3d if check_kp(kp)])
         I = np.argsort(kp_ids)

@@ -8,6 +8,7 @@ import cv2
 import numpy as np
 import quaternion
 from kapture import Kapture
+from kapture.io.records import get_record_fullpath
 from scipy.spatial.ckdtree import cKDTree
 
 import matplotlib.pyplot as plt
@@ -30,7 +31,7 @@ from visnav.depthmaps import get_cam_params, set_cam_params
 from visnav.missions.nokia import NokiaSensor
 from visnav.run import plot_results
 
-DEBUG = 0
+DEBUG = 1
 PX_ERR_SD = 1.0
 LOC_ERR_SD = (3.0, 10.0, 3.0) if 1 else (np.inf,)
 ORI_ERR_SD = (math.radians(1.0) if 0 else np.inf,)
@@ -146,7 +147,7 @@ def run_fe(args):
             d = []
             for k in (0, args.fe_triang_int):
                 img_file = records[j+k][sensor_id]
-                img_path = os.path.join(kapt_path, 'sensors', 'records_data', img_file)
+                img_path = get_record_fullpath(kapt_path, img_file)
                 kps, descs = extract_features(img_path, args)
                 d.append((img_file, kps, descs))
 
@@ -245,7 +246,7 @@ def find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d
                           for feat_id, pt3d_id in feat_to_pt3d.items()})
 
             if DEBUG:
-                img_files[(path, frame_id)] = os.path.join(kapt_path, 'sensors', 'records_data', img_file)
+                img_files[(path, frame_id)] = get_record_fullpath(kapt_path, img_file)
 
     # TODO: in some distant future, find closest pose based on GFTT/AKAZE locations instead of drone location
     #       (similar to what is done in navex/datasets/preproc)
@@ -330,8 +331,8 @@ def run_ba(args):
         kapt = kapture_from_dir(kapt_path)
         sensor_id, width, height, fl_x, fl_y, pp_x, pp_y, *dist_coefs = get_cam_params(kapt, SENSOR_NAME)
 
-        # if DEBUG:
-        #     replay_kapt(kapt_path, kapt)
+        if DEBUG:
+            replay_kapt(kapt_path, kapt)
 
         if args.ini_fl:
             fl_x = fl_y = args.ini_fl * args.img_sc
@@ -595,7 +596,7 @@ def replay_kapt(kapt_path: str, kapt: Kapture = None):
         kapt = kapture_from_dir(kapt_path)
     cam_params = get_cam_params(kapt, SENSOR_NAME)
     frames, poses, pts3d, pts2d, pose_idxs, pt3d_idxs, *_ = get_ba_params(kapt_path, None, kapt, cam_params[0])
-    img_paths = [os.path.join(kapt_path, 'sensors', 'records_data', f[1]) for f in frames]
+    img_paths = [get_record_fullpath(kapt_path, f[1]) for f in frames]
     replay(img_paths, pts2d, cam_params, poses, pose_idxs, pts3d, pt3d_idxs)
 
 
