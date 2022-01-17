@@ -90,6 +90,8 @@ class Frame:
         Frame._NEXT_ID += 1
 
     def to_rel(self, pt3d, post=True):
+        if len(pt3d) == 0:
+            return pt3d
         pose = getattr(self.pose, 'post' if post else 'prior')
         fun = tools.q_times_v if len(pt3d.shape) == 1 else tools.q_times_mx
         return fun(pose.quat, pt3d) + pose.loc.reshape((1, 3))
