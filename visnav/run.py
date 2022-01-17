@@ -183,8 +183,7 @@ def main():
         mission.odo.flush_state()  # flush all keyframes and keypoints
         map3d = mission.odo.removed_keypoints
 #        results = [(kf.pose, kf.measure, kf.time, kf.id) for kf in mission.odo.removed_keyframes if kf.pose.post]
-        keyframes = [dict(pose=kf.pose, meas=kf.measure, time=kf.time, id=kf.id, kps_uv=kf.kps_uv,
-                          image=kf.image)
+        keyframes = [dict(pose=kf.pose, meas=kf.measure, time=kf.time, id=kf.id, kps_uv=kf.kps_uv)
                      for kf in mission.odo.removed_keyframes if kf.pose.post]
         frame_names = [frame_names0[kfid2img[kf['id']]] for kf in keyframes]
         meta_names = [meta_names0[kfid2img[kf['id']]] for kf in keyframes]
