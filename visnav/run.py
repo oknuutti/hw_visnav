@@ -3,13 +3,15 @@ import pickle
 from datetime import datetime
 import os
 import math
+from typing import List
 
 import numpy as np
 import quaternion
 
 from visnav.algo import tools
+from visnav.algo.model import Camera
 from visnav.algo.tools import Pose
-from visnav.algo.odo.base import VisualOdometry
+from visnav.algo.odo.base import VisualOdometry, Frame, Keypoint
 from visnav.iotools.kapture import KaptureIO
 from visnav.missions.hwproto import HardwarePrototype
 from visnav.missions.nokia import NokiaSensor, interp_loc
@@ -53,11 +55,6 @@ def main():
     parser.add_argument('--plot-only', action='store_true', help='only plot the result')
     args = parser.parse_args()
 
-    res_file = args.res or ('%s-result.pickle' % args.mission)
-    if args.plot_only:
-        plot_results(file=res_file, nadir_looking=args.nadir_looking)
-        return
-
     if args.verbosity > 1:
         import matplotlib.pyplot as plt
         from matplotlib import cm
@@ -95,6 +92,13 @@ def main():
 
     if args.nadir_looking:
         mission.odo._nadir_looking = True
+
+
+    res_file = args.res or ('%s-result.pickle' % args.mission)
+    if args.plot_only:
+        plot_results(file=res_file, nadir_looking=args.nadir_looking)
+        replay_keyframes(mission.odo.cam, file=res_file)
+        return
 
     # run odometry
     prior = Pose(np.array([0, 0, 0]), quaternion.one)
@@ -178,16 +182,19 @@ def main():
     try:
         mission.odo.flush_state()  # flush all keyframes and keypoints
         map3d = mission.odo.removed_keypoints
-        results = [(kf.pose, kf.measure, kf.time, kf.id) for kf in mission.odo.removed_keyframes if kf.pose.post]
-        frame_names = [frame_names0[kfid2img[r[3]]] for r in results]
-        meta_names = [meta_names0[kfid2img[r[3]]] for r in results]
-        ground_truth = [ground_truth0[kfid2img[r[3]]] for r in results]
+#        results = [(kf.pose, kf.measure, kf.time, kf.id) for kf in mission.odo.removed_keyframes if kf.pose.post]
+        keyframes = [dict(pose=kf.pose, meas=kf.measure, time=kf.time, id=kf.id, kps_uv=kf.kps_uv,
+                          image=kf.image)
+                     for kf in mission.odo.removed_keyframes if kf.pose.post]
+        frame_names = [frame_names0[kfid2img[kf['id']]] for kf in keyframes]
+        meta_names = [meta_names0[kfid2img[kf['id']]] for kf in keyframes]
+        ground_truth = [ground_truth0[kfid2img[kf['id']]] for kf in keyframes]
         ba_errs = np.array(ba_errs)
 
         if 1:
             pts3d = np.array([pt.pt3d for pt in map3d])
             ground_alt = np.quantile(-pts3d[:, 1], 0.5)    # neg-y is altitude in cam frame
-            drone_alt = -(-results[-1][0].post).loc[1]        # word
+            drone_alt = -(-keyframes[-1]['pose'].post).loc[1]        # word
             expected_dist = drone_alt - mission.coord0[2]
             modeled_dist = drone_alt - ground_alt
             logger.info('ground at %.1f mr (%.1f mr), drone alt %.1f mr (%.1f mr)' % (
@@ -238,13 +245,13 @@ def main():
     if res_folder:
         os.makedirs(res_folder, exist_ok=True)
     with open(res_file, 'wb') as fh:
-        pickle.dump((results, map3d, frame_names, meta_names, ground_truth, ba_errs), fh)
+        pickle.dump((keyframes, map3d, frame_names, meta_names, ground_truth, ba_errs), fh)
 
     if args.verbosity > 1:
-        plot_results(results, map3d, frame_names, meta_names, ground_truth, ba_errs, res_file, nadir_looking=args.nadir_looking)
+        plot_results(keyframes, map3d, frame_names, meta_names, ground_truth, ba_errs, res_file, nadir_looking=args.nadir_looking)
 
 
-def plot_results(results=None, map3d=None, frame_names=None, meta_names=None, ground_truth=None, ba_errs=None,
+def plot_results(keyframes=None, map3d=None, frame_names=None, meta_names=None, ground_truth=None, ba_errs=None,
                  file='result.pickle', nadir_looking=False):
 
     import matplotlib.pyplot as plt
@@ -254,25 +261,25 @@ def plot_results(results=None, map3d=None, frame_names=None, meta_names=None, gr
     # TODO: remove override
     nadir_looking = False
 
-    if results is None:
+    if keyframes is None:
         with open(file, 'rb') as fh:
-            results, map3d, frame_names, meta_names, ground_truth, *ba_errs = pickle.load(fh)
+            keyframes, map3d, frame_names, meta_names, ground_truth, *ba_errs = pickle.load(fh)
             ba_errs = ba_errs[0] if len(ba_errs) else None
 
     w2b, b2c = NokiaSensor.w2b, NokiaSensor.b2c
     nl_dq = tools.eul_to_q((-np.pi / 2,), 'y') if nadir_looking else quaternion.one
 
-    est_loc = np.ones((len(results), 3)) * np.nan
-    est_ori = np.ones((len(results), 3)) * np.nan
-    meas_loc = np.ones((len(results), 3)) * np.nan
-    meas_ori = np.ones((len(results), 3)) * np.nan
-    for i, res in enumerate(results):
-        if res and res[0] and res[0].post:
-            if res[0].method == VisualOdometry.POSE_2D3D:
-                est_loc[i, :] = ((-res[0].post).to_global(b2c).to_global(w2b)).loc
-                meas_loc[i, :] = ((-res[0].prior).to_global(b2c).to_global(w2b)).loc
-                est_ori[i, :] = tools.q_to_ypr(nl_dq.conj() * ((-res[0].post).to_global(b2c)).quat)
-                meas_ori[i, :] = tools.q_to_ypr(nl_dq.conj() * ((-res[0].prior).to_global(b2c)).quat)
+    est_loc = np.ones((len(keyframes), 3)) * np.nan
+    est_ori = np.ones((len(keyframes), 3)) * np.nan
+    meas_loc = np.ones((len(keyframes), 3)) * np.nan
+    meas_ori = np.ones((len(keyframes), 3)) * np.nan
+    for i, kf in enumerate(keyframes):
+        if kf and kf['pose'] and kf['pose'].post:
+            if kf['pose'].method == VisualOdometry.POSE_2D3D:
+                est_loc[i, :] = ((-kf['pose'].post).to_global(b2c).to_global(w2b)).loc
+                meas_loc[i, :] = ((-kf['pose'].prior).to_global(b2c).to_global(w2b)).loc
+                est_ori[i, :] = tools.q_to_ypr(nl_dq.conj() * ((-kf['pose'].post).to_global(b2c)).quat)
+                meas_ori[i, :] = tools.q_to_ypr(nl_dq.conj() * ((-kf['pose'].prior).to_global(b2c)).quat)
 
     est_ori = est_ori / np.pi * 180
     meas_ori = meas_ori / np.pi * 180
@@ -283,13 +290,13 @@ def plot_results(results=None, map3d=None, frame_names=None, meta_names=None, gr
         meas_ori = meas_ori[:, (2, 0, 1)]
 
     fst = np.where(np.logical_not(np.isnan(est_loc[:, 0])))[0][0]
-    idx = np.where([r is not None for r in results])[0]
-    idx2 = np.where([r is not None and r[1] is not None for r in results])[0]
-    t0 = results[idx[0]][2].timestamp()
+    idx = np.where([kf['pose'] is not None for kf in keyframes])[0]
+    idx2 = np.where([kf['pose'] is not None and kf['meas'] is not None for kf in keyframes])[0]
+    t0 = keyframes[idx[0]]['time'].timestamp()
 
-    t = np.array([results[i][2].timestamp() - t0 for i in idx])
-    t2 = np.array([results[i][2].timestamp() - t0 + results[i][1].time_off + results[i][1].time_adj for i in idx2])
-    dt = np.array([results[i][1].time_adj for i in idx2])
+    t = np.array([keyframes[i]['time'].timestamp() - t0 for i in idx])
+    t2 = np.array([keyframes[i]['time'].timestamp() - t0 + keyframes[i]['meas'].time_off + keyframes[i]['meas'].time_adj for i in idx2])
+    dt = np.array([keyframes[i]['meas'].time_adj for i in idx2])
 
     rng = np.nanmax(est_loc[idx, :2], axis=0) - np.nanmin(est_loc[idx, :2], axis=0)
     rng2 = 0 if len(idx2) == 0 else np.nanmax(meas_loc[idx2, :2], axis=0) - np.nanmin(meas_loc[idx2, :2], axis=0)
@@ -362,8 +369,8 @@ def plot_results(results=None, map3d=None, frame_names=None, meta_names=None, gr
             tools.hover_annotate(fig, axs[1], line[0], [meta_names[i] for i in idx2])
             axs[1].set_ylabel('dt')
         else:
-            id2idx = {r[3]: i for i, r in enumerate(results)}
-            t3 = [results[id2idx[int(id)]][2].timestamp() - t0 for id in ba_errs[:, 0]]
+            id2idx = {kf['id']: i for i, kf in enumerate(keyframes)}
+            t3 = [keyframes[id2idx[int(id)]]['time'].timestamp() - t0 for id in ba_errs[:, 0]]
 
             axs[1].plot(t3, ba_errs[:, 1], 'C0', label='repr [px]')
             axs[1].plot(t3, ba_errs[:, 2], 'C1', label='loc [mr]')
@@ -408,6 +415,50 @@ def plot_results(results=None, map3d=None, frame_names=None, meta_names=None, gr
         100*(1 - np.mean(np.isnan(est_loc[:, 0]))),
         np.nanstd(np.linalg.norm(np.diff(est_loc[:, :3], axis=0), axis=1)),
     ))
+
+
+def replay_keyframes(cam: Camera, keyframes: List[Frame] = None, map3d: List[Keypoint] = None, file: str = 'results.pickle'):
+    import cv2
+
+    if keyframes is None:
+        with open(file, 'rb') as fh:
+            keyframes, map3d, frame_names, meta_names, ground_truth, *ba_errs = pickle.load(fh)
+            ba_errs = ba_errs[0] if len(ba_errs) else None
+
+    if isinstance(keyframes[0], Frame):
+        keyframes = [dict(pose=kf.pose, meas=kf.measure, time=kf.time, id=kf.id, kps_uv=kf.kps_uv, image=kf.image)
+                     for kf in keyframes]
+
+    kp_size, kp_color = 5, (200, 0, 0)
+    kp_ids = set(kf.id for kf in map3d if not kf.bad_qlt and kf.inlier_count > 2 and kf.inlier_count / kf.total_count > 0.2)
+    map3d = {kf.id: kf for kf in map3d}
+    img_scale = 0.5
+
+    for kf in keyframes:
+        if kf['pose'] is None or kf['pose'].post is None:
+            continue
+
+        obs_ids = list(kp_ids.intersection(kf['kps_uv'].keys()))
+        if len(obs_ids) == 0:
+            continue
+
+        image = kf['image'].copy() if 'image' in kf else np.zeros((int(cam.height*img_scale), int(cam.width*img_scale), 3), dtype=np.uint8)
+        if len(image.shape) == 2 or image.shape[2] == 1:
+            image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+
+        p_pts2d = (np.array([kf['kps_uv'][id] for id in obs_ids]) + 0.5).astype(int).squeeze()
+        p_pts3d = np.array([map3d[id].pt3d for id in obs_ids])
+
+        pts3d_cf = tools.q_times_mx(kf['pose'].post.quat, p_pts3d) + kf['pose'].post.loc
+        pts2d_proj = (cam.project(pts3d_cf.astype(np.float32)) * img_scale + 0.5).astype(int)
+
+        for (x, y), (xp, yp) in zip(p_pts2d, pts2d_proj):
+            image = cv2.circle(image, (x, y), kp_size, kp_color, 1)   # negative thickness => filled circle
+            image = cv2.rectangle(image, (xp-2, yp-2), (xp+2, yp+2), kp_color, 1)
+            image = cv2.line(image, (xp, yp), (x, y), kp_color, 1)
+
+        cv2.imshow('keypoint reprojection', image)
+        cv2.waitKey()
 
 
 if __name__ == '__main__':

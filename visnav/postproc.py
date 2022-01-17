@@ -311,7 +311,7 @@ def run_ba(args):
         ftol=3e-4,
 
         # filter out observations with large reprojection errors at these iterations
-        max_repr_err={0: 320, 1: 64, 2: 32, 3: 16, 4: 12, 6: 8},
+        max_repr_err={},  #0: 320, 1: 64, 2: 32, 3: 16, 4: 12, 6: 8},
 
         jacobi_scaling_eps=0,
         lin_cg_maxiter=500,
@@ -325,7 +325,7 @@ def run_ba(args):
     # TODO: (5) update so that also loads AKAZE features, joins separate flights before running truly global BA
     for i, path in enumerate(args.path):
         with open(os.path.join(path, 'result.pickle'), 'rb') as fh:
-            orig_results, map3d, frame_names, meta_names, gt, ba_errs = pickle.load(fh)
+            orig_keyframes, map3d, frame_names, meta_names, gt, ba_errs = pickle.load(fh)
 
         kapt_path = os.path.join(path, 'kapture')
         kapt = kapture_from_dir(kapt_path)
@@ -366,7 +366,7 @@ def run_ba(args):
 
         logger.info('loading poses and keypoints...')
         frames, poses, pts3d, pts2d, pose_idxs, pt3d_idxs, meas_r, meas_aa, meas_idxs, _ = \
-            get_ba_params(kapt_path, orig_results, kapt, sensor_id)
+            get_ba_params(kapt_path, orig_keyframes, kapt, sensor_id)
 
         _meas_r = meas_r if args.abs_loc_r else None   # enable/disable loc measurements
         _meas_aa = meas_aa if args.abs_ori_r else None  # enable/disable ori measurements
@@ -378,10 +378,10 @@ def run_ba(args):
         def save_and_plot(problem, log=False, save=False, plot=False):
             cam_params, poses, pts3d = map(lambda x: getattr(problem, x), ('cam_params', 'poses', 'pts3d'))
 
-            results = orig_results[:len(poses)]
-            poses = [Pose(poses[j, 3:], tools.angleaxis_to_q(poses[j, :3])) for j in range(len(results))]
+            keyframes = orig_keyframes[:len(poses)]
+            poses = [Pose(poses[j, 3:], tools.angleaxis_to_q(poses[j, :3])) for j in range(len(keyframes))]
             for j, pose in enumerate(poses):
-                results[j][0].post = pose
+                keyframes[j]['pose'].post = pose
             map3d = [Keypoint(pt3d=pts3d[j, :]) for j in range(len(pts3d))]
 
             if log:
@@ -391,12 +391,12 @@ def run_ba(args):
 
             if save:
                 with open(os.path.join(path, 'global-ba-result.pickle'), 'wb') as fh:
-                    pickle.dump((results, map3d, frame_names, meta_names, gt, ba_errs), fh)
+                    pickle.dump((keyframes, map3d, frame_names, meta_names, gt, ba_errs), fh)
 
                 update_kapture(kapt_path, kapt, [width, height] + list(cam_params), poses, pts3d)
 
             if plot:
-                plot_results(results, map3d, frame_names, meta_names, nadir_looking=args.nadir_looking)
+                plot_results(keyframes, map3d, frame_names, meta_names, nadir_looking=args.nadir_looking)
 
         if 1:
             solver.solve(problem, callback=lambda x: save_and_plot(x, plot=True) if DEBUG else None)
@@ -431,7 +431,7 @@ def run_ba(args):
             exit()
 
 
-def get_ba_params(kapt_path, results, kapt, sensor_id):
+def get_ba_params(kapt_path, keyframes, kapt, sensor_id):
     frames = [(id, fname[sensor_id]) for id, fname in kapt.records_camera.items()]
     frames = sorted(frames, key=lambda x: x[0])
     fname2id = {fname: id for id, fname in frames}
@@ -466,10 +466,10 @@ def get_ba_params(kapt_path, results, kapt, sensor_id):
     poses = np.array([[*tools.q_to_angleaxis(kapt.trajectories[id][sensor_id].r, True),
                        *kapt.trajectories[id][sensor_id].t] for id, fname in frames]).astype(float)
 
-    if results is not None:
-        meas_idxs = np.array([i for i, r in enumerate(results) if r[1] is not None and i < len(poses)], dtype=int)
-        meas_q = {i: results[i][0].prior.quat.conj() for i in meas_idxs}
-        meas_r = np.array([tools.q_times_v(meas_q[i], -results[i][0].prior.loc) for i in meas_idxs], dtype=np.float32)
+    if keyframes is not None:
+        meas_idxs = np.array([i for i, kf in enumerate(keyframes) if kf['meas'] is not None and i < len(poses)], dtype=int)
+        meas_q = {i: keyframes[i]['pose'].prior.quat.conj() for i in meas_idxs}
+        meas_r = np.array([tools.q_times_v(meas_q[i], -keyframes[i]['pose'].prior.loc) for i in meas_idxs], dtype=np.float32)
         meas_aa = np.array([tools.q_to_angleaxis(meas_q[i], compact=True) for i in meas_idxs], dtype=np.float32)
     else:
         meas_r, meas_aa, meas_idxs = [None] * 3
@@ -600,12 +600,12 @@ def replay_kapt(kapt_path: str, kapt: Kapture = None):
     replay(img_paths, pts2d, cam_params, poses, pose_idxs, pts3d, pt3d_idxs)
 
 
-def replay(img_paths, pts2d, cam_params, poses, pose_idxs, pts3d, pt3d_idxs):
+def replay(img_paths, pts2d, cam_params, poses, pose_idxs, pts3d, pt3d_idxs, frame_ids=None):
     assert len(img_paths) == len(poses)
     assert len(pts2d) == len(pose_idxs)
     assert len(pts2d) == len(pt3d_idxs)
-    cam = cam_obj(cam_params)
-    kp_size, kp_color = 5, (0, 200, 0)
+    cam = cam_params if isinstance(cam_params, Camera) else cam_obj(cam_params)
+    kp_size, kp_color = 5, (200, 0, 0)
 
     # TODO: poses are 5 keyframes ahead compared to keypoint observations!
 
@@ -614,7 +614,11 @@ def replay(img_paths, pts2d, cam_params, poses, pose_idxs, pts3d, pt3d_idxs):
         if np.sum(I) == 0:
             continue
 
-        image = cv2.imread(img_path)
+        image = img_path if isinstance(img_path, np.ndarray) else cv2.imread(img_path)
+        image = cv2.resize(image, (cam.width, cam.height))
+        if len(image.shape) == 2 or image.shape[2] == 1:
+            image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+
         p_pts2d = (pts2d[I, :] + 0.5).astype(int)
         p_pts3d = pts3d[pt3d_idxs[I], :]
 
@@ -628,6 +632,8 @@ def replay(img_paths, pts2d, cam_params, poses, pose_idxs, pts3d, pt3d_idxs):
             image = cv2.line(image, (xp, yp), (x, y), kp_color, 1)
 
         cv2.imshow('keypoint reprojection', image)
+        if frame_ids is not None:
+            cv2.setWindowTitle('keypoint reprojection', 'frame #%d' % frame_ids[i])
         cv2.waitKey()
 
 

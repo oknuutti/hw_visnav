@@ -173,7 +173,7 @@ class VisualGPSNav(VisualOdometry):
 
             if not current_only:
                 rem_kf_ids = self.prune_keyframes()
-                rem_kp_ids = self.prune_map3d(rem_kf_ids, active_only=False)
+                rem_kp_ids = self.prune_map3d(rem_kf_ids)
 
         meas_idxs = meas_idxs.astype(int)
         meas_r = meas_r.reshape((-1, 3))
@@ -181,7 +181,7 @@ class VisualGPSNav(VisualOdometry):
 
         args = (poses_mx, pts3d, pts2d, v_pts2d, cam_idxs, pt3d_idxs, self.cam.cam_mx, dist_coefs, px_err_sd, meas_r,
                 meas_aa, t_off, meas_idxs, self.loc_err_sd, self.ori_err_sd)
-        kwargs = dict(max_nfev=self.max_ba_fun_eval, skip_pose_n=skip_pose_n, huber_coef=(1, 5, 0.5), poses_only=current_only)
+        kwargs = dict(max_nfev=self.max_ba_fun_eval, skip_pose_n=skip_pose_n, huber_coef=(2, 5, 0.5), poses_only=current_only)
 
         if self.ba_n_cam_intr and not current_only and len(keyframes) >= self.max_keyframes:
             kwargs['n_cam_intr'] = self.ba_n_cam_intr
@@ -210,6 +210,12 @@ class VisualGPSNav(VisualOdometry):
         if cam_intr is not None:
             print('\nCAM INTR: %s\n' % cam_intr)
 
+        if 0 and not current_only:
+            # show result
+            from visnav.postproc import replay
+            replay([kf.image for kf in keyframes], pts2d, self.cam, poses_ba, cam_idxs, pts3d_ba, pt3d_idxs,
+                   frame_ids=[kf.id for kf in keyframes])
+
         with self._new_frame_lock:
             for i, dt in zip(meas_idxs, t_off):
                 keyframes[i].measure.time_adj = dt - keyframes[i].measure.time_off
@@ -219,6 +225,11 @@ class VisualGPSNav(VisualOdometry):
             if not current_only:
                 self.del_keyframes(rem_kf_ids)
                 self.del_keypoints(rem_kp_ids)
+
+        if 0 and not current_only:
+            # show result
+            from visnav.run import replay_keyframes
+            replay_keyframes(self.cam, self.all_keyframes(), self.all_pts3d())
 
         if self.ba_err_logger is not None and not current_only:
             self.ba_err_logger(keyframes[-1].id, errs)

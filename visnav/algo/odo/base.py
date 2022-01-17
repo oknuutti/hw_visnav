@@ -482,6 +482,9 @@ class VisualOdometry:
     def all_keyframes(self):
         return self.removed_keyframes + self.state.keyframes
 
+    def all_pts3d(self):
+        return self.removed_keypoints + list(self.state.map3d.values())
+
     def initialize_track(self, new_frame):
         if self.state is not None:
             self.flush_state()
@@ -681,7 +684,12 @@ class VisualOdometry:
             # mark non-tracked 3d-keypoints belonging to at least two keyframes as non-active, otherwise delete
             with self._3d_map_lock:
                 for id in ids[np.logical_not(mask)]:
-                    self.del_keypoint(id, kf_lim=2)
+                    if id in self.state.map3d:
+                        # marked non-active, removed during next map maintenance
+                        self.state.map3d[id].active = False
+                    elif id in self.state.map2d:
+                        self.state.feat_dscr.pop(id, False)
+                        self.state.map2d.pop(id)
 
         ids = ids[mask]
         nf.kps_uv = dict(zip(ids, new_kp2d[mask]))
@@ -1488,7 +1496,7 @@ class VisualOdometry:
             # Remove 3d keypoints from map.
             # No need to remove 2d keypoints here as they are removed
             # elsewhere if 1) tracking fails, or 2) triangulated into 3d points.
-            rem_kp_ids = self.prune_map3d(rem_kf_ids, active_only=False)
+            rem_kp_ids = self.prune_map3d(rem_kf_ids)
 
             self.del_keyframes(rem_kf_ids)
             self.del_keypoints(rem_kp_ids, kf_lim=2)
@@ -1548,18 +1556,21 @@ class VisualOdometry:
             self.removed_keyframes.extend(rem_kfs)
             logger.info('%d keyframes dropped' % len(rem_kfs))
 
-    def prune_map3d(self, rem_kf_ids=[], active_only=True):
+    def prune_map3d(self, rem_kf_ids=None):
+        rem_kf_ids = rem_kf_ids or []
         with self._3d_map_lock:
             rem_ids = []
-            lim, kfs = self.max_keyframes, self.state.keyframes
-            for id, kp in self.state.map3d.items():
-                if active_only and not kp.active:
-                    continue
-                if (kp.total_count >= self.removal_usage_limit
-                        and kp.inlier_count / kp.total_count <= self.removal_ratio) \
-                        or (len(kfs) >= lim and kp.pt3d_added_frame_id < kfs[-lim].id           # TODO: use rem_kf_ids
-                            and (kp.inlier_time is None or kp.inlier_time <= kfs[-lim].time)):
-                    rem_ids.append(id)
+            for k_id, kp in self.state.map3d.items():
+                if not kp.active:
+                    # lost track
+                    rem_ids.append(k_id)
+                elif kp.total_count >= self.removal_usage_limit \
+                    and kp.inlier_count / kp.total_count <= self.removal_ratio:
+                    # not a very good feature
+                    rem_ids.append(k_id)
+                elif len([1 for f in self.state.keyframes if f.id not in rem_kf_ids and k_id in f.kps_uv]) < 2:
+                    # not enough observations
+                    rem_ids.append(k_id)
         return rem_ids
 
     def del_keypoints(self, ids, kf_lim=None, bad_qlt=False):

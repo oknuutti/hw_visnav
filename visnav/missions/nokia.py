@@ -295,7 +295,7 @@ class NokiaSensor(Mission):
             'ori_err_sd': np.inf if 1 else math.radians(10.0),
 
             'ba_dist_coef': False,          # optimize k1, k2
-            'ba_n_cam_intr': 0,            # optimize principal point, not focal length
+            'ba_n_cam_intr': 0,             # optimize principal point, not focal length
             'enable_marginalization': True,
         }
 
