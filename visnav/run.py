@@ -196,7 +196,7 @@ def main():
             drone_alt = -(-keyframes[-1]['pose'].post).loc[1]        # word
             expected_dist = drone_alt - mission.coord0[2]
             modeled_dist = drone_alt - ground_alt
-            logger.info('ground at %.1f mr (%.1f mr), drone alt %.1f mr (%.1f mr)' % (
+            logger.info('ground at %.1f m (%.1f m), drone alt %.1f m (%.1f m)' % (
                 ground_alt, mission.coord0[2], modeled_dist, expected_dist
             ))
 
@@ -372,7 +372,7 @@ def plot_results(keyframes=None, map3d=None, frame_names=None, meta_names=None, 
             t3 = [keyframes[id2idx[int(id)]]['time'].timestamp() - t0 for id in ba_errs[:, 0]]
 
             axs[1].plot(t3, ba_errs[:, 1], 'C0', label='repr [px]')
-            axs[1].plot(t3, ba_errs[:, 2], 'C1', label='loc [mr]')
+            axs[1].plot(t3, ba_errs[:, 2], 'C1', label='loc [m]')
             axs[1].plot(t3, ba_errs[:, 3], 'C2', label='ori [deg]')
             axs[1].set_title('BA errors')
             axs[1].legend()

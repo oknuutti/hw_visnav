@@ -39,7 +39,7 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
                        marginalize_pose_idxs: np.ndarray = None, marginalize_pt3d_idxs: np.ndarray = None,
                        dtype=np.float64, px_err_weight=1,
                        n_cam_intr=0, log_writer=None, max_nfev=None, skip_pose_n=1, poses_only=False, huber_coef=False,
-                       just_return_r_J=False):
+                       weighted_residuals=True, just_return_r_J=False):
     """
     Returns the bundle adjusted parameters, in this case the optimized rotation and translation vectors.
 
@@ -118,16 +118,16 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
     m = m1 + m2 + m3
     if isinstance(huber_coef, (tuple, list)):
         huber_coef = np.array([huber_coef[0]] * m1 + [huber_coef[1]] * m2 + [huber_coef[2]] * m3, dtype=dtype)
-    weight = 1 if 0 else np.array([px_err_weight * m / m1] * m1
-                                  + [(m / m2) if m2 else 0] * m2
-                                  + [(m / m3) if m3 else 0] * m3, dtype=dtype)
+    weight = 1 if not weighted_residuals else np.array([px_err_weight * m / m1] * m1
+                                                      + [(m / m2) if m2 else 0] * m2
+                                                      + [(m / m3) if m3 else 0] * m3, dtype=dtype)
 
     orig_dtype = pts2d.dtype
     if dtype != orig_dtype:
         pose0, fixed_pt3d, pts2d, v_pts2d, K, px_err_sd, meas_r, meas_aa = map(
             lambda x: x.astype(dtype), (pose0, fixed_pt3d, pts2d, v_pts2d, K, px_err_sd, meas_r, meas_aa))
 
-    curr_prior_J, prior_x_idxs = None, None
+    curr_prior_J, prior_x_idxs, prior_weight = None, None, 1.0
     if prior_J is not None and len(prior_r) > 0:
         a = n_cams * 6
         b = a + len(meas_idxs) * (1 if ENABLE_DT_ADJ else 0)
@@ -148,33 +148,8 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
             prior_x_idxs[-(f - c):] = prior_k[-(f - c):]
 
         curr_prior_J = sp.lil_matrix((len(prior_r), len(x0)), dtype=dtype)
-        curr_prior_J[:, prior_x_idxs] = prior_J
+        curr_prior_J[:, prior_x_idxs] = prior_J * prior_weight
         curr_prior_J = curr_prior_J.tocsr()
-
-    if 0:
-        err = _costfun(x0, pose0, fixed_pt3d, n_cams, n_pts, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K, dist_coefs,
-                       px_err_sd, meas_r, meas_aa, meas_idxs, loc_err_sd, ori_err_sd, huber_coef)
-        print('ERR: %.4e' % (np.sum(err**2)/2))
-    if CHECK_JACOBIAN and n_cams >= 6: #  and n_dist > 0:
-        if 1:
-            jac = _jacobian(x0, pose0, fixed_pt3d, n_cams, n_pts, n_dist, n_cam_intr, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K,
-                            px_err_sd, meas_r, meas_aa, meas_idxs, loc_err_sd, ori_err_sd, huber_coef).toarray()
-            jac_ = numerical_jacobian(lambda x: _costfun(x, pose0, fixed_pt3d, n_cams, n_pts, n_dist, n_cam_intr, cam_idxs, pt3d_idxs,
-                                                         pts2d, v_pts2d, K, px_err_sd, meas_r, meas_aa,
-                                                         meas_idxs, loc_err_sd, ori_err_sd, huber_coef), x0, 1e-4)
-        else:
-            jac = _rot_pt_jac(x0, pose0, fixed_pt3d, n_cams, n_pts, n_dist, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K, px_err_sd,
-                            meas_r, meas_aa, meas_idxs, loc_err_sd, ori_err_sd, huber_coef)
-            jac_ = numerical_jacobian(lambda x: _rotated_points(x, pose0, fixed_pt3d, n_cams, n_pts, n_dist, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K, px_err_sd,
-                                      meas_r, meas_aa, meas_idxs, loc_err_sd, ori_err_sd, huber_coef), x0, 1e-4)
-
-        import matplotlib.pyplot as plt
-        fig, axs = plt.subplots(1, 2, sharex=True, sharey=True)
-        axs[0].imshow(np.sign(jac) * np.abs(jac) ** (1/8))
-        axs[0].set_title('analytical')
-        axs[1].imshow(np.sign(jac_) * np.abs(jac_) ** (1/8))
-        axs[1].set_title('numerical')
-        plt.show()
 
     @lru_cache(1)
     def _cfun(x):
@@ -189,7 +164,7 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
             sqrt_phl_err = err
 
         if prior_x_idxs is not None:
-            prior_r_current = prior_r + prior_J.dot(x[prior_x_idxs] - prior_x)
+            prior_r_current = (prior_r + prior_J.dot(x[prior_x_idxs] - prior_x)) * prior_weight
             sqrt_phl_err = np.concatenate((sqrt_phl_err, prior_r_current), axis=0)
 
         return sqrt_phl_err
@@ -216,6 +191,28 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
 
         return J
 
+    if CHECK_JACOBIAN and n_cams >= 6: #  and n_dist > 0:
+        if 1:
+            J = jac(x0, False).toarray()
+            J_ = numerical_jacobian(lambda x: _costfun(x, pose0, fixed_pt3d, n_cams, n_pts, n_dist, n_cam_intr, cam_idxs, pt3d_idxs,
+                                                         pts2d, v_pts2d, K, px_err_sd, meas_r, meas_aa,
+                                                         meas_idxs, loc_err_sd, ori_err_sd, huber_coef), x0, 1e-4)
+            if curr_prior_J is not None:
+                J_ = np.vstack((J_, curr_prior_J.toarray() if sp.issparse(curr_prior_J) else curr_prior_J))
+        else:
+            J = _rot_pt_jac(x0, pose0, fixed_pt3d, n_cams, n_pts, n_dist, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K, px_err_sd,
+                            meas_r, meas_aa, meas_idxs, loc_err_sd, ori_err_sd, huber_coef)
+            J_ = numerical_jacobian(lambda x: _rotated_points(x, pose0, fixed_pt3d, n_cams, n_pts, n_dist, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K, px_err_sd,
+                                      meas_r, meas_aa, meas_idxs, loc_err_sd, ori_err_sd, huber_coef), x0, 1e-4)
+
+        import matplotlib.pyplot as plt
+        fig, axs = plt.subplots(1, 2, sharex=True, sharey=True)
+        axs[0].imshow(np.sign(J) * np.abs(J) ** (1/8))
+        axs[0].set_title('analytical')
+        axs[1].imshow(np.sign(J_) * np.abs(J_) ** (1/8))
+        axs[1].set_title('numerical')
+        plt.show()
+
     if just_return_r_J:
         return cfun(x0, True), jac(x0, True)
 
@@ -239,10 +236,10 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
                                                         0 if poses_only else n_pts, n_dist, n_cam_intr, meas_idxs.size,
                                                         meas_r0=None if len(meas_idxs) < 2 else meas_r[0])
 
-    new_prior = (None,) * 4
-    if marginalize_pose_idxs is not None and len(marginalize_pose_idxs) + len(marginalize_pt3d_idxs) > 0:
+    new_prior, prior_len = (None,) * 4, 0 if prior_r is None else len(prior_r)
+    if marginalize_pose_idxs is not None and (len(marginalize_pose_idxs) + len(marginalize_pt3d_idxs) + prior_len > 0):
         new_prior = marginalize(res.x, res.fun, res.jac, marginalize_pose_idxs, marginalize_pt3d_idxs,
-                                n_cams, n_pts, n_dist, n_cam_intr, meas_idxs)
+                                n_cams, n_pts, n_dist, n_cam_intr, meas_idxs, prior_len)
 
     if prior_r is not None and len(prior_r) > 0:
         res.fun = res.fun[:-len(prior_r)]
@@ -934,7 +931,7 @@ def project(pts3d, poses, K, dist_coefs=None):
 
 
 def marginalize(x, r, J, marginalize_pose_idxs, marginalize_kp3d_idxs,
-                n_cams, n_pts, n_dist, n_cam_intr, measure_idxs):
+                n_cams, n_pts, n_dist, n_cam_intr, measure_idxs, prior_rows):
 
     a = n_cams * 6
     b = a + len(measure_idxs) * (1 if ENABLE_DT_ADJ else 0)
@@ -963,14 +960,21 @@ def marginalize(x, r, J, marginalize_pose_idxs, marginalize_kp3d_idxs,
     if sp.issparse(J):
         nzr, nzc = J.nonzero()
         J_rows = np.zeros((J.shape[0],), dtype=bool)
-        J_cols = np.zeros((J.shape[1],), dtype=bool)
         J_rows[nzr[m_x[nzc]]] = True
-        J_cols[nzc[J_rows[nzr]]] = True      # mu-vars + κ-vars
     else:
         J_rows = np.any(np.logical_not(np.isclose(J[:, m_x], 0)), axis=1)     # rows affected by marginalized (mu-) vars
+
+    if prior_rows > 0:
+        # always include all prior related rows
+        J_rows[-prior_rows:] = True
+
+    if sp.issparse(J):
+        J_cols = np.zeros((J.shape[1],), dtype=bool)
+        J_cols[nzc[J_rows[nzr]]] = True  # mu-vars + κ-vars
+    else:
         J_cols = np.any(np.logical_not(np.isclose(J[J_rows, :], 0)), axis=0)  # cols affecting above rows (mu-vars + κ-vars)
 
-    k_x = np.logical_and(J_cols, k_x)   # now only κ-vars
+    k_x = np.logical_and(J_cols, k_x)   # now only κ-vars (and vars related to previous prior)
     J_cols_m = np.where(m_x)[0]         # col indices related to mu-vars
     J_cols_k = np.where(k_x)[0]         # col indices related to κ-vars
     J_cols = np.concatenate((J_cols_m, J_cols_k), axis=0)

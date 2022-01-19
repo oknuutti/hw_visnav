@@ -195,10 +195,11 @@ class VisualOdometry:
 
     # map maintenance
     DEF_MAX_KEYFRAMES = 8
+    DEF_WINDOW_FIFO_LEN = 3
     DEF_MAX_MARG_RATIO = 0.90
     DEF_REMOVAL_USAGE_LIMIT = 2        # 3d keypoint valid for removal if it was available for use this many times
     DEF_REMOVAL_RATIO = 0.15           # 3d keypoint inlier participation ratio below which the keypoint is discarded
-    DEF_REMOVAL_AGE = 8                # remove if last inlier was this many keyframes ago
+    DEF_MIN_RETAIN_OBS = 3             # keep inactive keypoints if still this many observations in keyframe window
     DEF_MM_BIAS_SDS = np.ones(6) * 2e-3  # bias drift sds, x, y, z, then so3
 
     DEF_INLIER_RATIO_2D2D = 0.50        # expected ratio of inliers when using the 5-point algo for pose
@@ -479,10 +480,11 @@ class VisualOdometry:
 
     def flush_state(self):
         self.removed_keyframes.extend(self.state.keyframes)
+        self.removed_keyframes.sort(key=lambda x: x.id)
         self.removed_keypoints.extend(self.state.map3d.values())
 
     def all_keyframes(self):
-        return self.removed_keyframes + self.state.keyframes
+        return sorted(self.removed_keyframes + self.state.keyframes, key=lambda x: x.id)
 
     def all_pts3d(self):
         return self.removed_keypoints + list(self.state.map3d.values())
@@ -1487,7 +1489,7 @@ class VisualOdometry:
                 pass  # can't happen if in synchronized mode
 
     def is_maintenance_time(self):
-        return (self.state.keyframes[-1].id - self.state.keyframes[0].id + 1) % self.ba_interval == 0
+        return self.state.keyframes[-1].id % self.ba_interval == 0
 
     def maintain_map(self):
         if not self.use_ba:
@@ -1501,7 +1503,7 @@ class VisualOdometry:
             rem_kp_ids = self.prune_map3d(rem_kf_ids)
 
             self.del_keyframes(rem_kf_ids)
-            self.del_keypoints(rem_kp_ids, kf_lim=2)
+            self.del_keypoints(rem_kp_ids, kf_lim=self.min_retain_obs)
 
         elif len(self.state.map3d) >= self.min_inliers:
             # pruning done before and after ba
@@ -1548,7 +1550,25 @@ class VisualOdometry:
 
     def prune_keyframes(self):
         with self._3d_map_lock:
-            rem_kf_ids = [kf.id for kf in self.state.keyframes[:-self.max_keyframes]]
+            if 0:
+                rem_kf_ids = [kf.id for kf in self.state.keyframes[:-self.max_keyframes]]
+            else:
+                # remove all keyframes with zero active keypoints (respect protected fifo part)
+                active_kps = {id for id, kp in self.state.map3d.items() if kp.active}
+                rem_kf_ids = [kf.id for kf in self.state.keyframes[:-self.window_fifo_len]
+                              if len(active_kps.intersection(set(kf.kps_uv.keys()))) == 0]
+                kf_ids = [kf.id for kf in self.state.keyframes if kf.id not in rem_kf_ids]
+
+                # if still needed, select keyframes to remove based on a scheme where we try to follow exponential
+                # keyframe intervals as measured by their ids
+                for i in range(len(kf_ids) - self.max_keyframes):
+                    id_diff = np.diff(kf_ids[: -self.window_fifo_len + 1])
+                    range_n = len(kf_ids) - self.window_fifo_len
+                    trg_diff = 10 ** (1 - np.arange(range_n) / range_n)
+                    dev = trg_diff - id_diff
+                    rem_idx = np.argmax(dev) + 1
+                    rem_kf_ids.append(kf_ids[rem_idx])
+                    kf_ids.pop(rem_idx)
         return rem_kf_ids
 
     def del_keyframes(self, ids):
@@ -1556,6 +1576,7 @@ class VisualOdometry:
             rem_kfs = [kf for kf in self.state.keyframes if kf.id in ids]
             self.state.keyframes = [kf for kf in self.state.keyframes if kf.id not in ids]
             self.removed_keyframes.extend(rem_kfs)
+            self.removed_keyframes.sort(key=lambda x: x.id)
             logger.info('%d keyframes dropped' % len(rem_kfs))
 
     def prune_map3d(self, rem_kf_ids=None):
@@ -1563,16 +1584,14 @@ class VisualOdometry:
         with self._3d_map_lock:
             rem_ids = []
             for k_id, kp in self.state.map3d.items():
-                if not kp.active:
-                    # lost track
-                    rem_ids.append(k_id)
-                elif kp.total_count >= self.removal_usage_limit \
-                    and kp.inlier_count / kp.total_count <= self.removal_ratio:
+                if kp.total_count >= self.removal_usage_limit and kp.inlier_count / kp.total_count < self.removal_ratio:
                     # not a very good feature
                     rem_ids.append(k_id)
-                elif len([1 for f in self.state.keyframes if f.id not in rem_kf_ids and k_id in f.kps_uv]) < 2:
-                    # not enough observations
-                    rem_ids.append(k_id)
+                else:
+                    n_obs = len([1 for f in self.state.keyframes if f.id not in rem_kf_ids and k_id in f.kps_uv])
+                    if kp.active and n_obs < 2 or not kp.active and n_obs < self.min_retain_obs:
+                        # not enough observations
+                        rem_ids.append(k_id)
         return rem_ids
 
     def del_keypoints(self, ids, kf_lim=None, bad_qlt=False):
@@ -1587,7 +1606,7 @@ class VisualOdometry:
             self.state.map3d[id].bad_qlt = True
 
         if kf_lim is not None and id in self.state.map3d:
-            if len([1 for f in self.state.keyframes[-self.max_keyframes:] if id in f.kps_uv]) >= kf_lim:
+            if len([1 for f in self.state.keyframes if id in f.kps_uv]) >= kf_lim:
                 ret = int(self.state.map3d[id].active)
                 self.state.map3d[id].active = False
                 return ret
@@ -1910,7 +1929,7 @@ class VisualOdometry:
         axs = fig.subplots(1, 4, sharex=True)
         i = 0
         if 1:
-            axs[i].set_ylabel('alt [mr]')
+            axs[i].set_ylabel('alt [m]')
             axs[i].plot(e_idxs, e_w_loc[:, 2])
             axs[i].plot(m_idxs, m_w_loc[:, 2])
             i += 1

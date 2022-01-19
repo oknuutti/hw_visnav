@@ -181,7 +181,8 @@ class VisualGPSNav(VisualOdometry):
 
         args = (poses_mx, pts3d, pts2d, v_pts2d, cam_idxs, pt3d_idxs, self.cam.cam_mx, dist_coefs, px_err_sd, meas_r,
                 meas_aa, t_off, meas_idxs, self.loc_err_sd, self.ori_err_sd)
-        kwargs = dict(max_nfev=self.max_ba_fun_eval, skip_pose_n=skip_pose_n, huber_coef=(2, 5, 0.5), poses_only=current_only)
+        kwargs = dict(max_nfev=self.max_ba_fun_eval, skip_pose_n=skip_pose_n, huber_coef=(1, 5, 0.5),
+                      poses_only=current_only, weighted_residuals=True)
 
         if self.ba_n_cam_intr and not current_only and len(keyframes) >= self.max_keyframes:
             kwargs['n_cam_intr'] = self.ba_n_cam_intr
@@ -224,7 +225,7 @@ class VisualGPSNav(VisualOdometry):
 
             if not current_only:
                 self.del_keyframes(rem_kf_ids)
-                self.del_keypoints(rem_kp_ids)
+                self.del_keypoints(rem_kp_ids, kf_lim=None if self.enable_marginalization else self.min_retain_obs)
 
         if 0 and not current_only:
             # show result
