@@ -400,7 +400,7 @@ def run_ba(args):
         if 1:
             solver.solve(problem, callback=lambda x: save_and_plot(x, plot=True) if DEBUG else None)
             save_and_plot(problem, log=True, save=True, plot=args.plot)
-            if 1:
+            if args.plot:
                 replay_kapt(kapt_path, kapt)
         else:
             J = problem.jacobian()
