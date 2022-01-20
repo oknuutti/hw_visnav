@@ -174,6 +174,7 @@ class VisualGPSNav(VisualOdometry):
             if not current_only:
                 rem_kf_ids = self.prune_keyframes()
                 rem_kp_ids = self.prune_map3d(rem_kf_ids)
+                logger.info('pruning %d keyframes and %d keypoints' % (len(rem_kf_ids), len(rem_kp_ids)))
 
         meas_idxs = meas_idxs.astype(int)
         meas_r = meas_r.reshape((-1, 3))

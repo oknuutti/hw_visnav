@@ -856,10 +856,10 @@ class VisualOdometry:
             # record keypoint stats
             with self._3d_map_lock:
                 for id in ids:
-                    self.state.map2d[id].total_count += 1
+                    self.get_kp(id).total_count += 1
                 for i in inliers.flatten():
-                    self.state.map2d[ids[i]].inlier_count += 1
-                    self.state.map2d[ids[i]].inlier_time = nf.time
+                    self.get_kp(ids[i]).inlier_count += 1
+                    self.get_kp(ids[i]).inlier_time = nf.time
 
             dq = quaternion.from_rotation_matrix(R)
             p_delta = DeltaPose(ur.flatten(), dq)
@@ -870,6 +870,9 @@ class VisualOdometry:
             nf.pose.method = VisualOdometry.POSE_2D2D
 
         return ok
+
+    def get_kp(self, id):
+        return self.state.map2d.get(id, self.state.map3d.get(id, None))
 
     def solve_pnp(self, kf, use_3d2d_ransac, min_inliers=None, lf=None):
         min_inliers = min_inliers or self.min_inliers
@@ -1434,6 +1437,7 @@ class VisualOdometry:
                 for id, err in kf_repr_err[i].items():
                     kf.repr_err[id] = err
 
+        logger.info('removing %d keypoints based on sanity check after ba' % len(rem_ids))
         for kp_id in rem_ids:
             if kp_id in self.state.map3d:
                 self.del_keypoint(kp_id, bad_qlt=True)
@@ -1504,6 +1508,7 @@ class VisualOdometry:
 
             self.del_keyframes(rem_kf_ids)
             self.del_keypoints(rem_kp_ids, kf_lim=self.min_retain_obs)
+            logger.info('pruned %d keyframes and %d keypoints' % (len(rem_kf_ids), len(rem_kp_ids)))
 
         elif len(self.state.map3d) >= self.min_inliers:
             # pruning done before and after ba

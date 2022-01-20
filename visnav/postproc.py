@@ -31,11 +31,11 @@ from visnav.depthmaps import get_cam_params, set_cam_params
 from visnav.missions.nokia import NokiaSensor
 from visnav.run import plot_results
 
-DEBUG = 1
-PX_ERR_SD = 1.0
-LOC_ERR_SD = (3.0, 10.0, 3.0) if 1 else (np.inf,)
+DEBUG = 0
+PX_ERR_SD = 0.55    # |(960, 540)| * 0.0005 => 1101 * 0.0005 => 0.55
+LOC_ERR_SD = (2.0, 2.0, 2.0) if 1 else (np.inf,)
 ORI_ERR_SD = (math.radians(1.0) if 0 else np.inf,)
-HUBER_COEFS = (2.0, 5.0, 0.5)
+HUBER_COEFS = (1.0, 5.0, 0.5)
 SENSOR_NAME = 'cam'
 VO_FEATURE_NAME = 'gftt'
 EXTRACTED_FEATURE_NAME = 'akaze'
