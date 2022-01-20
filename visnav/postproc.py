@@ -11,7 +11,6 @@ from kapture import Kapture
 from kapture.io.records import get_record_fullpath
 from scipy.spatial.ckdtree import cKDTree
 
-import matplotlib.pyplot as plt
 from tqdm import tqdm
 
 import kapture as kt
@@ -416,6 +415,7 @@ def run_ba(args):
             J = J.toarray()
             Jref = Jref.toarray()
 
+            import matplotlib.pyplot as plt
             plt.figure(1)
             plt.plot(r, label='new')
             plt.plot(rref, label='ref')
