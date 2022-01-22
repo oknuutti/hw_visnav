@@ -653,7 +653,7 @@ def triangulate(kapt, cam_params, img_file1, kps1, descs1, img_file2, kps2, desc
         mask = np.logical_and(mask, repr_err < MAX_REPR_ERROR)
 
     if np.sum(mask) < MIN_INLIERS:
-        return None, None
+        return None, None, None
 
     return (pts3d[mask, :], *zip(*[[m.queryIdx, m.trainIdx] for m in matches[mask]]))
 
