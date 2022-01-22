@@ -38,8 +38,8 @@ HUBER_COEFS = None  # (1.0, 5.0, 0.5)
 SENSOR_NAME = 'cam'
 VO_FEATURE_NAME = 'gftt'
 EXTRACTED_FEATURE_NAME = 'akaze'
-EXTRACTED_FEATURE_COUNT = 2000
-EXTRACTED_FEATURE_GRID = (3, 3)
+EXTRACTED_FEATURE_COUNT = 3000
+EXTRACTED_FEATURE_GRID = (1, 1)
 EXTRACTED_FEATURE_PARAMS = {'akaze': {
     'descriptor_type': cv2.AKAZE_DESCRIPTOR_MLDB,  # default: cv2.AKAZE_DESCRIPTOR_MLDB
     'descriptor_channels': 3,  # default: 3
@@ -47,7 +47,7 @@ EXTRACTED_FEATURE_PARAMS = {'akaze': {
     'diffusivity': cv2.KAZE_DIFF_CHARBONNIER,  # default: cv2.KAZE_DIFF_PM_G2
     'threshold': 0.00005,  # default: 0.001
     'nOctaves': 4,  # default: 4
-    'nOctaveLayers': 4,  # default: 4
+    'nOctaveLayers': 8,  # default: 4
 }}
 MAX_REPR_ERROR = 8
 MIN_INLIERS = 15
@@ -57,6 +57,8 @@ logger = tools.get_logger("main")
 
 
 # TODO: the following:
+#  - profile memory usage
+#  - better akaze extraction and matching
 #  - (6) implement image normalization and cam idealization for depth map estimation (here or at depthmaps.py?)
 #  - ? find intra batch global keyframe matches
 #  /- try https://pythonhosted.org/sppy/ to speed up sparse matrix manipulations,
@@ -192,13 +194,16 @@ def run_fm(args):
     res_pts3d = []  # [[3d-point, ...], ...]
     res_obser_map = {}  # {(batch-id, frame-id, feature-id): pt3d-id, ...}  # pt3d-id is the index of list res_pts3d
 
+    img_files = {}  # for plotting only
+
     k = 0
     for i, path1 in enumerate(args.path):
         for j, path2 in zip(range(i + 1, len(args.path)), args.path[i+1:]):
             k += 1
             logger.info('Finding feature matches and doing initial triangulation for %s and %s (%d/%d)' % (
                 path1, path2, k, n*(n-1)/2))
-            find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d, res_obser_map, args.plot)
+            find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d, res_obser_map,
+                         args.plot, img_files)
 
     # calculate mean of each entry in res_pts3d
     res_pts3d = np.array([np.mean(np.array(pts3d), axis=0) for pts3d in res_pts3d])
@@ -208,11 +213,8 @@ def run_fm(args):
         pickle.dump((res_pts3d, res_obser_map), fh)
 
 
-def find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d, res_obser, plot):
+def find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d, res_obser, plot=False, img_files=None):
     # find all frames with akaze features, load poses and observations
-    if plot:
-        img_files = {}
-
     for path in (path1, path2):
         if path in cam_params:
             continue
@@ -264,6 +266,10 @@ def find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d
                 cam = cam_obj(cam_params[path])
                 pts3d = np.array([obser[(path, fid, i)] for i in range(len(pts2d[(path, fid)]))])
                 d.append((cam.cam_mx, pts2d[(path, fid)], descr[(path, fid)], pts3d))
+
+            if plot:
+                plot_matches(img_files[(path1, fid1)], img_files[(path2, fids2[idx2])],
+                             pts2d[(path1, fid1)], pts2d[(path2, fids2[idx2])], kps_only=True)
 
             matches1, matches2 = match_and_validate(*d[0], *d[1])
 
@@ -534,13 +540,14 @@ def get_ba_params(kapt_path, keyframes, kapt, sensor_id):
         uv_map[id_f] = uvs
 
     # load also observations of akaze features
-    ef_frames = {fname for r in kapt.observations.values() if EXTRACTED_FEATURE_NAME in r
-                       for fname, id2 in r[EXTRACTED_FEATURE_NAME]}
-    feat = kapt.keypoints[EXTRACTED_FEATURE_NAME]
-    ef_uv_map = {}
-    for fname in ef_frames:
-        uvs = image_keypoints_from_file(get_keypoints_fullpath(EXTRACTED_FEATURE_NAME, kapt_path, fname), feat.dtype, feat.dsize)
-        ef_uv_map[fname2id[fname]] = uvs
+    if EXTRACTED_FEATURE_NAME in kapt.keypoints:
+        ef_frames = {fname for r in kapt.observations.values() if EXTRACTED_FEATURE_NAME in r
+                           for fname, id2 in r[EXTRACTED_FEATURE_NAME]}
+        feat = kapt.keypoints[EXTRACTED_FEATURE_NAME]
+        ef_uv_map = {}
+        for fname in ef_frames:
+            uvs = image_keypoints_from_file(get_keypoints_fullpath(EXTRACTED_FEATURE_NAME, kapt_path, fname), feat.dtype, feat.dsize)
+            ef_uv_map[fname2id[fname]] = uvs
 
     max_pt3d_id = -1
     f_uv, ef_uv = {}, {}
@@ -747,15 +754,21 @@ def join_batches(arr_pts2d, arr_cam_params, arr_cam_param_idxs, arr_poses, arr_p
            meas_r, meas_aa, meas_idxs
 
 
-def plot_matches(img_path1, img_path2, kps1, kps2):
+def plot_matches(img_path1, img_path2, kps1, kps2, kps_only=False):
     def arr2kp(arr, size=7):
         return [cv2.KeyPoint(p[0, 0], p[0, 1], size) for p in arr]
 
     matches = [cv2.DMatch(i, i, 0, 0) for i in range(len(kps1))]
     img1, img2 = map(lambda x: cv2.imread(x), (img_path1, img_path2))
-    img = cv2.drawMatches(img1, arr2kp(kps1), img2, arr2kp(kps2), matches, None)
-    cv2.imshow('matches', img)
-    cv2.waitKey()
+    if kps_only:
+        img = np.concatenate((cv2.drawKeypoints(img1, arr2kp(kps1), None),
+                              cv2.drawKeypoints(img2, arr2kp(kps2), None)), axis=1)
+    else:
+        img = cv2.drawMatches(img1, arr2kp(kps1), img2, arr2kp(kps2), matches, None)
+    cv2.imshow('keypoints' if kps_only else 'matches', img)
+    if not kps_only:
+        cv2.setWindowTitle('matches', '%d matches' % len(matches))
+    cv2.waitKey(1 if kps_only else 0)
 
 
 def replay_probem(img_paths: List[str], p: Problem):
