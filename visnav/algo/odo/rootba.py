@@ -176,7 +176,7 @@ class RootBundleAdjuster:
             stats.l_diff = l_diff
             stats.delta_f = self._linearizer.initial_cost() - cost1
             stats.step_quality = stats.delta_f / l_diff
-            stats.delta_r = np.nan  # stats.delta_f / np.linalg.norm(r0)    # TODO: remove?
+            stats.delta_r = stats.delta_f / self._linearizer.initial_cost()
             stats.valid = l_diff > 0
             stats.success = stats.valid and stats.step_quality > self.min_step_quality
 

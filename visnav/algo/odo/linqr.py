@@ -34,7 +34,7 @@ class InnerLinearizerQR:
         self._a_block = None
         self._pose_size = self.problem.pose_size
         self._pose_n = len(self.problem.poses)
-        self.nb = len(self.problem.cam_param_idxs)
+        self.nb = len(self.problem.xb)
         self.np = self._pose_size * self._pose_n
         self.nl = 3
         # self.mr = 2 * len(self.problem.pts2d)
@@ -402,7 +402,7 @@ class InnerLinearizerQR:
         return self.get_Q2TJbp_T_Q2TJbp_mult_x(xp)
 
     def nb(self) -> int:
-        return len(self.problem.cam_param_idxs)
+        return len(self.problem.xb)
 
 
 class ResidualBlock:

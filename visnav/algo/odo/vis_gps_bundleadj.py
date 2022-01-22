@@ -737,7 +737,7 @@ def numerical_jacobian(fun, x0, eps=1e-4):
         y0 = fun(x0)
         J = np.zeros((len(y0), len(x0)))
         for j in tqdm(range(len(x0))):
-            d = np.zeros((len(x0),))
+            d = np.zeros(x0.shape)
             d[j] = eps
             x1 = x0 + d
             y1 = fun(x1)

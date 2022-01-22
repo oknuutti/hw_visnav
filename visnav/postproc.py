@@ -24,17 +24,17 @@ from visnav.algo.model import Camera
 from visnav.algo.odo.base import Keypoint
 from visnav.algo.odo.problem import Problem
 from visnav.algo.odo.rootba import RootBundleAdjuster, LinearizerQR
-from visnav.algo.odo.vis_gps_bundleadj import vis_gps_bundle_adj
+from visnav.algo.odo.vis_gps_bundleadj import vis_gps_bundle_adj, numerical_jacobian
 from visnav.algo.tools import Pose
 from visnav.depthmaps import get_cam_params, set_cam_params
 from visnav.missions.nokia import NokiaSensor
 from visnav.run import plot_results
 
 DEBUG = 0
-PX_ERR_SD = 0.55    # |(960, 540)| * 0.0005 => 1101 * 0.0005 => 0.55
-LOC_ERR_SD = (2.0, 2.0, 2.0) if 1 else (np.inf,)
+PX_ERR_SD = 2  # 0.55   #  0.55    # |(960, 540)| * 0.0005 => 1101 * 0.0005 => 0.55
+LOC_ERR_SD = (3.0, 3.0, 3.0) if 1 else (np.inf,)
 ORI_ERR_SD = (math.radians(1.0) if 0 else np.inf,)
-HUBER_COEFS = (1.0, 5.0, 0.5)
+HUBER_COEFS = None  # (1.0, 5.0, 0.5)
 SENSOR_NAME = 'cam'
 VO_FEATURE_NAME = 'gftt'
 EXTRACTED_FEATURE_NAME = 'akaze'
@@ -57,18 +57,16 @@ logger = tools.get_logger("main")
 
 
 # TODO: the following:
-#  - (5) implement truly global ba by joining given flights
-#  - debug global ba
 #  - (6) implement image normalization and cam idealization for depth map estimation (here or at depthmaps.py?)
-#  /- how to freeze np first poses? or, how to add a prior?
+#  - ? find intra batch global keyframe matches
 #  /- try https://pythonhosted.org/sppy/ to speed up sparse matrix manipulations,
 #  /  maybe https://pypi.org/project/minieigen/ helps also?
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Run global BA on a flight')
+    parser = argparse.ArgumentParser(description='Run global BA on a batch or a set of related batches')
     parser.add_argument('--path', nargs='+', required=True, help='path to folder with result.pickle and kapture-folder')
-    parser.add_argument('--matches-path', type=str, help='path to across-flight feature match file')
+    parser.add_argument('--matches-path', type=str, help='path to across-batch feature match file')
     parser.add_argument('--img-sc', default=0.5, type=float, help='image scale')
     parser.add_argument('--nadir-looking', action='store_true', help='is cam looking down? used for plots only')
     parser.add_argument('--plot', action='store_true', help='plot result')
@@ -82,7 +80,7 @@ def main():
     parser.add_argument('--abs-loc-r', action='store_true', help='use absolute location measures in BA')
     parser.add_argument('--abs-ori-r', action='store_true', help='use absolute orientation measure in BA')
     parser.add_argument('--skip-fe', action='store_true', help='Skip AKAZE feature extraction')
-    parser.add_argument('--skip-fm', action='store_true', help='Skip feature matching across flights')
+    parser.add_argument('--skip-fm', action='store_true', help='Skip feature matching across batches')
     parser.add_argument('--skip-ba', action='store_true', help='Skip global BA')
     parser.add_argument('--normalize-images', action='store_true',
                         help='After all is done, normalize images based on current camera params')
@@ -182,17 +180,17 @@ def run_fm(args):
         return
 
     # Example values:
-    #   flight-id = 'data/output/27'
+    #   batch-id = 'data/output/27'
     #   frame-id = 6   (for image cam/frame000006.jpg)
     #   feature-id: 4  (4th feature extracted for given frame)
-    cam_params = {}  # {flight-id: cam_params, ...}
-    poses = {}  # {(flight-id, frame-id): pose, ...}
-    pts2d = {}  # {(flight-id, frame-id): [2d-point, ...], ...}       # feature-id is the index of the inner list
-    descr = {}  # {(flight-id, frame-id): [descr, ...], ...}          # feature-id is the index of the inner list
-    obser = {}  # {(flight-id, frame-id, feature-id): 3d-point, ...}
+    cam_params = {}  # {batch-id: cam_params, ...}
+    poses = {}  # {(batch-id, frame-id): pose, ...}
+    pts2d = {}  # {(batch-id, frame-id): [2d-point, ...], ...}       # feature-id is the index of the inner list
+    descr = {}  # {(batch-id, frame-id): [descr, ...], ...}          # feature-id is the index of the inner list
+    obser = {}  # {(batch-id, frame-id, feature-id): 3d-point, ...}
 
     res_pts3d = []  # [[3d-point, ...], ...]
-    res_obser = {}  # {(flight-id, frame-id, feature-id): pt3d-id, ...}  # pt3d-id is the index of list res_pts3d
+    res_obser_map = {}  # {(batch-id, frame-id, feature-id): pt3d-id, ...}  # pt3d-id is the index of list res_pts3d
 
     k = 0
     for i, path1 in enumerate(args.path):
@@ -200,19 +198,19 @@ def run_fm(args):
             k += 1
             logger.info('Finding feature matches and doing initial triangulation for %s and %s (%d/%d)' % (
                 path1, path2, k, n*(n-1)/2))
-            find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d, res_obser)
+            find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d, res_obser_map, args.plot)
 
     # calculate mean of each entry in res_pts3d
     res_pts3d = np.array([np.mean(np.array(pts3d), axis=0) for pts3d in res_pts3d])
 
     # save res_pts3d, res_obser so that can use for global ba
     with open(args.matches_path, 'wb') as fh:
-        pickle.dump((res_pts3d, res_obser), fh)
+        pickle.dump((res_pts3d, res_obser_map), fh)
 
 
-def find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d, res_obser):
+def find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d, res_obser, plot):
     # find all frames with akaze features, load poses and observations
-    if DEBUG:
+    if plot:
         img_files = {}
 
     for path in (path1, path2):
@@ -244,12 +242,12 @@ def find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d
             obser.update({(path, frame_id, feat_id): kapt.points3d[pt3d_id][:3]
                           for feat_id, pt3d_id in feat_to_pt3d.items()})
 
-            if DEBUG:
+            if plot:
                 img_files[(path, frame_id)] = get_record_fullpath(kapt_path, img_file)
 
     # TODO: in some distant future, find closest pose based on GFTT/AKAZE locations instead of drone location
     #       (similar to what is done in navex/datasets/preproc)
-    # for each pose in flight1, find closest pose from flight2 (based on location only)
+    # for each pose in batch1, find closest pose from batch2 (based on location only)
     fids1, locs1 = zip(*[(fid, pose.loc) for (path, fid), pose in poses.items() if path == path1])
     fids2, locs2 = zip(*[(fid, pose.loc) for (path, fid), pose in poses.items() if path == path2])
     tree = cKDTree(np.array(locs2))
@@ -288,7 +286,7 @@ def find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d
 
                 successes += 1
                 pbar.set_postfix({'successful matches': successes})
-                if DEBUG:
+                if plot:
                     plot_matches(img_files[(path1, fid1)], img_files[(path2, fids2[idx2])],
                                  d[0][1][matches1, ...], d[1][1][matches2, ...])
 
@@ -307,7 +305,7 @@ def run_ba(args):
         min_step_quality=0,
         xtol=0,
         rtol=0,
-        ftol=3e-4,
+        ftol=1e-5, #3e-4,
 
         # filter out observations with large reprojection errors at these iterations
         max_repr_err={},  #0: 320, 1: 64, 2: 32, 3: 16, 4: 12, 6: 8},
@@ -321,7 +319,21 @@ def run_ba(args):
         use_weighted_residuals=True,
     )
 
-    # TODO: (5) update so that also loads AKAZE features, joins separate flights before running truly global BA
+    akaze_pts3d, akaze_obser_map = [None] * 2
+    if args.matches_path:
+        # load AKAZE features so that can join separate batches before running BA
+        with open(args.matches_path, 'rb') as fh:
+            # [3d-point, ...]
+            # {(batch-id, frame-id, feature-id): pt3d-id, ...}  # pt3d-id is the index to above list
+            akaze_pts3d, akaze_obser_map = pickle.load(fh)
+    else:
+        assert len(args.path) == 1, 'optimizing multiple batches separately not supported, please specify ' \
+                                    '--matches-path for optimizing the given batches together'
+
+    arr_pts2d, arr_cam_params, arr_cam_param_idxs, arr_poses, arr_pose_idxs = [], [], [], [], []
+    arr_pts3d, arr_pt3d_idxs, arr_meas_r, arr_meas_aa, arr_meas_idxs = [], [], [], [], []
+    arr_akaze_obser, arr_frames, batch_ids, arr_kapt = [], [], [], []
+
     for i, path in enumerate(args.path):
         with open(os.path.join(path, 'result.pickle'), 'rb') as fh:
             orig_keyframes, map3d, frame_names, meta_names, gt, ba_errs = pickle.load(fh)
@@ -329,8 +341,9 @@ def run_ba(args):
         kapt_path = os.path.join(path, 'kapture')
         kapt = kapture_from_dir(kapt_path)
         sensor_id, width, height, fl_x, fl_y, pp_x, pp_y, *dist_coefs = get_cam_params(kapt, SENSOR_NAME)
+        arr_kapt.append((kapt, width, height))
 
-        if DEBUG:
+        if DEBUG and 1:
             replay_kapt(kapt_path, kapt)
 
         if args.ini_fl:
@@ -364,71 +377,149 @@ def run_ba(args):
         cam_param_idxs = np.array(cam_param_idxs, dtype=int)
 
         logger.info('loading poses and keypoints...')
-        frames, poses, pts3d, pts2d, pose_idxs, pt3d_idxs, meas_r, meas_aa, meas_idxs, _ = \
+        frames, poses, pts3d, pts2d, pose_idxs, pt3d_idxs, meas_r, meas_aa, meas_idxs, akaze_obser, _ = \
             get_ba_params(kapt_path, orig_keyframes, kapt, sensor_id)
 
         _meas_r = meas_r if args.abs_loc_r else None   # enable/disable loc measurements
         _meas_aa = meas_aa if args.abs_ori_r else None  # enable/disable ori measurements
         _meas_idxs = None if meas_r is None and meas_aa is None else meas_idxs
 
-        problem = Problem(pts2d, cam_params, cam_param_idxs, poses, pose_idxs, pts3d, pt3d_idxs, _meas_r, _meas_aa,
-                          _meas_idxs, PX_ERR_SD, LOC_ERR_SD, ORI_ERR_SD, dtype=np.float64)
+        arr_pts2d.append(pts2d)
+        arr_cam_params.append(cam_params)
+        arr_cam_param_idxs.append(cam_param_idxs)
+        arr_poses.append(poses)
+        arr_pose_idxs.append(pose_idxs)
+        arr_pts3d.append(pts3d)
+        arr_pt3d_idxs.append(pt3d_idxs)
+        arr_meas_r.append(_meas_r)
+        arr_meas_aa.append(_meas_aa)
+        arr_meas_idxs.append(_meas_idxs)
+        arr_akaze_obser.append(akaze_obser)
+        arr_frames.append(frames)
+        batch_ids.append(path)
 
-        def save_and_plot(problem, log=False, save=False, plot=False):
-            cam_params, poses, pts3d = map(lambda x: getattr(problem, x), ('cam_params', 'poses', 'pts3d'))
+    pts2d, batch_idxs, cam_params, cam_param_idxs, poses, pose_idxs, pts3d, pt3d_idxs, meas_r, meas_aa, meas_idxs = \
+            join_batches(arr_pts2d, arr_cam_params, arr_cam_param_idxs, arr_poses, arr_pose_idxs, arr_pts3d,
+                         arr_pt3d_idxs, arr_meas_r, arr_meas_aa, arr_meas_idxs, arr_akaze_obser, arr_frames,
+                         batch_ids, akaze_pts3d, akaze_obser_map)
 
-            keyframes = orig_keyframes[:len(poses)]
-            poses = [Pose(poses[j, 3:], tools.angleaxis_to_q(poses[j, :3])) for j in range(len(keyframes))]
-            for j, pose in enumerate(poses):
-                keyframes[j]['pose'].post = pose
-            map3d = [Keypoint(pt3d=pts3d[j, :]) for j in range(len(pts3d))]
+    problem = Problem(pts2d, batch_idxs, cam_params, cam_param_idxs, poses, pose_idxs, pts3d, pt3d_idxs, meas_r, meas_aa,
+                      meas_idxs, PX_ERR_SD, LOC_ERR_SD, ORI_ERR_SD, dtype=np.float64)
+
+    def save_and_plot(problem, log=False, save=False, plot=False):
+        batch_idxs, all_cam_params, all_poses, all_pts3d = \
+            map(lambda x: getattr(problem, x), ('batch_idxs', 'cam_params', 'poses', 'pts3d'))
+
+        for i, path in enumerate(args.path):
+            repr_I = np.where(batch_idxs == i)[0]
+            pose_I = np.unique(problem.pose_idxs[repr_I])
+            pt3d_I = np.unique(problem.pt3d_idxs[repr_I])
+            cam_params = all_cam_params[i]
 
             if log:
                 fl_x, fl_y, pp_x, pp_y, *dist_coefs = cam_params
-                logger.info('new fl: %s, cx: %s, cy: %s, k1, k2: %s' % (
-                    fl_x / args.img_sc, pp_x / args.img_sc, pp_y / args.img_sc, dist_coefs))
+                logger.info('batch %d, new fl: %s, cx: %s, cy: %s, k1, k2: %s' % (
+                    i + 1, fl_x / args.img_sc, pp_x / args.img_sc, pp_y / args.img_sc, dist_coefs))
+
+            if save or plot:
+                with open(os.path.join(path, 'result.pickle'), 'rb') as fh:
+                    keyframes, map3d, frame_names, meta_names, gt, ba_errs = pickle.load(fh)
+
+                poses = [Pose(all_poses[j, 3:], tools.angleaxis_to_q(all_poses[j, :3])) for j in pose_I]
+
+                if 1:
+                    # includes also the akaze keypoints
+                    pts3d = all_pts3d[pt3d_I, :]
+                else:
+                    pts3d = all_pts3d[pt3d_I[:len(map3d)], :]
+
+                keyframes = keyframes[:len(poses)]
+                for j, pose in enumerate(poses):
+                    keyframes[j]['pose'].post = pose
+                map3d = [Keypoint(pt3d=pts3d[j, :]) for j in range(len(pts3d))]
 
             if save:
-                with open(os.path.join(path, 'global-ba-result.pickle'), 'wb') as fh:
+                with open(os.path.join(path, 'ba-result.pickle'), 'wb') as fh:
                     pickle.dump((keyframes, map3d, frame_names, meta_names, gt, ba_errs), fh)
 
-                update_kapture(kapt_path, kapt, [width, height] + list(cam_params), poses, pts3d)
+                kapt, width, height = arr_kapt[i]
+                update_kapture(os.path.join(path, 'kapture'), kapt, [width, height] + list(cam_params), poses, pts3d)
 
             if plot:
                 plot_results(keyframes, map3d, frame_names, meta_names, nadir_looking=args.nadir_looking)
 
+    if 1:
+        solver.solve(problem, callback=lambda x: save_and_plot(x, plot=True, save=True) if DEBUG else None)
+        save_and_plot(problem, log=True, save=True, plot=args.plot)
+        if args.plot:
+            for i, (path, kapt) in enumerate(zip(args.path, arr_kapt)):
+                replay_kapt(os.path.join(path, 'kapture'), kapt[0])
+    elif 1:
+        N, M = 1000, 100
+        problem.maybe_populate_cache()
+
         if 1:
-            solver.solve(problem, callback=lambda x: save_and_plot(x, plot=True) if DEBUG else None)
-            save_and_plot(problem, log=True, save=True, plot=args.plot)
-            if args.plot:
-                replay_kapt(kapt_path, kapt)
+            x0 = problem.xb[:M]
+            J = problem.jacobian_repr_batch(fmt='dense')
+            J = J[:N, :M]
+
+            def costfun(x):
+                problem.xb = np.concatenate((x, problem.xb[M:]), axis=0)
+                return problem.residual_repr()[:N].flatten()
+        elif 0:
+            x0 = problem.xp[:M]
+            J = problem.jacobian_repr_frame(fmt='lil')
+            J = J[:N, :M].toarray()
+
+            def costfun(x):
+                problem.xp = np.concatenate((x, problem.xp[M:]), axis=0)
+                return problem.residual_repr()[:N].flatten()
         else:
-            J = problem.jacobian()
-            r = problem.residual()
+            x0 = problem.xl[:M]
+            J = problem.jacobian_repr_landmark(fmt='lil')
+            J = J[:N, :M].toarray()
 
-            a0, K, loc_err_sd = np.array([]), np.array([[fl_x, 0, pp_x], [0, fl_y, pp_y], [0, 0, 1]]), np.array(LOC_ERR_SD)
-            rref, Jref = vis_gps_bundle_adj(poses, pts3d, pts2d, a0, pose_idxs, pt3d_idxs, K, dist_coefs,
-                                            np.array([PX_ERR_SD]), meas_r, meas_aa, a0, meas_idxs, loc_err_sd, np.inf,
-                                            max_nfev=10, skip_pose_n=0, huber_coef=HUBER_COEFS, poses_only=False,
-                                            just_return_r_J=True)
+            def costfun(x):
+                problem.xl = np.concatenate((x, problem.xl[M:]), axis=0)
+                return problem.residual_repr()[:N].flatten()
 
-            J = J.toarray()
-            Jref = Jref.toarray()
+        J_ = numerical_jacobian(costfun, x0, 1e-6)
 
-            import matplotlib.pyplot as plt
-            plt.figure(1)
-            plt.plot(r, label='new')
-            plt.plot(rref, label='ref')
-            plt.legend()
+        import matplotlib.pyplot as plt
+        fig, axs = plt.subplots(1, 2, sharex=True, sharey=True)
+        axs[0].imshow(np.sign(J) * np.abs(J) ** (1/8))
+        axs[0].set_title('analytical')
+        axs[1].imshow(np.sign(J_) * np.abs(J_) ** (1/8))
+        axs[1].set_title('numerical')
+        plt.show()
 
-            fig, axs = plt.subplots(1, 2, sharex=True, sharey=True)
-            axs[0].imshow(np.sign(J) * np.abs(J) ** (1 / 8))
-            axs[0].set_title('new')
-            axs[1].imshow(np.sign(Jref) * np.abs(Jref) ** (1 / 8))
-            axs[1].set_title('ref')
-            plt.show()
+    else:
+        J = problem.jacobian()
+        r = problem.residual()
 
-            exit()
+        a0, K, loc_err_sd = np.array([]), np.array([[fl_x, 0, pp_x], [0, fl_y, pp_y], [0, 0, 1]]), np.array(LOC_ERR_SD)
+        rref, Jref = vis_gps_bundle_adj(poses, pts3d, pts2d, a0, pose_idxs, pt3d_idxs, K, dist_coefs,
+                                        np.array([PX_ERR_SD]), meas_r, meas_aa, a0, meas_idxs, loc_err_sd, np.inf,
+                                        max_nfev=10, skip_pose_n=0, huber_coef=HUBER_COEFS, poses_only=False,
+                                        just_return_r_J=True)
+
+        J = J.toarray()
+        Jref = Jref.toarray()
+
+        import matplotlib.pyplot as plt
+        plt.figure(1)
+        plt.plot(r, label='new')
+        plt.plot(rref, label='ref')
+        plt.legend()
+
+        fig, axs = plt.subplots(1, 2, sharex=True, sharey=True)
+        axs[0].imshow(np.sign(J) * np.abs(J) ** (1 / 8))
+        axs[0].set_title('new')
+        axs[1].imshow(np.sign(Jref) * np.abs(Jref) ** (1 / 8))
+        axs[1].set_title('ref')
+        plt.show()
+
+        exit()
 
 
 def get_ba_params(kapt_path, keyframes, kapt, sensor_id):
@@ -442,14 +533,27 @@ def get_ba_params(kapt_path, keyframes, kapt, sensor_id):
         uvs = image_keypoints_from_file(get_keypoints_fullpath(VO_FEATURE_NAME, kapt_path, fname), feat.dtype, feat.dsize)
         uv_map[id_f] = uvs
 
+    # load also observations of akaze features
+    ef_frames = {fname for r in kapt.observations.values() if EXTRACTED_FEATURE_NAME in r
+                       for fname, id2 in r[EXTRACTED_FEATURE_NAME]}
+    feat = kapt.keypoints[EXTRACTED_FEATURE_NAME]
+    ef_uv_map = {}
+    for fname in ef_frames:
+        uvs = image_keypoints_from_file(get_keypoints_fullpath(EXTRACTED_FEATURE_NAME, kapt_path, fname), feat.dtype, feat.dsize)
+        ef_uv_map[fname2id[fname]] = uvs
+
     max_pt3d_id = -1
-    f_uv = {}
+    f_uv, ef_uv = {}, {}
     for id3, r in kapt.observations.items():
         if VO_FEATURE_NAME in r:
             for fname, id2 in r[VO_FEATURE_NAME]:
                 id_f = fname2id[fname]
                 f_uv.setdefault(id_f, {})[id3] = uv_map[id_f][id2, :]
                 max_pt3d_id = max(max_pt3d_id, id3)
+        elif EXTRACTED_FEATURE_NAME in r:
+            for fname, id2 in r[EXTRACTED_FEATURE_NAME]:
+                id_f = fname2id[fname]
+                ef_uv.setdefault(id_f, {})[id2] = tuple(ef_uv_map[id_f][id2, :])
 
     obs_kp = list(set.union(*[set(m.keys()) for m in f_uv.values()]))
     pts3d = kapt.points3d[:max_pt3d_id+1, :3]
@@ -474,7 +578,7 @@ def get_ba_params(kapt_path, keyframes, kapt, sensor_id):
     else:
         meas_r, meas_aa, meas_idxs = [None] * 3
 
-    return frames, poses, pts3d, pts2d, cam_idxs, pt3d_idxs, meas_r, meas_aa, meas_idxs, obs_kp
+    return frames, poses, pts3d, pts2d, cam_idxs, pt3d_idxs, meas_r, meas_aa, meas_idxs, ef_uv, obs_kp
 
 
 def update_kapture(kapt_path, kapt, cam_params, poses, pts3d):
@@ -574,6 +678,59 @@ def match_and_validate(cam_mx1, kps1, descr1, pts3d1, cam_mx2, kps2, descr2, pts
         return None, None
 
     return (*zip(*[[m.queryIdx, m.trainIdx] for m in matches[list(inliers)]]),)
+
+
+def join_batches(arr_pts2d, arr_cam_params, arr_cam_param_idxs, arr_poses, arr_pose_idxs, arr_pts3d, arr_pt3d_idxs,
+                 arr_meas_r, arr_meas_aa, arr_meas_idxs, arr_akaze_obser, arr_frames, batch_ids,
+                 akaze_pts3d=None, akaze_obser_map=None):
+
+    assert len(arr_pts2d) == len(arr_cam_params) == len(arr_cam_param_idxs) == len(arr_poses) == len(arr_pose_idxs) \
+           == len(arr_pts3d) == len(arr_pt3d_idxs) == len(arr_meas_r) == len(arr_meas_aa) == len(arr_meas_idxs), \
+           'not all parameters are of same length'
+
+    batch_idxs, pose_idxs, pt3d_idxs, meas_idxs = [], [], [], []
+
+    pt3d_count = 0
+    pose_count, pose_counts = 0, []
+    bid2idx = {bid: bi for bi, bid in enumerate(batch_ids)}
+    fid2idx = {bi: {fid: fi for fi, (fid, fname) in enumerate(frames)} for bi, frames in enumerate(arr_frames)}
+
+    for _poses, _pose_idxs, _pts3d, _pt3d_idxs, _meas_idxs in \
+        zip(arr_poses, arr_pose_idxs, arr_pts3d, arr_pt3d_idxs, arr_meas_idxs):
+
+        batch_idxs.append(np.ones((len(_pose_idxs),), dtype=int) * len(pose_counts))
+        pose_idxs.append(_pose_idxs + pose_count)
+        meas_idxs.append(_meas_idxs + pose_count)
+        pt3d_idxs.append(_pt3d_idxs + pt3d_count)
+
+        pose_counts.append(pose_count)
+        pose_count += len(_poses)
+        pt3d_count += len(_pts3d)
+
+    if akaze_pts3d is not None:
+        _pts2d = np.zeros((len(akaze_obser_map), 2))
+        _batch_idxs = np.zeros((len(akaze_obser_map),), dtype=int)
+        _pose_idxs = np.zeros((len(akaze_obser_map),), dtype=int)
+        _pt3d_idxs = np.zeros((len(akaze_obser_map),), dtype=int)
+        for i, ((batch_id, frame_id, feature_id), id_pt3d) in enumerate(akaze_obser_map.items()):
+            bi = bid2idx[batch_id]
+            _pts2d[i, :] = arr_akaze_obser[bi][frame_id][feature_id]
+            _batch_idxs[i] = bi
+            _pose_idxs[i] = fid2idx[bi][frame_id] + pose_counts[bi]
+            _pt3d_idxs[i] = id_pt3d + pt3d_count
+
+        arr_pts2d.append(_pts2d)
+        batch_idxs.append(_batch_idxs)
+        pose_idxs.append(_pose_idxs)
+        arr_pts3d = arr_pts3d + [akaze_pts3d]
+        pt3d_idxs.append(_pt3d_idxs)
+    
+    pts2d, batch_idxs, poses, pose_idxs, pts3d, pt3d_idxs, meas_r, meas_aa, meas_idxs = map(
+        lambda x: None if np.any([k is None for k in x]) else np.concatenate(x, axis=0),
+        (arr_pts2d, batch_idxs, arr_poses, pose_idxs, arr_pts3d, pt3d_idxs, arr_meas_r, arr_meas_aa, meas_idxs))
+
+    return pts2d, batch_idxs, arr_cam_params, arr_cam_param_idxs, poses, pose_idxs, pts3d, pt3d_idxs, \
+           meas_r, meas_aa, meas_idxs
 
 
 def plot_matches(img_path1, img_path2, kps1, kps2):

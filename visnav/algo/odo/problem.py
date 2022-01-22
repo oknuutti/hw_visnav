@@ -9,12 +9,14 @@ from visnav.algo.tools import Manifold
 
 
 class Problem:
-    def __init__(self, pts2d, cam_params, cam_param_idxs, poses, pose_idxs, pts3d, pt3d_idxs, meas_r, meas_aa,
+    def __init__(self, pts2d, batch_idxs, cam_params, cam_param_idxs, poses, pose_idxs, pts3d, pt3d_idxs, meas_r, meas_aa,
                  meas_idxs, px_err_sd, loc_err_sd, ori_err_sd, dtype):
+
         self.pts2d = pts2d.astype(dtype)
 
-        self.cam_params = np.atleast_1d(np.array(cam_params)).astype(dtype)
-        self.cam_param_idxs = cam_param_idxs
+        self.batch_idxs = np.zeros((len(pts2d),), dtype=int) if batch_idxs is None else batch_idxs
+        self.cam_params = np.atleast_2d(np.array(cam_params)).astype(dtype)
+        self.cam_param_idxs = np.atleast_2d(cam_param_idxs)
 
         self.poses = Manifold(poses.shape, buffer=poses.astype(dtype), dtype=dtype)
         self.poses.set_so3_groups(self._get_so3_grouping(len(poses)))
@@ -45,12 +47,19 @@ class Problem:
 
     @property
     def xb(self):
-        return self.cam_params[self.cam_param_idxs].reshape((-1, 1))
+        return np.array([cp[cpi] for cp, cpi in zip(self.cam_params, self.cam_param_idxs)], dtype=self.dtype).reshape((-1, 1))
 
     @xb.setter
     def xb(self, new_xb):
         if len(new_xb) > 0:
-            self.cam_params[self.cam_param_idxs] = new_xb.flatten()
+            offset = 0
+            for i in range(self.cam_params.shape[0]):
+                n = len(self.cam_param_idxs[i])
+                self.cam_params[i][self.cam_param_idxs[i]] = new_xb.flatten()[offset: offset + n]
+                if 0 in self.cam_param_idxs[i] and 1 not in self.cam_param_idxs[i]:
+                    # if shared focal length, set fy = fx
+                    self.cam_params[i][1] = self.cam_params[i][0]
+                offset += n
         self.clear_cache()
 
     @property
@@ -160,11 +169,21 @@ class Problem:
         if self.cache is not None:
             return
 
-        fx, fy, cx, cy, *dist_coefs = self.cam_params
-        K = np.array([[fx, 0, cx],
-                      [0, fy, cy],
-                      [0,  0,  1]])
-        k1, k2 = np.pad(dist_coefs[0:2], (0, 2 - len(dist_coefs[0:2])), 'constant')
+        fx, fy, cx, cy, *dist_coefs = self.cam_params.T
+        n_batches = len(fx)
+        dist_coefs = np.array(dist_coefs).T
+        K = np.zeros((n_batches, 3, 3), dtype=self.dtype)
+        k1 = np.zeros((n_batches,), dtype=self.dtype)
+        k2 = np.zeros((n_batches,), dtype=self.dtype)
+        for i in range(n_batches):
+            K[i, :, :] = np.array([[fx[i], 0, cx[i]],
+                                   [0, fy[i], cy[i]],
+                                   [0,  0,  1]])
+            if len(dist_coefs) > i:
+                if len(dist_coefs[i]) > 0:
+                    k1[i] = dist_coefs[i][0]
+                if len(dist_coefs[i]) > 1:
+                    k2[i] = dist_coefs[i][1]
 
         pts3d_rot = tools.rotate_points_aa(self.pts3d[self.pt3d_idxs, :], self.poses[self.pose_idxs, 0:3].to_array())
         pts3d_cf = pts3d_rot + self.poses[self.pose_idxs, 3:6].to_array()
@@ -174,17 +193,17 @@ class Problem:
         iZciSD = iZc / self.px_err_sd
         Xn, Yn = pts3d_norm[:, 0], pts3d_norm[:, 1]
 
-        if k1 != 0 or k2 != 0:
+        if np.count_nonzero(k1) + np.count_nonzero(k2) > 0:
             # observations are not undistorted, only k1 and k2 are supported
             # see method jacobian_repr_frame for details
             R2 = Xn ** 2 + Yn ** 2
-            R2k1 = R2 * k1
-            R4k2 = R2 ** 2 * k2
-            alpha_xy = Xn * Yn * (4 * R2 * k2 + 2 * k1)
+            R2k1 = R2 * k1[self.batch_idxs]
+            R4k2 = R2 ** 2 * k2[self.batch_idxs]
+            alpha_xy = Xn * Yn * (4 * R2 * k2[self.batch_idxs] + 2 * k1[self.batch_idxs])
             y_gamma_r = Yn * (3 * R2k1 + 5 * R4k2 + 1)
             x_gamma_r = Xn * (3 * R2k1 + 5 * R4k2 + 1)
-            gamma_x = R2k1 + R4k2 + Xn ** 2 * (4 * R2 * k2 + 2 * k1) + 1
-            gamma_y = R2k1 + R4k2 + Yn ** 2 * (4 * R2 * k2 + 2 * k1) + 1
+            gamma_x = R2k1 + R4k2 + Xn ** 2 * (4 * R2 * k2[self.batch_idxs] + 2 * k1[self.batch_idxs]) + 1
+            gamma_y = R2k1 + R4k2 + Yn ** 2 * (4 * R2 * k2[self.batch_idxs] + 2 * k1[self.batch_idxs]) + 1
         else:
             R2, alpha_xy, y_gamma_r, x_gamma_r, gamma_x, gamma_y = [None] * 6
 
@@ -201,10 +220,10 @@ class Problem:
         c = self.cache
         P = c.pts3d_norm
 
-        if c.k1 != 0 or c.k2 != 0:
-            P = P * (1 + c.k1 * c.R2 + c.k2 * c.R2 ** 2)[:, None]
+        if np.count_nonzero(c.k1) + np.count_nonzero(c.k2) > 0:
+            P = P * (1 + c.k1[self.batch_idxs] * c.R2 + c.k2[self.batch_idxs] * c.R2 ** 2)[:, None]
 
-        pts2d_proj = c.K[:2, :2].dot(P.T).T + c.K[:2, 2:3].T
+        pts2d_proj = np.matmul(c.K[self.batch_idxs, :2, :2], P[:, :, None]).squeeze() + c.K[self.batch_idxs, :2, 2]
         repr_err = ((self.pts2d - pts2d_proj) / self.px_err_sd[:, None]).reshape((-1, 1))
         self._cached_repr_err = repr_err
         return repr_err
@@ -251,48 +270,51 @@ class Problem:
         #
 
         c = self.cache
-        m, n = self.pts2d.size, len(self.cam_param_idxs)
+        m, n = self.pts2d.size, sum([len(cpi) for cpi in self.cam_param_idxs])
         J = self._init_J('_Jrb', m, n, fmt)
         i = np.arange(len(self.pts2d))
 
-        fx, fy, cx, cy, *_ = self.cam_params
+        fx, fy, cx, cy, *_ = self.cam_params.T
         Xn, Yn = c.pts3d_norm[:, 0], c.pts3d_norm[:, 1]
-        j = 0
 
         # camera intrinsics (I=[fl, cx, cy]) affect reprojection error terms
         # [[e_u], [e_v]] = [[u - fl*Xn - cx],
         #                   [v - fl*Yn - cy]]
         # de/dI = [[-Xn, -1, 0],
         #          [-Yn, 0, -1]]
+        j = 0
+        for bi, cpi in enumerate(self.cam_param_idxs):
+            I = self.batch_idxs == bi
 
-        if {0, 1}.intersection(self.cam_param_idxs):
-            both = len({0, 1}.intersection(self.cam_param_idxs)) == 2
-            J[2 * i + 0, j + 0] = -Xn
-            J[2 * i + 1, j + (1 if both else 0)] = -Yn
-            j += 1 + (1 if both else 0)
+            if {0, 1}.intersection(cpi):
+                both = len({0, 1}.intersection(cpi)) == 2
+                J[2 * i[I] + 0, j + 0] = -Xn[I]
+                J[2 * i[I] + 1, j + (1 if both else 0)] = -Yn[I]
+                j += 1 + (1 if both else 0)
 
-        if 2 in self.cam_param_idxs:
-            J[2 * i + 0, j] = -1
-            j += 1
+            if 2 in cpi:
+                J[2 * i[I] + 0, j] = -1
+                j += 1
 
-        if 3 in self.cam_param_idxs:
-            J[2 * i + 1, j] = -1
-            j += 1
+            if 3 in cpi:
+                J[2 * i[I] + 1, j] = -1
+                j += 1
 
-        if {4, 5}.intersection(self.cam_param_idxs):
-            tmp_x = -fx * Xn * c.R2
-            tmp_y = -fy * Yn * c.R2
+            if {4, 5}.intersection(cpi):
+                tmp_x = -fx[bi] * Xn[I] * c.R2[I]
+                tmp_y = -fy[bi] * Yn[I] * c.R2[I]
 
-        if 4 in self.cam_param_idxs:
-            J[2 * i + 0, j] = tmp_x
-            J[2 * i + 1, j] = tmp_y
-            j += 1
+            if 4 in cpi:
+                J[2 * i[I] + 0, j] = tmp_x
+                J[2 * i[I] + 1, j] = tmp_y
+                j += 1
 
-        if 5 in self.cam_param_idxs:
-            J[2 * i + 0, j] = tmp_x * c.R2
-            J[2 * i + 1, j] = tmp_y * c.R2
-            j += 1
+            if 5 in cpi:
+                J[2 * i[I] + 0, j] = tmp_x * c.R2[I]
+                J[2 * i[I] + 1, j] = tmp_y * c.R2[I]
+                j += 1
 
+        J /= self.px_err_sd[:, None]
         return J
 
     def jacobian_repr_frame(self, fmt):
@@ -360,11 +382,12 @@ class Problem:
         # TODO: debug y-px coord at J
 
         c = self.cache
-        fx, fy, cx, cy, *_ = self.cam_params
+        fx, fy, cx, cy, *_ = self.cam_params.T
         Xr, Yr, Zr = c.pts3d_rot[:, 0], c.pts3d_rot[:, 1], c.pts3d_rot[:, 2]
         Xn, Yn = c.pts3d_norm[:, 0], c.pts3d_norm[:, 1]
+        fx, fy = fx[self.batch_idxs], fy[self.batch_idxs]
 
-        if c.k1 == 0 and c.k2 == 0:
+        if np.count_nonzero(c.k1) + np.count_nonzero(c.k2) == 0:
             # camera location
             J[2 * i + 0, self.pose_idxs * 6 + 3] = -fx * c.iZciSD
             J[2 * i + 0, self.pose_idxs * 6 + 5] = fx * Xn * c.iZciSD
@@ -420,10 +443,11 @@ class Problem:
         J = self._init_J('_Jrl', m, n, fmt)
         i = np.arange(len(self.pts2d))
 
-        fx, fy, cx, cy, *_ = self.cam_params
+        fx, fy, cx, cy, *_ = self.cam_params.T
         Xn, Yn = c.pts3d_norm[:, 0], c.pts3d_norm[:, 1]
+        fx, fy = fx[self.batch_idxs], fy[self.batch_idxs]
 
-        if c.k1 == 0 and c.k2 == 0:
+        if np.count_nonzero(c.k1) + np.count_nonzero(c.k2) == 0:
             dEu = -np.stack((fx * np.ones((len(Xn),)), np.zeros((len(Xn),)), -fx * Xn), axis=1) \
                   * c.iZciSD[:, None]
             dEv = -np.stack((np.zeros((len(Xn),)), fy * np.ones((len(Xn),)), -fy * Yn), axis=1) \
