@@ -614,13 +614,16 @@ def cam_obj(cam_params):
 
 
 def triangulate(kapt, cam_params, img_file1, kps1, descs1, img_file2, kps2, descs2):
+    if descs1 is None or descs2 is None or len(descs1) < MIN_INLIERS or len(descs2) < MIN_INLIERS:
+        return None, None, None
 
     # match features based on descriptors, cross check for validity, sort keypoints so that indices indicate matches
     matcher = cv2.BFMatcher(cv2.NORM_HAMMING, True)
-    matches = np.array(matcher.match(descs1, descs2))
+    matches = matcher.match(descs1, descs2)
     if len(matches) < MIN_INLIERS:
         return None, None, None
 
+    matches = np.array(matches)
     kps1 = kps1[[m.queryIdx for m in matches], :]
     kps2 = kps2[[m.trainIdx for m in matches], :]
 
