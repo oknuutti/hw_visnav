@@ -678,7 +678,7 @@ def match_and_validate(cam_mx1, kps1, descr1, pts3d1, cam_mx2, kps2, descr2, pts
     for pts3d, cam_mx, kps in zip((pts3d1, pts3d2), (cam_mx2, cam_mx1), (kps2, kps1)):
         ok, rv, r, inl = cv2.solvePnPRansac(pts3d, kps, cam_mx, None, iterationsCount=10000,
                                             reprojectionError=MAX_REPR_ERROR, flags=cv2.SOLVEPNP_AP3P)
-        inliers = inliers.intersection(inl.flatten())
+        inliers = inliers.intersection(inl.flatten() if inl is not None else [])
 
     if len(inliers) < MIN_INLIERS:
         return None, None
