@@ -665,9 +665,17 @@ def triangulate(kapt, cam_params, img_file1, kps1, descs1, img_file2, kps2, desc
 
 
 def match_and_validate(cam_mx1, kps1, descr1, pts3d1, cam_mx2, kps2, descr2, pts3d2):
+    if descr1 is None or descr2 is None or len(descr1) < MIN_INLIERS or len(descr2) < MIN_INLIERS:
+        return None, None
+
     # match features based on descriptors, cross check for validity, sort keypoints so that indices indicate matches
     matcher = cv2.BFMatcher(cv2.NORM_HAMMING, True)
-    matches = np.array(matcher.match(descr1, descr2))
+    matches = matcher.match(descr1, descr2)
+
+    if matches is None or len(matches) < MIN_INLIERS:
+        return None, None
+
+    matches = np.array(matches)
     kps1, pts3d1 = map(lambda x: x[[m.queryIdx for m in matches], :], (kps1, pts3d1))
     kps2, pts3d2 = map(lambda x: x[[m.trainIdx for m in matches], :], (kps2, pts3d2))
 
