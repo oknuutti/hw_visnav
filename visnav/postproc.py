@@ -332,6 +332,7 @@ def run_ba(args):
             # [3d-point, ...]
             # {(batch-id, frame-id, feature-id): pt3d-id, ...}  # pt3d-id is the index to above list
             akaze_pts3d, akaze_obser_map = pickle.load(fh)
+        akaze_obser_map = {(bid.split('/')[-1], fid, kid): pt3d_id for (bid, fid, kid), pt3d_id in akaze_obser_map.items()}
     else:
         assert len(args.path) == 1, 'optimizing multiple batches separately not supported, please specify ' \
                                     '--matches-path for optimizing the given batches together'
@@ -342,7 +343,8 @@ def run_ba(args):
 
     for i, path in enumerate(args.path):
         with open(os.path.join(path, 'result.pickle'), 'rb') as fh:
-            orig_keyframes, map3d, frame_names, meta_names, gt, ba_errs = pickle.load(fh)
+            orig_keyframes, *_ = pickle.load(fh)
+        del _
 
         kapt_path = os.path.join(path, 'kapture')
         kapt = kapture_from_dir(kapt_path)
@@ -385,6 +387,7 @@ def run_ba(args):
         logger.info('loading poses and keypoints...')
         frames, poses, pts3d, pts2d, pose_idxs, pt3d_idxs, meas_r, meas_aa, meas_idxs, akaze_obser, _ = \
             get_ba_params(kapt_path, orig_keyframes, kapt, sensor_id)
+        del _, orig_keyframes
 
         _meas_r = meas_r if args.abs_loc_r else None   # enable/disable loc measurements
         _meas_aa = meas_aa if args.abs_ori_r else None  # enable/disable ori measurements
@@ -402,12 +405,15 @@ def run_ba(args):
         arr_meas_idxs.append(_meas_idxs)
         arr_akaze_obser.append(akaze_obser)
         arr_frames.append(frames)
-        batch_ids.append(path)
+        batch_ids.append(path.split('/')[-1])
 
     pts2d, batch_idxs, cam_params, cam_param_idxs, poses, pose_idxs, pts3d, pt3d_idxs, meas_r, meas_aa, meas_idxs = \
             join_batches(arr_pts2d, arr_cam_params, arr_cam_param_idxs, arr_poses, arr_pose_idxs, arr_pts3d,
                          arr_pt3d_idxs, arr_meas_r, arr_meas_aa, arr_meas_idxs, arr_akaze_obser, arr_frames,
                          batch_ids, akaze_pts3d, akaze_obser_map)
+
+    del arr_pts2d, arr_cam_params, arr_cam_param_idxs, arr_poses, arr_pose_idxs, arr_pts3d, arr_pt3d_idxs, arr_meas_r, \
+        arr_meas_aa, arr_meas_idxs, arr_akaze_obser, arr_frames, batch_ids, akaze_pts3d, akaze_obser_map
 
     problem = Problem(pts2d, batch_idxs, cam_params, cam_param_idxs, poses, pose_idxs, pts3d, pt3d_idxs, meas_r, meas_aa,
                       meas_idxs, PX_ERR_SD, LOC_ERR_SD, ORI_ERR_SD, dtype=np.float64)
