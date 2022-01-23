@@ -7,7 +7,7 @@ from scipy.sparse import linalg as spl
 
 from visnav.algo import tools
 from visnav.algo.odo.linqr import InnerLinearizerQR
-from visnav.algo.tools import Stopwatch
+from visnav.algo.tools import Stopwatch, MemProf
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -301,10 +301,10 @@ class LinearizerQR:
         # TODO: try different ways, see which one is fastest
         if 0:
             M_x = lambda x: spl.spsolve(P, x)
-            M = spl.LinearOperator((n, n), M_x)
+            M = spl.LinearOperator((n, n), M_x, dtype=self.dtype)
         elif 1:
             M_x = spl.factorized(P)
-            M = spl.LinearOperator((n, n), M_x)
+            M = spl.LinearOperator((n, n), M_x, dtype=self.dtype)
         else:
             M = spl.inv(P)
 
@@ -315,7 +315,7 @@ class LinearizerQR:
             Hpp = self._lqr.get_Q2TJbp_T_Q2TJbp_blockdiag()
         else:
             Hpp_x = lambda x: self._lqr.right_multiply(x)
-            Hpp = spl.LinearOperator((n, n), Hpp_x)
+            Hpp = spl.LinearOperator((n, n), Hpp_x, dtype=self.dtype)
 
         delta_xbp, info = spl.cg(Hpp, b, M=M, tol=self.lin_cg_tol, maxiter=self.lin_cg_maxiter)  # TODO: Hpp == P ??
 

@@ -1,6 +1,8 @@
 import math
 import time
 import logging
+import gc
+import sys
 
 import dateutil.parser as dparser
 
@@ -71,6 +73,42 @@ class Stopwatch:
 
     def __exit__(self, *args):
         self.stop()
+
+
+class MemProf:
+    def __init__(self, logger, label='', enabled=True):
+        import tracemalloc
+        self.tm = tracemalloc
+        self.logger = logger
+        self.label = label
+        self.enabled = enabled
+
+    def __enter__(self):
+        if self.enabled:
+            self.tm.start()
+        return self
+
+    def __exit__(self, *args):
+        if self.enabled:
+            current, peak = self.tm.get_traced_memory()
+            self.logger.info('Mem usage at %s: peak: %.0fMB, increase: %.0fMB' % (
+                    self.label, *map(lambda x: x/1024/1024, (peak, current))))
+            self.tm.stop()
+
+
+def actualsize(input_obj):
+    memory_size = 0
+    ids = set()
+    objects = [input_obj]
+    while objects:
+        new = []
+        for obj in objects:
+            if id(obj) not in ids:
+                ids.add(id(obj))
+                memory_size += sys.getsizeof(obj)
+                new.append(obj)
+        objects = gc.get_referents(*new)
+    return memory_size
 
 
 class Time:
@@ -1338,7 +1376,7 @@ def dlogR_dR(R):
 
 
 @nb.njit(nogil=True, parallel=False, cache=True)
-def make_givens(a, b):
+def make_givens(a, b, dtype=np.float64):
     # based on https://www.math.usm.edu/lambers/mat610/sum10/lecture9.pdf
 
     if a > b:
@@ -1359,7 +1397,7 @@ def make_givens(a, b):
         s = c = 1 / math.sqrt(2)
 
     return np.array([[c, -s],
-                     [s, c]])
+                     [s, c]], dtype=dtype)
 
 
 @nb.njit(nogil=True, parallel=False, cache=True)

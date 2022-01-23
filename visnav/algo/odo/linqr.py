@@ -206,7 +206,7 @@ class InnerLinearizerQR:
         l_diff = 0
         delta_xb = delta_xbp[:self.nb]
         delta_xp = delta_xbp[self.nb:].reshape((-1, self._pose_size))
-        delta_xl = np.zeros((len(self._blocks), self._blocks[0].nl))
+        delta_xl = np.zeros((len(self._blocks), self._blocks[0].nl), dtype=self.dtype)
         for i, blk in enumerate(self.all_blocks):
             blk_delta_xp = delta_xp[blk.pose_idxs, :].reshape((-1, 1))
             if blk.nl > 0:
@@ -254,8 +254,8 @@ class InnerLinearizerQR:
     def get_Q2TJbp_T_Q2Tr(self):
         assert self._state == self.STATE_MARGINALIZED
 
-        brb = np.zeros((self.nb, 1))
-        bp = np.zeros((self._pose_n, self._pose_size))
+        brb = np.zeros((self.nb, 1), dtype=self.dtype)
+        bp = np.zeros((self._pose_n, self._pose_size), dtype=self.dtype)
         for blk in self.all_blocks:
             Q2T_Jbp = blk.Q2T_Jbp
             if sp.issparse(Q2T_Jbp):
@@ -283,8 +283,8 @@ class InnerLinearizerQR:
     def get_Jbp_diag2(self):
         assert self._state == self.STATE_LINEARIZED
 
-        db2 = np.zeros((self.nb,))
-        dp2 = np.zeros((self._pose_n, self._pose_size))
+        db2 = np.zeros((self.nb,), dtype=self.dtype)
+        dp2 = np.zeros((self._pose_n, self._pose_size), dtype=self.dtype)
         for blk in self.all_blocks:
             if blk.nb > 0:
                 db2 += np.sum(self._epow2(blk.Jb), axis=0)
@@ -295,42 +295,23 @@ class InnerLinearizerQR:
     def get_Q2TJbp_T_Q2TJbp_blockdiag(self):
         assert self._state == self.STATE_MARGINALIZED
 
-        if self.dtype == np.float64:
-            Hpp = self._get_Q2TJbp_T_Q2TJbp_blockdiag_f8(self.nb, self.np, self._pose_size, self._pose_damping,
-                                                         nb.typed.List([blk.Q2T_Jbp for blk in self._blocks]),
-                                                         nb.typed.List([blk.pose_idxs for blk in self._blocks]))
+        Hpp = self._get_Q2TJbp_T_Q2TJbp_blockdiag(self.nb, self.np, self._pose_size, self._pose_damping,
+                                                  nb.typed.List([blk.Q2T_Jbp for blk in self._blocks]),
+                                                  nb.typed.List([blk.pose_idxs for blk in self._blocks]))
 
-            for blk in self.non_lm_blocks:
-                blk_Hpp = blk.Q2T_Jbp.T.dot(blk.Q2T_Jbp)
-                tmp = np.arange(len(blk.pose_idxs))
-                _, _, bi, bj = self._block_indexing(tmp, tmp, self._pose_size, self._pose_size)
-                _, _, i, j = self._block_indexing(blk.pose_idxs, blk.pose_idxs, self._pose_size, self._pose_size)
-                Hpp[i+self.nb, j+self.nb] += np.array(blk_Hpp[bi, bj]).flatten()
-
-            return sp.csc_matrix(Hpp)
-
-        assert len(self.problem.cam_param_idxs) == 0, 'not implemented for cam param estimation'
-
-        # Note: invalid result & very slow if constructing with sp.lil_matrix,
-        #       maybe block sparse would work ok and be faster than lil?
-        Hpp = np.zeros((self.np, self.np), dtype=self.dtype)
-
-        for blk in self.all_blocks:
-            for i, idx in enumerate(blk.pose_idxs):
-                g0, b0 = blk.pose_idxs[i] * self._pose_size, i * self._pose_size
-                g1, b1 = g0 + self._pose_size, b0 + self._pose_size
-                blk_Hpp = blk.Q2T_Jbp[:, b0:b1].T.dot(blk.Q2T_Jbp[:, b0:b1])
-                Hpp[g0:g1, g0:g1] += blk_Hpp
-
-        if self._pose_damping is not None:
-            Hpp += self._pose_damping * np.eye(Hpp.shape[0], dtype=self.dtype)
+        for blk in self.non_lm_blocks:
+            blk_Hpp = blk.Q2T_Jbp.T.dot(blk.Q2T_Jbp)
+            tmp = np.arange(len(blk.pose_idxs))
+            _, _, bi, bj = self._block_indexing(tmp, tmp, self._pose_size, self._pose_size)
+            _, _, i, j = self._block_indexing(blk.pose_idxs, blk.pose_idxs, self._pose_size, self._pose_size)
+            Hpp[i+self.nb, j+self.nb] += np.array(blk_Hpp[bi, bj]).flatten()
 
         return sp.csc_matrix(Hpp)
 
     @staticmethod
     @nb.njit(nogil=True, parallel=False, cache=True)
-    def _get_Q2TJbp_T_Q2TJbp_blockdiag_f8(_nb, _np, psize, pose_damping, arr_Q2T_Jbp, arr_pose_idxs):
-        H = np.zeros((_nb + _np, _nb + _np), dtype=np.float64)
+    def _get_Q2TJbp_T_Q2TJbp_blockdiag(_nb, _np, psize, pose_damping, arr_Q2T_Jbp, arr_pose_idxs):
+        H = np.zeros((_nb + _np, _nb + _np), dtype=arr_Q2T_Jbp[0].dtype)
         for i, Q2T_Jbp in enumerate(arr_Q2T_Jbp):
             if _nb > 0:
                 A = Q2T_Jbp[:, 0:_nb].copy()
@@ -345,7 +326,7 @@ class InnerLinearizerQR:
                 H[g0:g1, g0:g1] += blk_Hpp
 
         if pose_damping is not None:
-            H += pose_damping * np.eye(H.shape[0], dtype=np.float64)
+            H += pose_damping * np.eye(H.shape[0], dtype=H.dtype)
 
         return H
 
@@ -444,7 +425,7 @@ class ResidualBlock:
             # self._S = np.concatenate((
             #         np.concatenate((Q.T.dot(self.Jp), R, Q.T.dot(self.r)), axis=1),
             #         np.zeros((self.nl, self.np + self.nl + 1), dtype=Q.dtype)), axis=0)
-            del self.Jb, self.Jp, self.Jl, self.r
+            del self.Jb, self.Jp, self.Jl, self.r, Q, R, Jbp
 
         self._marginalized = True
 
@@ -463,27 +444,27 @@ class ResidualBlock:
         else:
             # make and apply givens rotations
             self._S[-self.nl:, self.nb + self.np:self.n] = np.eye(self.nl, dtype=self._S.dtype) * np.sqrt(_lambda)
-            self._damping_rots = self._damp_f8(self._S, self.nb + self.np, self.nl)
+            self._damping_rots = self._damp(self._S, self.nb + self.np, self.nl)
 
     @staticmethod
     @nb.njit(nogil=True, parallel=False, cache=True)
-    def _damp_f8(S, l_idx, k):
+    def _damp(S, l_idx, k):
         damping_rots = nb.typed.List()
         for n in range(k):
             for m in range(n + 1):
-                G = tools.make_givens(S[n, l_idx + n], S[-k + n - m, l_idx + n])
+                G = tools.make_givens(S[n, l_idx + n], S[-k + n - m, l_idx + n], dtype=S.dtype)
                 tools.apply_givens(S, G, S.shape[0] - k + n - m, n)
                 damping_rots.append(G)
         return damping_rots
 
     def undamp(self):
         assert self.is_damped(), 'not damped yet'
-        self._undamp_f8(self._damping_rots, self._S, self.nl)
+        self._undamp(self._damping_rots, self._S, self.nl)
         self._damping_rots = None
 
     @staticmethod
     @nb.njit(nogil=True, parallel=False, cache=True)
-    def _undamp_f8(damping_rots, S, k):
+    def _undamp(damping_rots, S, k):
         for n in range(k-1, -1, -1):
             for m in range(n, -1, -1):
                 G = damping_rots.pop()

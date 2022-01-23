@@ -84,6 +84,7 @@ def main():
     parser.add_argument('--skip-fe', action='store_true', help='Skip AKAZE feature extraction')
     parser.add_argument('--skip-fm', action='store_true', help='Skip feature matching across batches')
     parser.add_argument('--skip-ba', action='store_true', help='Skip global BA')
+    parser.add_argument('--float32', action='store_true', help='use 32-bit floats instead of 64-bits')
     parser.add_argument('--normalize-images', action='store_true',
                         help='After all is done, normalize images based on current camera params')
     parser.add_argument('--fe-n', type=int, default=10, help='Extract AKAZE features every n frames')
@@ -407,7 +408,7 @@ def run_ba(args):
         arr_frames.append(frames)
         batch_ids.append(path.split('/')[-1])
 
-    pts2d, batch_idxs, cam_params, cam_param_idxs, poses, pose_idxs, pts3d, pt3d_idxs, meas_r, meas_aa, meas_idxs = \
+    pts2d, batch_idxs, cam_params, cam_param_idxs, poses, pose_idxs, pts3d, pt3d_idxs, pt3d_gftt_n, meas_r, meas_aa, meas_idxs = \
             join_batches(arr_pts2d, arr_cam_params, arr_cam_param_idxs, arr_poses, arr_pose_idxs, arr_pts3d,
                          arr_pt3d_idxs, arr_meas_r, arr_meas_aa, arr_meas_idxs, arr_akaze_obser, arr_frames,
                          batch_ids, akaze_pts3d, akaze_obser_map)
@@ -416,7 +417,7 @@ def run_ba(args):
         arr_meas_aa, arr_meas_idxs, arr_akaze_obser, arr_frames, batch_ids, akaze_pts3d, akaze_obser_map
 
     problem = Problem(pts2d, batch_idxs, cam_params, cam_param_idxs, poses, pose_idxs, pts3d, pt3d_idxs, meas_r, meas_aa,
-                      meas_idxs, PX_ERR_SD, LOC_ERR_SD, ORI_ERR_SD, dtype=np.float64)
+                      meas_idxs, PX_ERR_SD, LOC_ERR_SD, ORI_ERR_SD, dtype=np.float32 if args.float32 else np.float64)
 
     def save_and_plot(problem, log=False, save=False, plot=False):
         batch_idxs, all_cam_params, all_poses, all_pts3d = \
@@ -439,11 +440,8 @@ def run_ba(args):
 
                 poses = [Pose(all_poses[j, 3:], tools.angleaxis_to_q(all_poses[j, :3])) for j in pose_I]
 
-                if 1:
-                    # includes also the akaze keypoints
-                    pts3d = all_pts3d[pt3d_I, :]
-                else:
-                    pts3d = all_pts3d[pt3d_I[:len(map3d)], :]
+                # includes also the akaze keypoints
+                pts3d = all_pts3d[pt3d_I, :]
 
                 keyframes = keyframes[:len(poses)]
                 for j, pose in enumerate(poses):
@@ -459,6 +457,13 @@ def run_ba(args):
 
             if plot:
                 plot_results(keyframes, map3d, frame_names, meta_names, nadir_looking=args.nadir_looking)
+
+        if save:
+            # update joint-obs.pickle with new 3d-points
+            with open(args.matches_path, 'rb') as fh:
+                _, akaze_obser_map = pickle.load(fh)
+            with open(args.matches_path, 'wb') as fh:
+                pickle.dump((all_pts3d[pt3d_gftt_n:], akaze_obser_map), fh)
 
     if 1:
         solver.solve(problem, callback=lambda x: save_and_plot(x, plot=True, save=True) if DEBUG else None)
@@ -756,7 +761,7 @@ def join_batches(arr_pts2d, arr_cam_params, arr_cam_param_idxs, arr_poses, arr_p
         lambda x: None if np.any([k is None for k in x]) else np.concatenate(x, axis=0),
         (arr_pts2d, batch_idxs, arr_poses, pose_idxs, arr_pts3d, pt3d_idxs, arr_meas_r, arr_meas_aa, meas_idxs))
 
-    return pts2d, batch_idxs, arr_cam_params, arr_cam_param_idxs, poses, pose_idxs, pts3d, pt3d_idxs, \
+    return pts2d, batch_idxs, arr_cam_params, arr_cam_param_idxs, poses, pose_idxs, pts3d, pt3d_idxs, pt3d_count, \
            meas_r, meas_aa, meas_idxs
 
 
@@ -796,8 +801,6 @@ def replay(img_paths, pts2d, cam_params, poses, pose_idxs, pts3d, pt3d_idxs, fra
     assert len(pts2d) == len(pt3d_idxs)
     cam = cam_params if isinstance(cam_params, Camera) else cam_obj(cam_params)
     kp_size, kp_color = 5, (200, 0, 0)
-
-    # TODO: poses are 5 keyframes ahead compared to keypoint observations!
 
     for i, (img_path, pose) in enumerate(zip(img_paths, poses)):
         I = pose_idxs == i
