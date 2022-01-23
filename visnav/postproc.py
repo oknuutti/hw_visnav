@@ -419,55 +419,14 @@ def run_ba(args):
     problem = Problem(pts2d, batch_idxs, cam_params, cam_param_idxs, poses, pose_idxs, pts3d, pt3d_idxs, meas_r, meas_aa,
                       meas_idxs, PX_ERR_SD, LOC_ERR_SD, ORI_ERR_SD, dtype=np.float32 if args.float32 else np.float64)
 
-    def save_and_plot(problem, log=False, save=False, plot=False):
-        batch_idxs, all_cam_params, all_poses, all_pts3d = \
-            map(lambda x: getattr(problem, x), ('batch_idxs', 'cam_params', 'poses', 'pts3d'))
-
-        for i, path in enumerate(args.path):
-            repr_I = np.where(batch_idxs == i)[0]
-            pose_I = np.unique(problem.pose_idxs[repr_I])
-            pt3d_I = np.unique(problem.pt3d_idxs[repr_I])
-            cam_params = all_cam_params[i]
-
-            if log:
-                fl_x, fl_y, pp_x, pp_y, *dist_coefs = cam_params
-                logger.info('batch %d, new fl: %s, cx: %s, cy: %s, k1, k2: %s' % (
-                    i + 1, fl_x / args.img_sc, pp_x / args.img_sc, pp_y / args.img_sc, dist_coefs))
-
-            if save or plot:
-                with open(os.path.join(path, 'result.pickle'), 'rb') as fh:
-                    keyframes, map3d, frame_names, meta_names, gt, ba_errs = pickle.load(fh)
-
-                poses = [Pose(all_poses[j, 3:], tools.angleaxis_to_q(all_poses[j, :3])) for j in pose_I]
-
-                # includes also the akaze keypoints
-                pts3d = all_pts3d[pt3d_I, :]
-
-                keyframes = keyframes[:len(poses)]
-                for j, pose in enumerate(poses):
-                    keyframes[j]['pose'].post = pose
-                map3d = [Keypoint(pt3d=pts3d[j, :]) for j in range(len(pts3d))]
-
-            if save:
-                with open(os.path.join(path, 'ba-result.pickle'), 'wb') as fh:
-                    pickle.dump((keyframes, map3d, frame_names, meta_names, gt, ba_errs), fh)
-
-                kapt, width, height = arr_kapt[i]
-                update_kapture(os.path.join(path, 'kapture'), kapt, [width, height] + list(cam_params), poses, pts3d)
-
-            if plot:
-                plot_results(keyframes, map3d, frame_names, meta_names, nadir_looking=args.nadir_looking)
-
-        if save:
-            # update joint-obs.pickle with new 3d-points
-            with open(args.matches_path, 'rb') as fh:
-                _, akaze_obser_map = pickle.load(fh)
-            with open(args.matches_path, 'wb') as fh:
-                pickle.dump((all_pts3d[pt3d_gftt_n:], akaze_obser_map), fh)
+    del pts2d, batch_idxs, cam_params, cam_param_idxs, poses, pose_idxs, pts3d, pt3d_idxs, meas_r, meas_aa, meas_idxs
 
     if 1:
-        solver.solve(problem, callback=lambda x: save_and_plot(x, plot=True, save=True) if DEBUG else None)
-        save_and_plot(problem, log=True, save=True, plot=args.plot)
+        solver.solve(problem, callback=lambda x: save_and_plot(x, args, arr_kapt, pt3d_gftt_n, plot=True, save=True)
+                                       if DEBUG else None)
+
+        save_and_plot(problem, args, arr_kapt, pt3d_gftt_n, log=True, save=True, plot=args.plot)
+
         if args.plot:
             for i, (path, kapt) in enumerate(zip(args.path, arr_kapt)):
                 replay_kapt(os.path.join(path, 'kapture'), kapt[0])
@@ -537,6 +496,53 @@ def run_ba(args):
         plt.show()
 
         exit()
+
+
+def save_and_plot(problem, args, arr_kapt, pt3d_gftt_n, log=False, save=False, plot=False):
+    batch_idxs, all_cam_params, all_poses, all_pts3d = \
+        map(lambda x: getattr(problem, x), ('batch_idxs', 'cam_params', 'poses', 'pts3d'))
+
+    for i, path in enumerate(args.path):
+        repr_I = np.where(batch_idxs == i)[0]
+        pose_I = np.unique(problem.pose_idxs[repr_I])
+        pt3d_I = np.unique(problem.pt3d_idxs[repr_I])
+        cam_params = all_cam_params[i]
+
+        if log:
+            fl_x, fl_y, pp_x, pp_y, *dist_coefs = cam_params
+            logger.info('batch %d, new fl: %s, cx: %s, cy: %s, k1, k2: %s' % (
+                i + 1, fl_x / args.img_sc, pp_x / args.img_sc, pp_y / args.img_sc, dist_coefs))
+
+        if save or plot:
+            with open(os.path.join(path, 'result.pickle'), 'rb') as fh:
+                keyframes, map3d, frame_names, meta_names, gt, ba_errs = pickle.load(fh)
+
+            poses = [Pose(all_poses[j, 3:], tools.angleaxis_to_q(all_poses[j, :3])) for j in pose_I]
+
+            # includes also the akaze keypoints
+            pts3d = all_pts3d[pt3d_I, :]
+
+            keyframes = keyframes[:len(poses)]
+            for j, pose in enumerate(poses):
+                keyframes[j]['pose'].post = pose
+            map3d = [Keypoint(pt3d=pts3d[j, :]) for j in range(len(pts3d))]
+
+        if save:
+            with open(os.path.join(path, 'ba-result.pickle'), 'wb') as fh:
+                pickle.dump((keyframes, map3d, frame_names, meta_names, gt, ba_errs), fh)
+
+            kapt, width, height = arr_kapt[i]
+            update_kapture(os.path.join(path, 'kapture'), kapt, [width, height] + list(cam_params), poses, pts3d)
+
+        if plot:
+            plot_results(keyframes, map3d, frame_names, meta_names, nadir_looking=args.nadir_looking)
+
+    if save:
+        # update joint-obs.pickle with new 3d-points
+        with open(args.matches_path, 'rb') as fh:
+            _, akaze_obser_map = pickle.load(fh)
+        with open(args.matches_path, 'wb') as fh:
+            pickle.dump((all_pts3d[pt3d_gftt_n:], akaze_obser_map), fh)
 
 
 def get_ba_params(kapt_path, keyframes, kapt, sensor_id):
