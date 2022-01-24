@@ -22,6 +22,7 @@ class InnerLinearizerQR:
     def __init__(self, problem, jacobi_scaling_eps=1e-5, huber_coefs=None, use_weighted_residuals=False):
         self.problem = problem
         self.dtype = self.problem.dtype
+        self.idx_dtype = problem.IDX_DTYPE
         self.jacobi_scaling_eps = jacobi_scaling_eps
 
         huber_coefs = [None]*3 if huber_coefs is None else huber_coefs
@@ -100,7 +101,7 @@ class InnerLinearizerQR:
         # make landmark blocks
         self._blocks = []
         for i in range(len(self.problem.pts3d)):
-            r_idxs = np.where(self.problem.pt3d_idxs == i)[0]
+            r_idxs = np.where(self.problem.pt3d_idxs == i)[0].astype(self.idx_dtype)
             pose_idxs = self.problem.pose_idxs[r_idxs]
             blk_np = len(r_idxs)
 
@@ -143,7 +144,7 @@ class InnerLinearizerQR:
 
     @staticmethod
     def _augment_idxs(idxs, size):
-        return (np.repeat(idxs[:, None] * size, size, axis=1) + np.arange(size)[None, :]).flatten()
+        return (np.repeat(idxs[:, None] * size, size, axis=1) + np.arange(size, dtype=idxs.dtype)[None, :]).flatten()
 
     @profile(stream=mem_prof_logger)
     def _apply_huber(self, r, arr_J, total_nr, huber_coef):

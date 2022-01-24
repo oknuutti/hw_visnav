@@ -12,27 +12,29 @@ from visnav.algo.odo.linqr import mem_prof_logger
 
 
 class Problem:
+    IDX_DTYPE = np.int32
+
     @profile(stream=mem_prof_logger)
     def __init__(self, pts2d, batch_idxs, cam_params, cam_param_idxs, poses, pose_idxs, pts3d, pt3d_idxs, meas_r, meas_aa,
                  meas_idxs, px_err_sd, loc_err_sd, ori_err_sd, dtype):
 
         self.pts2d = pts2d.astype(dtype)
 
-        self.batch_idxs = np.zeros((len(pts2d),), dtype=int) if batch_idxs is None else batch_idxs
+        self.batch_idxs = np.zeros((len(pts2d),), dtype=Problem.IDX_DTYPE) if batch_idxs is None else batch_idxs
         self.cam_params = np.atleast_2d(np.array(cam_params)).astype(dtype)
-        self.cam_param_idxs = np.atleast_2d(cam_param_idxs)
+        self.cam_param_idxs = np.atleast_2d(cam_param_idxs).astype(Problem.IDX_DTYPE)
 
         self.poses = Manifold(poses.shape, buffer=poses.astype(dtype), dtype=dtype)
         self.poses.set_so3_groups(self._get_so3_grouping(len(poses)))
-        self.pose_idxs = pose_idxs
+        self.pose_idxs = pose_idxs.astype(Problem.IDX_DTYPE)
 
         self.pts3d = pts3d.astype(dtype)
-        self.pt3d_idxs = pt3d_idxs
+        self.pt3d_idxs = pt3d_idxs.astype(Problem.IDX_DTYPE)
         self.valid_pts3d = np.ones((len(self.pts3d),), dtype=bool)
 
         self.meas_r = np.array([], dtype=dtype) if meas_r is None else meas_r.astype(dtype)
         self.meas_aa = np.array([], dtype=dtype) if meas_aa is None else meas_aa.astype(dtype)
-        self.meas_idxs = np.array([], dtype=dtype) if meas_idxs is None else meas_idxs
+        self.meas_idxs = np.array([], dtype=Problem.IDX_DTYPE) if meas_idxs is None else meas_idxs.astype(Problem.IDX_DTYPE)
 
         self.px_err_sd = np.atleast_1d(np.array(px_err_sd, dtype=dtype))
         self.loc_err_sd = np.atleast_1d(np.array(loc_err_sd, dtype=dtype))
@@ -551,7 +553,7 @@ class Problem:
 
         m, n = self.meas_aa.size, (len(self.meas_idxs) if tight else len(self.poses)) * self.pose_size
         J = self._init_J('_Jof', m, n, fmt)
-        meas_idxs = np.arange(len(self.meas_idxs)) if tight else self.meas_idxs
+        meas_idxs = np.arange(len(self.meas_idxs), dtype=Problem.IDX_DTYPE) if tight else self.meas_idxs
 
         Rm = quaternion.as_rotation_matrix(quaternion.from_rotation_vector(self.meas_aa))
         Rw0 = quaternion.as_rotation_matrix(quaternion.from_rotation_vector(self.poses[self.meas_idxs, :3]))

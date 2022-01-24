@@ -328,6 +328,9 @@ def run_ba(args):
         use_weighted_residuals=True,
     )
 
+    mem_prof_logger.write('mem profiler logging works!')
+    mem_prof_logger.flush()
+
     akaze_pts3d, akaze_obser_map = [None] * 2
     if args.matches_path:
         # load AKAZE features so that can join separate batches before running BA
