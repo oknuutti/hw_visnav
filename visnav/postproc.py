@@ -758,11 +758,12 @@ def join_batches(arr_pts2d, arr_cam_params, arr_cam_param_idxs, arr_poses, arr_p
         _pose_idxs = np.zeros((len(akaze_obser_map),), dtype=int)
         _pt3d_idxs = np.zeros((len(akaze_obser_map),), dtype=int)
         for i, ((batch_id, frame_id, feature_id), id_pt3d) in enumerate(akaze_obser_map.items()):
-            bi = bid2idx[batch_id]
-            _pts2d[i, :] = arr_akaze_obser[bi][frame_id][feature_id]
-            _batch_idxs[i] = bi
-            _pose_idxs[i] = fid2idx[bi][frame_id] + pose_counts[bi]
-            _pt3d_idxs[i] = id_pt3d + pt3d_count
+            if batch_id in bid2idx:
+                bi = bid2idx[batch_id]
+                _pts2d[i, :] = arr_akaze_obser[bi][frame_id][feature_id]
+                _batch_idxs[i] = bi
+                _pose_idxs[i] = fid2idx[bi][frame_id] + pose_counts[bi]
+                _pt3d_idxs[i] = id_pt3d + pt3d_count
 
         arr_pts2d.append(_pts2d)
         batch_idxs.append(_batch_idxs)
