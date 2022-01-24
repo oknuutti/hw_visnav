@@ -12,6 +12,8 @@ from kapture.io.records import get_record_fullpath
 from scipy.spatial.ckdtree import cKDTree
 
 from tqdm import tqdm
+from memory_profiler import profile
+from visnav.algo.odo.linqr import mem_prof_logger
 
 import kapture as kt
 from kapture.io.csv import kapture_from_dir, kapture_to_dir
@@ -51,7 +53,6 @@ EXTRACTED_FEATURE_PARAMS = {'akaze': {
 }}
 MAX_REPR_ERROR = 8
 MIN_INLIERS = 15
-
 
 logger = tools.get_logger("main")
 
@@ -298,6 +299,7 @@ def find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d
                                  d[0][1][matches1, ...], d[1][1][matches2, ...])
 
 
+@profile(stream=mem_prof_logger)
 def run_ba(args):
     # check https://github.com/NikolausDemmel/rootba/blob/master/src/rootba/bal/solver_options.hpp
     solver = RootBundleAdjuster(

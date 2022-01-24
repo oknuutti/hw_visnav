@@ -5,6 +5,9 @@ import numba as nb
 
 from visnav.algo import tools
 
+from memory_profiler import profile
+mem_prof_logger = open('memory_profiler.log', 'w+')
+
 
 class InnerLinearizerQR:
 
@@ -55,6 +58,7 @@ class InnerLinearizerQR:
     def all_blocks(self):
         return self._blocks + self.non_lm_blocks
 
+    @profile(stream=mem_prof_logger)
     def linearize(self):
         mr, mx, ma = self.problem.pts2d.size, self.problem.meas_r.size, self.problem.meas_aa.size
         m = mr + mx + ma
@@ -194,12 +198,14 @@ class InnerLinearizerQR:
     def set_pose_damping(self, _lambda):
         self._pose_damping = _lambda
 
+    @profile(stream=mem_prof_logger)
     def marginalize(self):
         assert self._state == self.STATE_LINEARIZED, 'not linearized yet'
         for blk in self._blocks:
             blk.marginalize()
         self._state = self.STATE_MARGINALIZED
 
+    @profile(stream=mem_prof_logger)
     def backsub_xl(self, delta_xbp):
         assert self._state == self.STATE_MARGINALIZED, 'not linearized yet'
 
