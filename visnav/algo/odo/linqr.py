@@ -18,6 +18,7 @@ class InnerLinearizerQR:
         STATE_NUMERICAL_FAILURE,
     ) = range(4)
 
+    @profile(stream=mem_prof_logger)
     def __init__(self, problem, jacobi_scaling_eps=1e-5, huber_coefs=None, use_weighted_residuals=False):
         self.problem = problem
         self.dtype = self.problem.dtype
@@ -144,6 +145,7 @@ class InnerLinearizerQR:
     def _augment_idxs(idxs, size):
         return (np.repeat(idxs[:, None] * size, size, axis=1) + np.arange(size)[None, :]).flatten()
 
+    @profile(stream=mem_prof_logger)
     def _apply_huber(self, r, arr_J, total_nr, huber_coef):
         huber_coef = np.inf if huber_coef is None else huber_coef
 
