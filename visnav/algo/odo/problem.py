@@ -1,20 +1,23 @@
 from collections import namedtuple
+import logging
 
 import numpy as np
 import quaternion
 from scipy import sparse as sp
 
+from memory_profiler import profile
+
 from visnav.algo import tools
 from visnav.algo.tools import Manifold
 
-from memory_profiler import profile
-from visnav.algo.odo.linqr import mem_prof_logger
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 
 class Problem:
     IDX_DTYPE = np.int32
 
-    @profile(stream=mem_prof_logger)
+    @profile
     def __init__(self, pts2d, batch_idxs, cam_params, cam_param_idxs, poses, pose_idxs, pts3d, pt3d_idxs, meas_r, meas_aa,
                  meas_idxs, px_err_sd, loc_err_sd, ori_err_sd, dtype):
 
@@ -115,7 +118,7 @@ class Problem:
         self.cache = None
         return np.where(np.logical_not(I))[0]
 
-    @profile(stream=mem_prof_logger)
+    @profile
     def residual(self, parts=False):
         self.maybe_populate_cache()
         errs = [self.residual_repr()]
@@ -125,7 +128,7 @@ class Problem:
             errs.append(self.residual_ori())
         return errs if parts else np.concatenate(errs, axis=0)
 
-    @profile(stream=mem_prof_logger)
+    @profile
     def jacobian(self, parts=False, fmt=('dense', 'csr', 'csr')):
         self.maybe_populate_cache()
         fmt_b, fmt_p, fmt_l = fmt
@@ -173,7 +176,7 @@ class Problem:
         self.cache = None
         self._cached_repr_err = None
 
-    @profile(stream=mem_prof_logger)
+    @profile
     def maybe_populate_cache(self):
         if self.cache is not None:
             return

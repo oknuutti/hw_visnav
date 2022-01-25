@@ -13,7 +13,6 @@ from scipy.spatial.ckdtree import cKDTree
 
 from tqdm import tqdm
 from memory_profiler import profile
-from visnav.algo.odo.linqr import mem_prof_logger
 
 import kapture as kt
 from kapture.io.csv import kapture_from_dir, kapture_to_dir
@@ -299,7 +298,7 @@ def find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d
                                  d[0][1][matches1, ...], d[1][1][matches2, ...])
 
 
-@profile(stream=mem_prof_logger)
+@profile
 def run_ba(args):
     # check https://github.com/NikolausDemmel/rootba/blob/master/src/rootba/bal/solver_options.hpp
     solver = RootBundleAdjuster(
@@ -327,9 +326,6 @@ def run_ba(args):
         huber_coefs=HUBER_COEFS,
         use_weighted_residuals=True,
     )
-
-    mem_prof_logger.write('mem profiler logging works!')
-    mem_prof_logger.flush()
 
     akaze_pts3d, akaze_obser_map = [None] * 2
     if args.matches_path:
@@ -550,7 +546,7 @@ def save_and_plot(problem, args, arr_kapt, pt3d_gftt_n, log=False, save=False, p
             pickle.dump((all_pts3d[pt3d_gftt_n:], akaze_obser_map), fh)
 
 
-@profile(stream=mem_prof_logger)
+@profile
 def get_ba_params(kapt_path, keyframes, kapt, sensor_id):
     frames = [(id, fname[sensor_id]) for id, fname in kapt.records_camera.items()]
     frames = sorted(frames, key=lambda x: x[0])
@@ -724,7 +720,7 @@ def match_and_validate(cam_mx1, kps1, descr1, pts3d1, cam_mx2, kps2, descr2, pts
     return (*zip(*[[m.queryIdx, m.trainIdx] for m in matches[list(inliers)]]),)
 
 
-@profile(stream=mem_prof_logger)
+@profile
 def join_batches(arr_pts2d, arr_cam_params, arr_cam_param_idxs, arr_poses, arr_pose_idxs, arr_pts3d, arr_pt3d_idxs,
                  arr_meas_r, arr_meas_aa, arr_meas_idxs, arr_akaze_obser, arr_frames, batch_ids,
                  akaze_pts3d=None, akaze_obser_map=None):

@@ -5,12 +5,11 @@ import numpy as np
 from scipy import sparse as sp
 from scipy.sparse import linalg as spl
 
+from memory_profiler import profile
+
 from visnav.algo import tools
 from visnav.algo.odo.linqr import InnerLinearizerQR
 from visnav.algo.tools import Stopwatch, MemProf
-
-from memory_profiler import profile
-from visnav.algo.odo.linqr import mem_prof_logger
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -76,7 +75,7 @@ class RootBundleAdjuster:
         self._linearizer = None
         self._prev_x = None
 
-    @profile(stream=mem_prof_logger)
+    @profile
     def solve(self, prob, callback=None):
         self._timer = Stopwatch(start=True)
         self._lambda = self.ini_lambda
@@ -123,7 +122,7 @@ class RootBundleAdjuster:
         # TODO: return stats or something?
         return
 
-    @profile(stream=mem_prof_logger)
+    @profile
     def _step(self, i) -> [IterationStats, np.ndarray]:
         timer = Stopwatch(start=True)
         stats = IterationStats(tr_rad=1/self._lambda)
@@ -158,7 +157,7 @@ class RootBundleAdjuster:
         stats.time = timer.stop()
         return stats
 
-    @profile(stream=mem_prof_logger)
+    @profile
     def _inner_step(self, stats: IterationStats, i):
         # solve damped linear system
         delta_xbp = stats.delta_xbp = self._linearizer.solve(self._lambda)
@@ -238,7 +237,7 @@ class LinearizerQR:
     # def finish_iter(self):
     #     pass
 
-    @profile(stream=mem_prof_logger)
+    @profile
     def linearize(self):
         # Stage 1: outside lm solver inner loop
         #  - linearization
@@ -262,7 +261,7 @@ class LinearizerQR:
         self._pose_jac_scaling = 1 / (self.jacobi_scaling_eps + np.sqrt(d2))
         self._new_linearization_point = True
 
-    @profile(stream=mem_prof_logger)
+    @profile
     def solve(self, _lambda):
         # Stage 2: inside lm solver inner loop
         #  - scale pose jacobians (1st inner iteration)
@@ -334,7 +333,7 @@ class LinearizerQR:
         self._new_linearization_point = False
         return delta_xbp[:, None]    # includes delta_xb (delta_xp[:nb])
 
-    @profile(stream=mem_prof_logger)
+    @profile
     def update_x(self, delta_xbp):
         delta_xl, l_diff = self._lqr.backsub_xl(delta_xbp)
 
