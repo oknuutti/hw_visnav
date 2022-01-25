@@ -12,7 +12,7 @@ from kapture.io.records import get_record_fullpath
 from scipy.spatial.ckdtree import cKDTree
 
 from tqdm import tqdm
-from memory_profiler import profile
+#from memory_profiler import profile
 
 import kapture as kt
 from kapture.io.csv import kapture_from_dir, kapture_to_dir
@@ -76,6 +76,12 @@ def main():
     parser.add_argument('--ini-cx', type=float, help='initial value for x principal point')
     parser.add_argument('--ini-cy', type=float, help='initial value for y principal point')
     parser.add_argument('--ini-dist', nargs='+', default=[], type=float, help='initial values for radial distortion coefs')
+
+    parser.add_argument('--ini-tr', type=float, default=1000, help='initial ba trust region size')
+    parser.add_argument('--max-iters', type=int, default=30, help='max ba iterations')
+    parser.add_argument('--max-time', type=int, default=0, help='max ba duration in seconds')
+    parser.add_argument('--ftol', type=float, default=1e-5, help='stop ba if cost decreases less than this')
+
     parser.add_argument('--fix-fl', action='store_true', help='do not optimize focal length')
     parser.add_argument('--fix-pp', action='store_true', help='do not optimize principal point')
     parser.add_argument('--fix-dist', action='store_true', help='do not optimize distortion coefs')
@@ -298,22 +304,22 @@ def find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d
                                  d[0][1][matches1, ...], d[1][1][matches2, ...])
 
 
-@profile
+#@profile
 def run_ba(args):
     # check https://github.com/NikolausDemmel/rootba/blob/master/src/rootba/bal/solver_options.hpp
     solver = RootBundleAdjuster(
-        ini_tr_rad=1e3,
+        ini_tr_rad=args.ini_tr,
         min_tr_rad=1e-32,
         max_tr_rad=1e16,
         ini_vee=2.0,
         vee_factor=2.0,
         thread_n=1,
-        max_iters=30,
-        max_time=20000,   # in sec
+        max_iters=args.max_iters,
+        max_time=args.max_time,   # in sec
         min_step_quality=0,
         xtol=0,
         rtol=0,
-        ftol=1e-5, #3e-4,
+        ftol=args.ftol,  #3e-4,
 
         # filter out observations with large reprojection errors at these iterations
         max_repr_err={},  #0: 320, 1: 64, 2: 32, 3: 16, 4: 12, 6: 8},
@@ -546,7 +552,7 @@ def save_and_plot(problem, args, arr_kapt, pt3d_gftt_n, log=False, save=False, p
             pickle.dump((all_pts3d[pt3d_gftt_n:], akaze_obser_map), fh)
 
 
-@profile
+#@profile
 def get_ba_params(kapt_path, keyframes, kapt, sensor_id):
     frames = [(id, fname[sensor_id]) for id, fname in kapt.records_camera.items()]
     frames = sorted(frames, key=lambda x: x[0])
@@ -720,7 +726,7 @@ def match_and_validate(cam_mx1, kps1, descr1, pts3d1, cam_mx2, kps2, descr2, pts
     return (*zip(*[[m.queryIdx, m.trainIdx] for m in matches[list(inliers)]]),)
 
 
-@profile
+#@profile
 def join_batches(arr_pts2d, arr_cam_params, arr_cam_param_idxs, arr_poses, arr_pose_idxs, arr_pts3d, arr_pt3d_idxs,
                  arr_meas_r, arr_meas_aa, arr_meas_idxs, arr_akaze_obser, arr_frames, batch_ids,
                  akaze_pts3d=None, akaze_obser_map=None):
@@ -843,4 +849,23 @@ def replay(img_paths, pts2d, cam_params, poses, pose_idxs, pts3d, pt3d_idxs, fra
 
 
 if __name__ == '__main__':
+    if 0:
+        from visnav.algo.linalg import DictArray2D as darr
+        a = darr((200, 1000), np.float64)
+        a[33, 43] = np.inf
+        a[33, [44, 66]] = 22.
+        a[[54, 66], [877, 199]] = 99.
+        print(str(a[54, 877]))
+        print(str(a[66, 199]))
+        print(str(a[33, 43]))
+
+#        a.mult_with(np.ones((200, 1), dtype=np.float64) * 1/11)
+        a.mult_with_arr(np.ones((1, 1)) * 1/11)
+
+        b = np.empty(3)
+        a.copyto(([54, 66, 67], [877, 199, 202]), b)
+        print(str(b))
+        print(str(a.isfinite()))
+        exit()
+
     main()

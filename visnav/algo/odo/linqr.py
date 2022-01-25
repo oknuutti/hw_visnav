@@ -1,12 +1,14 @@
 import logging
+import warnings
 
 import numpy as np
+from numba import NumbaPerformanceWarning
 from scipy import sparse as sp
 import numba as nb
-from memory_profiler import profile
+#from memory_profiler import profile
 
 from visnav.algo import tools
-from visnav.algo.linalg import qr_complete_fn
+from visnav.algo.linalg import qr_complete_fn, qr_complete, is_own_sp_mx
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -21,7 +23,8 @@ class InnerLinearizerQR:
         STATE_NUMERICAL_FAILURE,
     ) = range(4)
 
-    def __init__(self, problem, jacobi_scaling_eps=1e-5, huber_coefs=None, use_weighted_residuals=False):
+    def __init__(self, problem, jacobi_scaling_eps=1e-5, huber_coefs=None, use_weighted_residuals=False,
+                 use_own_sp_mx=True):
         self.problem = problem
         self.dtype = self.problem.dtype
         self.idx_dtype = problem.IDX_DTYPE
@@ -32,6 +35,7 @@ class InnerLinearizerQR:
         self.huber_coef_loc = huber_coefs[1]
         self.huber_coef_ori = huber_coefs[2]
         self.use_weighted_residuals = use_weighted_residuals
+        self.use_own_sp_mx = use_own_sp_mx
 
         self.use_valid_projections_only = True
         self._pose_damping = None
@@ -62,18 +66,23 @@ class InnerLinearizerQR:
     def all_blocks(self):
         return self._blocks + self.non_lm_blocks
 
-    @profile
+    #@profile
     def linearize(self):
         mr, mx, ma = self.problem.pts2d.size, self.problem.meas_r.size, self.problem.meas_aa.size
         m = mr + mx + ma
 
         rr, *rxra = self.problem.residual(parts=True)
-        (Jrb, Jrp, Jrl), *JxJa = self.problem.jacobian(parts=True, fmt=('dense', 'csr', 'csr'))
+        spf = 'own' if self.use_own_sp_mx else 'csr'
+        (Jrb, Jrp, Jrl), *JxJa = self.problem.jacobian(parts=True, r_fmt=('dense', spf, spf))
         rx, ra, Jxb, Jxp, Jab, Jap = [None] * 6
 
         if self.use_valid_projections_only:
-            numerically_valid = np.all(np.isfinite(Jrl.data if sp.issparse(Jrl) else Jrl)) \
-                                and np.all(np.isfinite(Jrp.data if sp.issparse(Jrp) else Jrp)) \
+            if self.use_own_sp_mx:
+                numerically_valid = Jrp.isfinite() and Jrl.isfinite()
+            else:
+                numerically_valid = np.all(np.isfinite(Jrp.data if sp.issparse(Jrp) else Jrp)) \
+                                    and np.all(np.isfinite(Jrl.data if sp.issparse(Jrl) else Jrl))
+            numerically_valid = numerically_valid \
                                 and (Jrb is None or np.all(np.isfinite(Jrb.data if sp.issparse(Jrb) else Jrb))) \
                                 and np.all(np.isfinite(rr))
             if not numerically_valid:
@@ -97,11 +106,23 @@ class InnerLinearizerQR:
             self._a_block = NonLMResidualBlock(None, self.problem.meas_idxs, ra, Jab, Jap, None, psize=self._pose_size)
             self._total_error += err
 
-        safe = False    # safe is very slow, unsafe is dangerous as bugs won't be found
-        index = lambda A, i, j: A[i, j] if safe else A._get_arrayXarray(i, j)
+        self.build_landmark_blocks(rr, Jrb, Jrp, Jrl)
+        self._state = self.STATE_LINEARIZED
+
+    def build_landmark_blocks(self, rr, Jrb, Jrp, Jrl):
+        def index(A, i, j, safe=False):
+            if is_own_sp_mx(A):
+                B = np.empty(len(i), dtype=self.dtype)
+                A.copyto((i, j), B)
+                return B
+            # safe is very slow, unsafe is dangerous as bugs won't be found
+            return A[i, j] if safe else A._get_arrayXarray(i, j)
 
         # make landmark blocks
-        self._blocks = []
+        if self._blocks is None:
+            self._blocks = []
+
+        blk_i = 0
         for i in range(len(self.problem.pts3d)):
             r_idxs = np.where(self.problem.pt3d_idxs == i)[0].astype(self.idx_dtype)
             pose_idxs = self.problem.pose_idxs[r_idxs]
@@ -113,28 +134,32 @@ class InnerLinearizerQR:
                 continue
 
             # indexing sparse array faster this way instead of Jl[v_i, i:i+3]
-            _, _, Jrl_i, Jrl_j = self._block_indexing(r_idxs, np.ones((len(r_idxs),)) * i, 2, 3)
+            _, _, Jrl_i, Jrl_j = self._block_indexing(r_idxs, np.ones((len(r_idxs),), dtype=self.idx_dtype) * i, 2, 3)
             rr_i, _, Jrp_i, Jrp_j = self._block_indexing(r_idxs, pose_idxs, 2, self._pose_size)
-            _, _, blk_Jp_i, blk_Jp_j = self._block_indexing(np.arange(blk_np), np.arange(blk_np), 2, self._pose_size)
+            _, _, blk_Jp_i, blk_Jp_j = self._block_indexing(np.arange(blk_np, dtype=self.idx_dtype),
+                                                            np.arange(blk_np, dtype=self.idx_dtype), 2, self._pose_size)
 
             # create residual vector, assign reprojection residuals
             blk_r = np.zeros((blk_np*2, 1), dtype=self.dtype)
             blk_r[:blk_np*2] = rr[rr_i]
 
             # batch jacobian related to reprojection residuals
-            blk_Jb = None if Jrb is None else np.array(Jrb[rr_i, :])    # dense matrix here
+            blk_Jb = None if Jrb is None else np.array(Jrb[rr_i, :], dtype=self.dtype)    # dense matrix here
 
             # create landmark jacobian matrix, assign the three columns related to this landmark
             blk_Jl = np.zeros((blk_np*2, 3), dtype=self.dtype)
-            blk_Jl[:blk_np*2, :] = np.array(index(Jrl, Jrl_i, Jrl_j).reshape((-1, 3)))
+            blk_Jl[:blk_np*2, :] = np.array(index(Jrl, Jrl_i, Jrl_j).reshape((-1, 3)), dtype=self.dtype)
 
             # create pose/frame jacobian matrix, assign all frames that observe this landmark
             blk_Jp = np.zeros((blk_np*2, blk_np*self._pose_size), dtype=self.dtype)
             blk_Jp[blk_Jp_i, blk_Jp_j] = index(Jrp, Jrp_i, Jrp_j)
 
-            self._blocks.append(ResidualBlock(r_idxs, pose_idxs, blk_r, blk_Jb, blk_Jp, blk_Jl, self._pose_size))
-
-        self._state = self.STATE_LINEARIZED
+            if len(self._blocks) > blk_i:
+                self._blocks[blk_i].new_linearization(blk_r, blk_Jb, blk_Jp, blk_Jl)
+            else:
+                blk = ResidualBlock(r_idxs, pose_idxs, blk_r, blk_Jb, blk_Jp, blk_Jl, self._pose_size)
+                self._blocks.append(blk)
+            blk_i += 1
 
     @staticmethod
     def _block_indexing(row_idxs, col_idxs, block_rows, block_cols):
@@ -161,9 +186,21 @@ class InnerLinearizerQR:
 
         wr = dwr_dr * r
 
-        wJ = map(lambda J: None if J is None else (
-            sp.diags(dwr_dr.flatten()).dot(J) if sp.issparse(J) else J * dwr_dr
-        ), arr_J) if arr_J is not None else None
+        if arr_J is None:
+            wJ = None
+        else:
+            wJ = []
+            for i, J in enumerate(arr_J):
+                if J is None:
+                    wJ.append(J)
+                elif sp.issparse(J):
+                    wJ.append(sp.diags(dwr_dr.flatten()).dot(J))
+                elif is_own_sp_mx(J):
+                    J.mult_with_arr(dwr_dr.reshape((dwr_dr.size, -1)))
+                    wJ.append(J)
+                else:
+                    J *= dwr_dr
+                    wJ.append(J)
 
         err = np.sum(0.5 * (2 - huber_weight) * huber_weight * r ** 2)
         return wr, wJ, err
@@ -202,11 +239,13 @@ class InnerLinearizerQR:
     def set_pose_damping(self, _lambda):
         self._pose_damping = _lambda
 
-    @profile
+    #@profile
     def marginalize(self):
         assert self._state == self.STATE_LINEARIZED, 'not linearized yet'
-        self._marginalize(nb.typed.List(self._blocks))
-#        self._marginalize(self._blocks)
+        with warnings.catch_warnings():
+            # for some reason warns about non-contiguous arrays in np.dot, can't find any though
+            warnings.filterwarnings("ignore")
+            self._marginalize(nb.typed.List(self._blocks))
         self._state = self.STATE_MARGINALIZED
 
     @staticmethod
@@ -215,7 +254,7 @@ class InnerLinearizerQR:
         for blk in blocks:
             blk.marginalize()
 
-    @profile
+    #@profile
     def backsub_xl(self, delta_xbp):
         assert self._state == self.STATE_MARGINALIZED, 'not linearized yet'
 
@@ -403,7 +442,6 @@ class InnerLinearizerQR:
 
 
 array_type = nb.float32[:, :]
-qr_complete = qr_complete_fn(nb.float32)
 @nb.experimental.jitclass([
     ('r_idxs', nb.int32[:]),
     ('pose_idxs', nb.int32[:]),
@@ -429,10 +467,7 @@ class ResidualBlock:
 
         # TODO: store directly into correct size storage so that no need np.concatenate, np.zeros at self.marginalize
 
-        self.r = r
-        self.Jb = Jb
-        self.Jp = Jp
-        self.Jl = Jl
+        self.r, self.Jb, self.Jp, self.Jl = r, Jb, Jp, Jl
         self.Jl_col_scale = None
         self.psize = psize
 
@@ -445,30 +480,39 @@ class ResidualBlock:
 
         # self._Q = None
         self._S = None
-        self._marginalized = Jl is None
+        self._marginalized = False
+        self._damping_rots = None
+
+    def new_linearization(self, r, Jb, Jp, Jl):
+        self.r, self.Jb, self.Jp, self.Jl = r, Jb, Jp, Jl
+
+        if self._S is not None:
+            self._S[self.m:, :] = np.float32(0)
+        self._marginalized = False
         self._damping_rots = None
 
     def marginalize(self):
         assert not self.is_marginalized(), 'already marginalized'
 
-        if self.Jl is not None:
-            retval, Q, R = qr_complete(self.Jl)
-            assert retval == 0, 'error at qr_complete'
+        retval, Q, R = qr_complete(self.Jl)
+        assert retval == 0, 'error at qr_complete'
+        if self._S is None:
             self._S = np.zeros((self.m + self.nl, self.nb + self.np + self.nl + 1), dtype=Q.dtype)
-            Jbp = self.Jp if self.Jb is None else np.concatenate((self.Jb, self.Jp), axis=1)
-            self._S[:self.m, :self.nb + self.np] = Q.T.dot(Jbp)
-            self._S[:self.m, self.nb + self.np:-1] = R
-            self._S[:self.m, -1:] = Q.T.dot(self.r)
-            # self._S = np.concatenate((
-            #         np.concatenate((Q.T.dot(self.Jp), R, Q.T.dot(self.r)), axis=1),
-            #         np.zeros((self.nl, self.np + self.nl + 1), dtype=Q.dtype)), axis=0)
-            if 1:
-                self.Jb = np.empty((0, 0), dtype=np.float32)
-                self.Jp = np.empty((0, 0), dtype=np.float32)
-                self.Jl = np.empty((0, 0), dtype=np.float32)
-                self.r = np.empty((0, 0), dtype=np.float32)
-            else:
-                del self.Jb, self.Jp, self.Jl, self.r
+        Jbp = self.Jp if self.Jb is None else np.concatenate((self.Jb, self.Jp), axis=1)
+        self._S[:self.m, :self.nb + self.np] = Q.T.dot(Jbp)
+        self._S[:self.m, self.nb + self.np:-1] = R
+        self._S[:self.m, -1:] = Q.T.dot(self.r)
+
+        # self._S = np.concatenate((
+        #         np.concatenate((Q.T.dot(self.Jp), R, Q.T.dot(self.r)), axis=1),
+        #         np.zeros((self.nl, self.np + self.nl + 1), dtype=Q.dtype)), axis=0)
+        if 1:
+            self.Jb = np.empty((0, 0), dtype=np.float32)
+            self.Jp = np.empty((0, 0), dtype=np.float32)
+            self.Jl = np.empty((0, 0), dtype=np.float32)
+            self.r = np.empty((0, 0), dtype=np.float32)
+        else:
+            del self.Jb, self.Jp, self.Jl, self.r
 
         self._marginalized = True
 

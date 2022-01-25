@@ -5,9 +5,10 @@ import numpy as np
 import quaternion
 from scipy import sparse as sp
 
-from memory_profiler import profile
+#from memory_profiler import profile
 
 from visnav.algo import tools
+from visnav.algo.linalg import DictArray2D, is_own_sp_mx
 from visnav.algo.tools import Manifold
 
 logger = logging.getLogger(__name__)
@@ -17,7 +18,7 @@ logger.setLevel(logging.DEBUG)
 class Problem:
     IDX_DTYPE = np.int32
 
-    @profile
+    #@profile
     def __init__(self, pts2d, batch_idxs, cam_params, cam_param_idxs, poses, pose_idxs, pts3d, pt3d_idxs, meas_r, meas_aa,
                  meas_idxs, px_err_sd, loc_err_sd, ori_err_sd, dtype):
 
@@ -118,7 +119,7 @@ class Problem:
         self.cache = None
         return np.where(np.logical_not(I))[0]
 
-    @profile
+    #@profile
     def residual(self, parts=False):
         self.maybe_populate_cache()
         errs = [self.residual_repr()]
@@ -128,46 +129,45 @@ class Problem:
             errs.append(self.residual_ori())
         return errs if parts else np.concatenate(errs, axis=0)
 
-    @profile
-    def jacobian(self, parts=False, fmt=('dense', 'csr', 'csr')):
+    #@profile
+    def jacobian(self, parts=False, r_fmt=('dense', 'csr', 'csr'), m_fmt=('dense', 'csr')):
         self.maybe_populate_cache()
-        fmt_b, fmt_p, fmt_l = fmt
 
-        Jrb = self.jacobian_repr_batch(fmt_b) if len(self.cam_param_idxs) > 0 else None
-        Jrp = self.jacobian_repr_frame(fmt_p)
-        Jrl = self.jacobian_repr_landmark(fmt_l)
+        Jrb = self.jacobian_repr_batch(r_fmt[0]) if len(self.cam_param_idxs) > 0 else None
+        Jrp = self.jacobian_repr_frame(r_fmt[1])
+        Jrl = self.jacobian_repr_landmark(r_fmt[2])
         jacs = [(Jrb, Jrp, Jrl)]
 
         if self.meas_r is not None and len(self.meas_r) > 0:
-            Jxb = self.jacobian_loc_batch(fmt_b, True)
-            Jxp = self.jacobian_loc_frame(fmt_p, True)
+            Jxb = self.jacobian_loc_batch(m_fmt[0], True)
+            Jxp = self.jacobian_loc_frame(m_fmt[1], True)
             jacs.append((Jxb, Jxp, None))
         if self.meas_aa is not None and len(self.meas_aa) > 0:
-            Jab = self.jacobian_ori_batch(fmt_b, True)
-            Jap = self.jacobian_ori_frame(fmt_p, True)
+            Jab = self.jacobian_ori_batch(m_fmt[0], True)
+            Jap = self.jacobian_ori_frame(m_fmt[1], True)
             jacs.append((Jab, Jap, None))
 
         if parts:
-            jacs_csr = [[c if not sp.issparse(c) else
-                         getattr(c, 'to' + fmt[i])() for i, c in enumerate(r)] for r in jacs]
+            jacs_csr = [[c if is_own_sp_mx(c) or not sp.issparse(c) else
+                         getattr(c, 'to' + fmt[i])() for i, c in enumerate(r)] for r, fmt in zip(jacs, (r_fmt, m_fmt, m_fmt))]
             return jacs_csr
 
-        ms = [[(c.shape[0] if c is not None else 0) for c in r] for r in jacs]
-        ns = [[(c.shape[1] if c is not None else 0) for c in r] for r in jacs]
-        m = [0] + list(np.cumsum(np.max(ms, axis=1)))
-        n = [0] + list(np.cumsum(np.max(ns, axis=0)))
-
-        if not np.all([f == 'dense' for f in fmt]):
-            J = sp.lil_matrix((m[-1], n[-1]), dtype=self.dtype)
-        else:
-            J = np.zeros((m[-1], n[-1]), dtype=self.dtype)
-
-        for i, r in enumerate(jacs):
-            for j, c in enumerate(r):
-                if c is not None:
-                    J[m[i]:m[i+1], n[j]:n[j+1]] = c
-
-        return getattr(J, 'to'+fmt_l)() if sp.issparse(J) else J
+        # ms = [[(c.shape[0] if c is not None else 0) for c in r] for r in jacs]
+        # ns = [[(c.shape[1] if c is not None else 0) for c in r] for r in jacs]
+        # m = [0] + list(np.cumsum(np.max(ms, axis=1)))
+        # n = [0] + list(np.cumsum(np.max(ns, axis=0)))
+        #
+        # if not np.all([f == 'dense' for f in fmt]):
+        #     J = sp.lil_matrix((m[-1], n[-1]), dtype=self.dtype)
+        # else:
+        #     J = np.zeros((m[-1], n[-1]), dtype=self.dtype)
+        #
+        # for i, r in enumerate(jacs):
+        #     for j, c in enumerate(r):
+        #         if c is not None:
+        #             J[m[i]:m[i+1], n[j]:n[j+1]] = c
+        #
+        # return getattr(J, 'to'+fmt_l)() if sp.issparse(J) else J
 
     Cache = namedtuple('Cache', ('K', 'k1', 'k2', 'dist_coefs', 'pts3d_rot', 'pts3d_cf', 'pts3d_norm', 'iZciSD',
                                  'R2', 'alpha_xy', 'y_gamma_r', 'x_gamma_r', 'gamma_x', 'gamma_y'))
@@ -176,7 +176,7 @@ class Problem:
         self.cache = None
         self._cached_repr_err = None
 
-    @profile
+    #@profile
     def maybe_populate_cache(self):
         if self.cache is not None:
             return
@@ -262,7 +262,10 @@ class Problem:
         if self._J_cache is None:
             self._J_cache = {}
         if name not in self._J_cache:
-            self._J_cache[name] = (np.zeros if fmt == 'dense' else sp.lil_matrix)((m, n), dtype=self.dtype)
+            if fmt == 'own':
+                self._J_cache[name] = DictArray2D((m, n), self.dtype)
+            else:
+                self._J_cache[name] = (np.zeros if fmt == 'dense' else sp.lil_matrix)((m, n), dtype=self.dtype)
         return self._J_cache[name]
 
     def jacobian_repr_batch(self, fmt):
@@ -326,7 +329,7 @@ class Problem:
                 J[2 * i[I] + 1, j] = tmp_y * c.R2[I]
                 j += 1
 
-        J /= self.px_err_sd[:, None]
+        J *= 1 / self.px_err_sd[:, None]
         return J
 
     def jacobian_repr_frame(self, fmt):
@@ -465,7 +468,7 @@ class Problem:
             dEv = -np.stack((np.zeros((len(Xn),)), fy * np.ones((len(Xn),)), -fy * Yn), axis=1) \
                   * c.iZciSD[:, None]
         else:
-            dEu = np.zeros((len(Xn), 3))
+            dEu = np.zeros((len(Xn), 3), self.dtype)
             dEv = np.zeros_like(dEu)
             dEu[:, 0] = -fx * c.iZciSD * c.gamma_x
             dEu[:, 1] = -fx * c.iZciSD * c.alpha_xy
