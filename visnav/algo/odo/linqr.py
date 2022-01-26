@@ -13,7 +13,7 @@ from visnav.algo.tools import maybe_decorate
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
-NUMBA_LEVEL = 0
+NUMBA_LEVEL = 3
 
 
 class InnerLinearizerQR:
@@ -513,7 +513,7 @@ class ResidualBlock:
         self._marginalized = True
 
     @staticmethod
-    @maybe_decorate(nb.njit(nogil=True, parallel=False, cache=True), NUMBA_LEVEL >= 2)
+    @maybe_decorate(nb.njit(nogil=True, parallel=False, cache=True), NUMBA_LEVEL == 2)
     def _marginalize(_S, r, Jb, Jp, Jl):
         m, nb, _np, nl = r.size, Jb.shape[1], Jp.shape[1], Jl.shape[1]
 
@@ -545,7 +545,7 @@ class ResidualBlock:
             self._damping_rots = self._damp(self._S, self.nb + self.np, self.nl)
 
     @staticmethod
-    @maybe_decorate(nb.njit(nogil=True, parallel=False, cache=True), NUMBA_LEVEL >= 1)
+    @maybe_decorate(nb.njit(nogil=True, parallel=False, cache=True), 3 > NUMBA_LEVEL >= 1)
     def _damp(S, l_idx, k):
         damping_rots = nb.typed.List.empty_list(array_type)
         for n in range(k):
@@ -561,7 +561,7 @@ class ResidualBlock:
         self._damping_rots = None
 
     @staticmethod
-    @maybe_decorate(nb.njit(nogil=True, parallel=False, cache=True), NUMBA_LEVEL >= 1)
+    @maybe_decorate(nb.njit(nogil=True, parallel=False, cache=True), 3 > NUMBA_LEVEL >= 1)
     def _undamp(damping_rots, S, k):
         for n in range(k-1, -1, -1):
             for m in range(n, -1, -1):
