@@ -1384,7 +1384,7 @@ def dlogR_dR(R):
     return np.hstack((S1, S2, S3))
 
 
-#@nb.njit(nogil=True, parallel=False, cache=True)
+@nb.njit(nogil=True, parallel=False, cache=True)
 def make_givens(a, b, dtype=np.float64):
     # based on https://www.math.usm.edu/lambers/mat610/sum10/lecture9.pdf
 
@@ -1409,7 +1409,7 @@ def make_givens(a, b, dtype=np.float64):
                      [s, c]], dtype=dtype)
 
 
-#@nb.njit(nogil=True, parallel=False, cache=True)
+@nb.njit(nogil=True, parallel=False, cache=True)
 def apply_givens(A, G, i, j):
     I = np.array([i, j], dtype=np.int32)
     AI = A[I, :]
