@@ -66,7 +66,12 @@ class InnerLinearizerQR:
 
     @property
     def all_blocks(self):
-        return self._blocks + self.non_lm_blocks
+        def generator():
+            for blk in self._blocks:
+                yield blk
+            for blk in self.non_lm_blocks:
+                yield blk
+        return generator()
 
     def linearize(self):
         mr, mx, ma = self.problem.pts2d.size, self.problem.meas_r.size, self.problem.meas_aa.size
@@ -97,18 +102,71 @@ class InnerLinearizerQR:
             Jxb, Jxp, _ = JxJa[0]
             rx = rxra[0]
             rx, (Jxb, Jxp), err = self._apply_huber(rx, (Jxb, Jxp), m, self.huber_coef_loc)
-            self._x_block = NonLMResidualBlock(None, self.problem.meas_idxs, rx, Jxb, Jxp, None, psize=self._pose_size)
+            self._x_block = NonLMResidualBlock(self.problem.meas_idxs, rx, Jxb, Jxp, psize=self._pose_size)
             self._total_error += err
 
         if ma > 0:
             Jab, Jap, _ = JxJa[0 if mx == 0 else 1]
             ra = rxra[0 if mx == 0 else 1]
             ra, (Jab, Jap), err = self._apply_huber(ra, (Jab, Jap), m, self.huber_coef_ori)
-            self._a_block = NonLMResidualBlock(None, self.problem.meas_idxs, ra, Jab, Jap, None, psize=self._pose_size)
+            self._a_block = NonLMResidualBlock( self.problem.meas_idxs, ra, Jab, Jap, psize=self._pose_size)
             self._total_error += err
 
-        self.build_landmark_blocks(rr, Jrb, Jrp, Jrl)
+        if NUMBA_LEVEL >= 4:
+            if self._blocks is None:
+                self._blocks = nb.typed.List.empty_list(ResidualBlockType, len(self.problem.valid_pts3d))
+            self._bld_lm_blks(self._blocks, self.problem.valid_pts3d, self.problem.pt3d_idxs, self.problem.pose_idxs,
+                              rr, Jrb, Jrp, Jrl, self.idx_dtype, self._pose_size)
+        else:
+            self.build_landmark_blocks(rr, Jrb, Jrp, Jrl)
+
         self._state = self.STATE_LINEARIZED
+
+    @staticmethod
+    @maybe_decorate(nb.njit(nogil=True, parallel=False, cache=True), NUMBA_LEVEL >= 4)
+    def _bld_lm_blks(blocks, valid_pts3d, pt3d_idxs, pose_idxs, rr, Jrb, Jrp, Jrl, idx_dtype, pose_size):
+        # TODO: debug, some problem with logic present, results are poorer than previous method
+        #       - However, not sure if worthwhile to fix, seems execution times are very similar
+        #       - NUMBA_LEVEL == 2-3, seems best execution time -wise, not certain about memory use
+
+        blk_i = 0
+        for pt_i in np.arange(len(valid_pts3d), dtype=idx_dtype):
+            r_idxs = np.where(pt3d_idxs == pt_i)[0].astype(idx_dtype)
+            blk_pose_idxs = pose_idxs[r_idxs]
+            blk_np = len(r_idxs)
+            m, n_b, n_p, n_l = blk_np * 2, Jrb.shape[1], blk_np * pose_size, 3
+
+            if blk_np < 2:
+                # too few observations of this 3d-point
+                valid_pts3d[pt_i] = False
+                continue
+
+            if len(blocks) <= blk_i:
+                blocks.append(ResidualBlock(r_idxs, blk_pose_idxs, m, n_b, n_p, n_l, pose_size))
+
+            blk = blocks[blk_i]
+            blk.reset()
+            blk_i += 1
+
+            for i, ri in enumerate(r_idxs):
+                i = idx_dtype(i)
+                for j in range(n_b):
+                    j = idx_dtype(j)
+                    blk.S[i*2,     j] = Jrb[ri*2,     j]
+                    blk.S[i*2 + 1, j] = Jrb[ri*2 + 1, j]
+
+                for j in range(pose_size):
+                    j = idx_dtype(j)
+                    blk.S[i*2,     n_b + i * pose_size + j] = Jrp[ri*2,     blk_pose_idxs[i] + j]
+                    blk.S[i*2 + 1, n_b + i * pose_size + j] = Jrp[ri*2 + 1, blk_pose_idxs[i] + j]
+
+                for j in range(n_l):
+                    j = idx_dtype(j)
+                    blk.S[i*2,     n_b + n_p + j] = Jrl[ri*2,     pt_i * 3 + j]
+                    blk.S[i*2 + 1, n_b + n_p + j] = Jrl[ri*2 + 1, pt_i * 3 + j]
+
+                blk.S[i * 2,     -1] = rr[ri * 2,     idx_dtype(0)]
+                blk.S[i * 2 + 1, -1] = rr[ri * 2 + 1, idx_dtype(0)]
 
     def build_landmark_blocks(self, rr, Jrb, Jrp, Jrl):
         def index(A, i, j, safe=False):
@@ -155,11 +213,10 @@ class InnerLinearizerQR:
             blk_Jp = np.zeros((blk_np*2, blk_np*self._pose_size), dtype=self.dtype)
             blk_Jp[blk_Jp_i, blk_Jp_j] = index(Jrp, Jrp_i, Jrp_j)
 
-            if len(self._blocks) > blk_i:
-                self._blocks[blk_i].new_linearization(blk_r, blk_Jb, blk_Jp, blk_Jl)
-            else:
-                blk = ResidualBlock(r_idxs, pose_idxs, blk_r, blk_Jb, blk_Jp, blk_Jl, self._pose_size)
-                self._blocks.append(blk)
+            if len(self._blocks) <= blk_i:
+                m, n_b, n_p, n_l = blk_r.size, blk_Jb.shape[1], blk_Jp.shape[1], blk_Jl.shape[1]
+                self._blocks.append(ResidualBlock(r_idxs, pose_idxs, m, n_b, n_p, n_l, self._pose_size))
+            self._blocks[blk_i].new_linearization_point(blk_r, blk_Jb, blk_Jp, blk_Jl)
             blk_i += 1
 
     @staticmethod
@@ -244,7 +301,7 @@ class InnerLinearizerQR:
         assert self._state == self.STATE_LINEARIZED, 'not linearized yet'
         if NUMBA_LEVEL >= 3:
             with warnings.catch_warnings():
-                # for some reason warns about non-contiguous arrays in np.dot, can't find any though
+                # for some reason warns about non-contiguous arrays in n_p.dot, can't find any though
                 warnings.filterwarnings("ignore")
                 self._marginalize(nb.typed.List(self._blocks))
         else:
@@ -252,7 +309,7 @@ class InnerLinearizerQR:
         self._state = self.STATE_MARGINALIZED
 
     @staticmethod
-    @maybe_decorate(nb.njit(nogil=True, parallel=False, cache=False), NUMBA_LEVEL >= 3)
+    @maybe_decorate(nb.njit(nogil=True, parallel=False, cache=True), NUMBA_LEVEL >= 3)
     def _marginalize(blocks):
         for blk in blocks:
             blk.marginalize()
@@ -263,10 +320,10 @@ class InnerLinearizerQR:
         l_diff = 0
         delta_xb = delta_xbp[:self.nb]
         delta_xp = delta_xbp[self.nb:].reshape((-1, self._pose_size))
-        delta_xl = np.zeros((len(self._blocks), self._blocks[0].nl), dtype=self.dtype)
+        delta_xl = np.zeros((len(self._blocks), self._blocks[0].n_l), dtype=self.dtype)
         for i, blk in enumerate(self.all_blocks):
             blk_delta_xp = delta_xp[blk.pose_idxs, :].reshape((-1, 1))
-            if blk.nl > 0:
+            if blk.n_l > 0:
                 blk_delta_xbp = np.concatenate((delta_xb, blk_delta_xp), axis=0)
                 blk_delta_xl = -np.linalg.solve(blk.R1, blk.Q1T_r + blk.Q1T_Jbp.dot(blk_delta_xbp))
                 delta_xl[i, :] = blk_delta_xl.T * blk.Jl_col_scale
@@ -276,8 +333,8 @@ class InnerLinearizerQR:
             # calculate linear cost diff
             blk.damp(0)
             QT_J_deltax = blk.QT_Jbp @ blk_delta_xbp
-            if blk.nl > 0:
-                QT_J_deltax[:blk.nl] += blk.R1.dot(blk_delta_xl)
+            if blk.n_l > 0:
+                QT_J_deltax[:blk.n_l] += blk.R1.dot(blk_delta_xl)
             l_diff -= QT_J_deltax.T.dot(0.5 * QT_J_deltax + blk.QT_r).flatten()[0]
 
         return delta_xl, l_diff / self.residual_count()
@@ -319,9 +376,9 @@ class InnerLinearizerQR:
                 blk_b = (blk.Q2T_r.T @ Q2T_Jbp).T
             else:
                 blk_b = (blk.Q2T_r.T.dot(Q2T_Jbp)).T
-            if blk.nb > 0:
-                brb[:self.nb] += blk_b[:blk.nb]
-            bp[blk.pose_idxs, :] += blk_b[blk.nb:].reshape((-1, self._pose_size))
+            if blk.n_b > 0:
+                brb[:self.nb] += blk_b[:blk.n_b]
+            bp[blk.pose_idxs, :] += blk_b[blk.n_b:].reshape((-1, self._pose_size))
 
         return np.concatenate((brb, bp.reshape((-1, 1))), axis=0)
 
@@ -343,7 +400,7 @@ class InnerLinearizerQR:
         db2 = np.zeros((self.nb,), dtype=self.dtype)
         dp2 = np.zeros((self._pose_n, self._pose_size), dtype=self.dtype)
         for blk in self.all_blocks:
-            if blk.nb > 0:
+            if blk.n_b > 0:
                 db2 += np.sum(self._epow2(blk.Jb), axis=0)
             dp2[blk.pose_idxs, :] += np.sum(self._epow2(blk.Jp), axis=0).reshape((-1, self._pose_size))
 
@@ -415,14 +472,14 @@ class InnerLinearizerQR:
         jac_rb_scaling = jac_scaling[None, :self.nb]
         jac_rp_scaling = jac_scaling[self.nb:].reshape((-1, self._pose_size))
         for blk in self.all_blocks:
-            assert not blk.is_damped() or blk.nl == 0, 'apply scaling before damping'
+            assert not blk.is_damped() or blk.n_l == 0, 'apply scaling before damping'
             blk_rp = jac_rp_scaling[blk.pose_idxs, :].reshape((1, -1))
-            blk_jsc = np.concatenate((jac_rb_scaling, blk_rp), axis=1) if blk.nl > 0 else blk_rp
+            blk_jsc = np.concatenate((jac_rb_scaling, blk_rp), axis=1) if blk.n_l > 0 else blk_rp
             if sp.issparse(blk.QT_Jbp):
                 blk.QT_Jbp = blk.QT_Jbp * sp.diags(blk_jsc.flatten())
             else:
                 blk_QT_Jbp = blk.QT_Jbp  # direct blk.QT_Jbp inplace multiplication will fail because of @property decorator
-                blk_QT_Jbp *= blk_jsc    # same as blk.QT_Jbp = blk.QT_Jbp.dot(np.diag(blk_jsc))
+                blk_QT_Jbp *= blk_jsc    # same as blk.QT_Jbp = blk.QT_Jbp.dot(n_p.diag(blk_jsc))
 
     def set_landmark_damping(self, _lambda):
         assert self._state == self.STATE_MARGINALIZED, 'can only use if state == MARGINALIZED'
@@ -443,95 +500,71 @@ class InnerLinearizerQR:
         return len(self.problem.xb)
 
 
-array_type = nb.float32[:, :]
+nb_type, idx_type, np_type = nb.float32, nb.int32, np.float32
+array_type = nb_type[:, :]
 
 @maybe_decorate(
     nb.experimental.jitclass([
-        ('r_idxs', nb.int32[:]),
-        ('pose_idxs', nb.int32[:]),
-        ('r', array_type),
-        ('Jb', array_type),
-        ('Jp', array_type),
-        ('Jl', array_type),
-        ('psize', nb.intp),
-        ('Jl_col_scale', nb.optional(array_type)),
-        ('nb', nb.intp),
-        ('np', nb.intp),
-        ('nl', nb.intp),
-        ('pnum', nb.intp),
+        ('r_idxs', idx_type[:]),
+        ('pose_idxs', idx_type[:]),
         ('m', nb.intp),
-        ('_S', nb.optional(array_type)),
+        ('n_b', nb.intp),
+        ('n_p', nb.intp),
+        ('n_l', nb.intp),
+        ('psize', nb.intp),
+        ('pnum', nb.intp),
+        ('S', array_type),
+        ('Jl_col_scale', nb.optional(array_type)),
         ('_marginalized', nb.boolean),
         ('_damping_rots', nb.optional(nb.types.ListType(array_type))),
     ]), NUMBA_LEVEL >= 3)
 class ResidualBlock:
-    def __init__(self, r_idxs, pose_idxs, r, Jb, Jp, Jl, psize=6):
+    def __init__(self, r_idxs, pose_idxs, m, n_b, n_p, n_l, psize=6):
         self.r_idxs = r_idxs
         self.pose_idxs = pose_idxs
-
-        # TODO: store directly into correct size storage so that no need np.concatenate, np.zeros at self.marginalize
-
-        self.r, self.Jb, self.Jp, self.Jl = r, Jb, Jp, Jl
-        self.Jl_col_scale = None
         self.psize = psize
+        self.m, self.n_b, self.n_p, self.n_l = m, n_b, n_p, n_l
+        self.pnum = self.n_p // self.psize
 
-        self.nb = Jb.shape[1] if Jb is not None else 0
-        self.np = Jp.shape[1] if Jp is not None else 0
-        self.nl = Jl.shape[1] if Jl is not None else 0
-
-        self.pnum = self.np // self.psize
-        self.m = r.size
-
-        # self._Q = None
-        self._S = None
+        self.S = np.empty((self.m + self.n_l, self.n_b + self.n_p + self.n_l + 1), dtype=np_type)
+        self.Jl_col_scale = None
         self._marginalized = False
         self._damping_rots = None
 
-    def new_linearization(self, r, Jb, Jp, Jl):
+    def reset(self):
+        self._marginalized = False
+        self._damping_rots = None
+        self.S[:] = self.S.dtype.type(0.0)
+
+    def new_linearization_point(self, r, Jb, Jp, Jl):
+        self.reset()
         self.r, self.Jb, self.Jp, self.Jl = r, Jb, Jp, Jl
-
-        if self._S is not None:
-            self._S[self.m:, :] = np.float32(0)
-        self._marginalized = False
-        self._damping_rots = None
 
     def marginalize(self):
         assert not self.is_marginalized(), 'already marginalized'
-        if self._S is None:
-            self._S = np.zeros((self.m + self.nl, self.nb + self.np + self.nl + 1), dtype=self.Jl.dtype)
-
-        self._marginalize(self._S, self.r, self.Jb, self.Jp, self.Jl)
-
-        if 1:
-            self.Jb = np.empty((0, 0), dtype=np.float32)
-            self.Jp = np.empty((0, 0), dtype=np.float32)
-            self.Jl = np.empty((0, 0), dtype=np.float32)
-            self.r = np.empty((0, 0), dtype=np.float32)
-        else:
-            del self.Jb, self.Jp, self.Jl, self.r
-
+        self._marginalize(self.S, self.m, self.n_b, self.n_p, self.n_l)
         self._marginalized = True
 
     @staticmethod
     @maybe_decorate(nb.njit(nogil=True, parallel=False, cache=True), NUMBA_LEVEL == 2)
-    def _marginalize(_S, r, Jb, Jp, Jl):
-        m, nb, _np, nl = r.size, Jb.shape[1], Jp.shape[1], Jl.shape[1]
-
-        Q, R = np.linalg.qr(Jl, mode='complete')  # NOTE: numba 0.51.1 doesn't support mode argument,
-                                                  #       this uses own qr function at algo/linalg.py
-        Jbp = Jp if Jb is None else np.concatenate((Jb, Jp), axis=1)
-        _S[:m, :nb + _np] = Q.T.dot(Jbp)
-        _S[:m, nb + _np:-1] = R
-        _S[:m, -1:] = Q.T.dot(r)
-        # self._S = np.concatenate((
-        #         np.concatenate((Q.T.dot(self.Jp), R, Q.T.dot(self.r)), axis=1),
-        #         np.zeros((self.nl, self.np + self.nl + 1), dtype=Q.dtype)), axis=0)
+    def _marginalize(_S, m, n_b, n_p, n_l):
+        Q, R = np.linalg.qr(_S[:m, n_b + n_p:-1], mode='complete')  # NOTE: numba 0.51.1 doesn't support mode argument,
+                                                                    #       this uses own qr function at algo/linalg.py
+        if 0:
+            # S[:m, ...] is not contiguous, need to ignore warnings in non jitted code
+            _S[:m, :n_b + n_p] = Q.T.dot(_S[:m, :n_b + n_p])   # Q.T.dot(Jbp)
+            _S[:m, n_b + n_p:-1] = R                           # Q.T.dot(Jl)
+            _S[:m, -1:] = Q.T.dot(_S[:m, -1:])                 # Q.T.dot(r)
+        else:
+            # similar speed as the alternative above, no warnings, maybe needs a bit more memory?
+            A = np.ascontiguousarray(_S[:m, :])
+            _S[:m, :] = Q.T.dot(A)
 
     def damp(self, _lambda):
         assert self.is_marginalized(), 'not yet marginalized'
         assert _lambda >= 0, 'lambda must be >= 0'
 
-        if self.nl == 0:
+        if self.n_l == 0:
             return
 
         if self.is_damped():
@@ -541,8 +574,8 @@ class ResidualBlock:
             pass  # by default lambda already zero if no damping
         else:
             # make and apply givens rotations
-            self._S[-self.nl:, self.nb + self.np:self.n] = np.eye(self.nl, dtype=self._S.dtype) * np.sqrt(_lambda)
-            self._damping_rots = self._damp(self._S, self.nb + self.np, self.nl)
+            self.S[-self.n_l:, self.n_b + self.n_p:self.n] = np.eye(self.n_l, dtype=self.S.dtype) * np.sqrt(_lambda)
+            self._damping_rots = self._damp(self.S, self.n_b + self.n_p, self.n_l)
 
     @staticmethod
     @maybe_decorate(nb.njit(nogil=True, parallel=False, cache=True), 3 > NUMBA_LEVEL >= 1)
@@ -557,7 +590,7 @@ class ResidualBlock:
 
     def undamp(self):
         assert self.is_damped(), 'not damped yet'
-        self._undamp(self._damping_rots, self._S, self.nl)
+        self._undamp(self._damping_rots, self.S, self.n_l)
         self._damping_rots = None
 
     @staticmethod
@@ -566,110 +599,157 @@ class ResidualBlock:
         for n in range(k-1, -1, -1):
             for m in range(n, -1, -1):
                 G = damping_rots.pop()
-                tools.apply_givens(S, G.T, S.shape[0] - k + n - m, n)
+                tools.apply_givens(S, G.T, S.shape[0] - k + n - m, n)    # TODO: contiguous
 
     def is_marginalized(self):
         return self._marginalized
 
     def is_damped(self):
-        return self._damping_rots is not None or self.nl == 0
+        return self._damping_rots is not None or self.n_l == 0
+
+    @property
+    def r(self):
+        assert not self.is_marginalized(), 'r only defined for non-marginalized landmark blocks'
+        return self.S[:self.m, self.n:]
+
+    @r.setter
+    def r(self, r):
+        assert not self.is_marginalized(), 'r only defined for non-marginalized landmark blocks'
+        self.S[:self.m, self.n:] = r
+
+    @property
+    def Jb(self):
+        assert not self.is_marginalized(), 'Jb only defined for non-marginalized landmark blocks'
+        return self.S[:self.m, :self.n_b]
+
+    @Jb.setter
+    def Jb(self, Jb):
+        assert not self.is_marginalized(), 'Jb only defined for non-marginalized landmark blocks'
+        self.S[:self.m, :self.n_b] = Jb
+
+    @property
+    def Jp(self):
+        assert not self.is_marginalized(), 'Jp only defined for non-marginalized landmark blocks'
+        return self.S[:self.m, self.n_b: self.n_b + self.n_p]
+
+    @Jp.setter
+    def Jp(self, Jp):
+        assert not self.is_marginalized(), 'Jp only defined for non-marginalized landmark blocks'
+        self.S[:self.m, self.n_b: self.n_b + self.n_p] = Jp
+
+    @property
+    def Jl(self):
+        assert not self.is_marginalized(), 'Jl only defined for non-marginalized landmark blocks'
+        return self.S[:self.m, self.n_b + self.n_p:-1]
+
+    @Jl.setter
+    def Jl(self, Jl):
+        assert not self.is_marginalized(), 'Jl only defined for non-marginalized landmark blocks'
+        self.S[:self.m, self.n_b + self.n_p:-1] = Jl
+
+    @property
+    def Jbp(self):
+        assert not self.is_marginalized(), 'Jbp only defined for non-marginalized landmark blocks'
+        return self.S[:self.m, :self.n_b + self.n_p]
+
+    @Jbp.setter
+    def Jbp(self, Jbp):
+        assert not self.is_marginalized(), 'Jbp only defined for non-marginalized landmark blocks'
+        self.S[:self.m, :self.n_b + self.n_p] = Jbp
 
     @property
     def QT_r(self):
-        if self._S is not None:
-            return self._S[:, self.n:] if self.is_damped() else self._S[:-self.nl, self.n:]
-        return self.r
+        assert self.is_marginalized(), 'QT_r only defined for marginalized landmark blocks'
+        return self.S[:, self.n:] if self.is_damped() else self.S[:-self.n_l, self.n:]
 
     @property
     def QT_Jbp(self):
-        if self._S is not None:
-            return self._S[:, :self.nb + self.np] if self.is_damped() else self._S[:-self.nl, :self.nb + self.np]
-        if self.Jb is not None and self.Jp is not None:
-            return np.hstack((self.Jb, self.Jp))
-        if self.Jb is not None:
-            return self.Jb
-        return self.Jp
+        assert self.is_marginalized(), 'QT_Jbp only defined for marginalized landmark blocks'
+        return self.S[:, :self.n_b + self.n_p] if self.is_damped() else self.S[:self.m, :self.n_b + self.n_p]
 
     @QT_Jbp.setter
     def QT_Jbp(self, QT_Jbp):
-        assert sp.issparse(QT_Jbp) and self._S is None, 'for dense matrices, manipulate in-place'
-        if self.Jb is not None and self.Jp is not None:
-            self.Jb = QT_Jbp[:, :self.nb]
-            self.Jp = QT_Jbp[:, self.nb:]
-        elif self.Jb is not None:
-            self.Jb = QT_Jbp
+        assert self.is_marginalized(), 'QT_Jbp only defined for marginalized landmark blocks'
+        if self.is_damped():
+            self.S[:, :self.n_b + self.n_p] = QT_Jbp
         else:
-            self.Jp = QT_Jbp
+            self.S[:self.m, :self.n_b + self.n_p] = QT_Jbp
 
     @property
     def R(self):
-        assert self._S is not None, 'R only defined for marginalized landmark blocks'
-        return self._S[:, self.nb + self.np:self.n] if self.is_damped() else self._S[:-self.nl, self.nb + self.np:self.n]
+        assert self.is_marginalized(), 'R only defined for marginalized landmark blocks'
+        return self.S[:, self.n_b + self.n_p:self.n] if self.is_damped() \
+            else self.S[:self.m, self.n_b + self.n_p: self.n]
 
     @property
     def QT_Jl(self):
+        assert self.is_marginalized(), 'QT_Jl only defined for marginalized landmark blocks'
         return self.R
 
     @property
     def R1(self):
-        assert self._S is not None, 'R1 only defined for marginalized landmark blocks'
-        return self._S[:self.nl, self.nb + self.np:self.n]
+        assert self.is_marginalized(), 'R1 only defined for marginalized landmark blocks'
+        return self.S[:self.n_l, self.n_b + self.n_p: self.n]
 
     @property
     def Q1T_Jl(self):
-        assert self._S is not None, 'R only defined for marginalized landmark blocks'
+        assert self.is_marginalized(), 'Q1T_Jl only defined for marginalized landmark blocks'
         return self.R1
 
     @property
     def Q1T_r(self):
-        assert self.is_marginalized(), 'not marginalized yet'
-        assert self._S is not None, 'R only defined for marginalized landmark blocks'
-        return self._S[:self.nl, self.n:]
+        assert self.is_marginalized(), 'Q1T_r only defined for marginalized landmark blocks'
+        assert self.S is not None, 'R only defined for marginalized landmark blocks'
+        return self.S[:self.n_l, self.n:]
 
     @property
     def Q2T_r(self):
-        assert self.is_marginalized(), 'not marginalized yet'
-        if self._S is not None:
-            return self._S[self.nl:, self.n:] if self.is_damped() else self._S[self.nl:-self.nl, self.n:]
+        assert self.is_marginalized(), 'Q2T_r only defined for marginalized landmark blocks'
+        if self.S is not None:
+            return self.S[self.n_l:, self.n:] if self.is_damped() else self.S[self.n_l:-self.n_l, self.n:]
         return self.QT_r
 
     @property
     def Q1T_Jbp(self):
-        assert self.is_marginalized(), 'not marginalized yet'
-        assert self._S is not None, 'R only defined for marginalized landmark blocks'
-        return self._S[:self.nl, :self.nb + self.np]
+        assert self.is_marginalized(), 'Q1T_Jbp only defined for marginalized landmark blocks'
+        assert self.S is not None, 'R only defined for marginalized landmark blocks'
+        return self.S[:self.n_l, :self.n_b + self.n_p]
 
     @property
     def Q2T_Jbp(self):
-        # assert self.is_marginalized(), 'not marginalized yet'
-        if self._S is not None:
-            return self._S[self.nl:, :self.nb + self.np] if self.is_damped() else self._S[self.nl:-self.nl, :self.nb + self.np]
-        return self.QT_Jbp
+        assert self.is_marginalized(), 'Q2T_Jbp only defined for marginalized landmark blocks'
+        return self.S[self.n_l:, :self.n_b + self.n_p] if self.is_damped() else self.S[self.n_l:self.m, :self.n_b + self.n_p]
 
     @property
     def n(self):
-        return self.nb + self.np + self.nl
+        return self.n_b + self.n_p + self.n_l
+
+
+if NUMBA_LEVEL >= 3:
+    ResidualBlockType = ResidualBlock.class_type.instance_type
 
 
 class NonLMResidualBlock:
-    def __init__(self, r_idxs, pose_idxs, r, Jb, Jp, Jl, psize=6):
-        self.r_idxs = r_idxs
+    def __init__(self, pose_idxs, r, Jb, Jp, psize=6):
         self.pose_idxs = pose_idxs
-
         self.r = r
         self.Jb = Jb
         self.Jp = Jp
-        self.Jl = Jl
         self.Jl_col_scale = None
         self.psize = psize
 
-        self.nb = Jb.shape[1] if Jb is not None else 0
-        self.np = Jp.shape[1] if Jp is not None else 0
-        self.nl = Jl.shape[1] if Jl is not None else 0
-
-        self.pnum = self.np // self.psize
         self.m = r.size
-        self._S = None
+        self.n_b = Jb.shape[1] if Jb is not None else 0
+        self.n_p = Jp.shape[1] if Jp is not None else 0
+        self.pnum = self.n_p // self.psize
+
+    @property
+    def n_l(self):
+        return 0
+
+    @property
+    def n(self):
+        return self.n_b + self.n_p
 
     def is_marginalized(self):
         return True
@@ -685,14 +765,10 @@ class NonLMResidualBlock:
 
     @property
     def QT_r(self):
-        if self._S is not None:
-            return self._S[:, self.n:] if self.is_damped() else self._S[:-self.nl, self.n:]
         return self.r
 
     @property
     def QT_Jbp(self):
-        if self._S is not None:
-            return self._S[:, :self.nb + self.np] if self.is_damped() else self._S[:-self.nl, :self.nb + self.np]
         if self.Jb is not None and self.Jp is not None:
             return sp.hstack(self.Jb, self.Jp)
         if self.Jb is not None:
@@ -701,10 +777,10 @@ class NonLMResidualBlock:
 
     @QT_Jbp.setter
     def QT_Jbp(self, QT_Jbp):
-        assert sp.issparse(QT_Jbp) and self._S is None, 'for dense matrices, manipulate in-place'
+        assert sp.issparse(QT_Jbp), 'for dense matrices, manipulate in-place'
         if self.Jb is not None and self.Jp is not None:
-            self.Jb = QT_Jbp[:, :self.nb]
-            self.Jp = QT_Jbp[:, self.nb:]
+            self.Jb = QT_Jbp[:, :self.n_b]
+            self.Jp = QT_Jbp[:, self.n_b:]
         elif self.Jb is not None:
             self.Jb = QT_Jbp
         else:
@@ -712,49 +788,32 @@ class NonLMResidualBlock:
 
     @property
     def R(self):
-        assert self._S is not None, 'R only defined for marginalized landmark blocks'
-        return self._S[:, self.nb + self.np:self.n] if self.is_damped() else self._S[:-self.nl, self.nb + self.np:self.n]
+        assert False, 'non-landmark block'
 
     @property
     def QT_Jl(self):
-        return self.R
+        assert False, 'non-landmark block'
 
     @property
     def R1(self):
-        assert self._S is not None, 'R1 only defined for marginalized landmark blocks'
-        return self._S[:self.nl, self.nb + self.np:self.n]
+        assert False, 'non-landmark block'
 
     @property
     def Q1T_Jl(self):
-        assert self._S is not None, 'R only defined for marginalized landmark blocks'
-        return self.R1
+        assert False, 'non-landmark block'
 
     @property
     def Q1T_r(self):
-        assert self.is_marginalized(), 'not marginalized yet'
-        assert self._S is not None, 'R only defined for marginalized landmark blocks'
-        return self._S[:self.nl, self.n:]
+        assert False, 'non-landmark block'
 
     @property
     def Q2T_r(self):
-        assert self.is_marginalized(), 'not marginalized yet'
-        if self._S is not None:
-            return self._S[self.nl:, self.n:] if self.is_damped() else self._S[self.nl:-self.nl, self.n:]
-        return self.QT_r
+        return self.r
 
     @property
     def Q1T_Jbp(self):
-        assert self.is_marginalized(), 'not marginalized yet'
-        assert self._S is not None, 'R only defined for marginalized landmark blocks'
-        return self._S[:self.nl, :self.nb + self.np]
+        assert False, 'non-landmark block'
 
     @property
     def Q2T_Jbp(self):
-        # assert self.is_marginalized(), 'not marginalized yet'
-        if self._S is not None:
-            return self._S[self.nl:, :self.nb + self.np] if self.is_damped() else self._S[self.nl:-self.nl, :self.nb + self.np]
         return self.QT_Jbp
-
-    @property
-    def n(self):
-        return self.nb + self.np + self.nl
