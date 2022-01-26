@@ -2,13 +2,12 @@ import logging
 import warnings
 
 import numpy as np
-from numba import NumbaPerformanceWarning
 from scipy import sparse as sp
 import numba as nb
 #from memory_profiler import profile
 
 from visnav.algo import tools
-from visnav.algo.linalg import qr_complete_fn, qr_complete, is_own_sp_mx
+from visnav.algo.linalg import is_own_sp_mx
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -24,7 +23,7 @@ class InnerLinearizerQR:
     ) = range(4)
 
     def __init__(self, problem, jacobi_scaling_eps=1e-5, huber_coefs=None, use_weighted_residuals=False,
-                 use_own_sp_mx=True):
+                 use_own_sp_mx=False):
         self.problem = problem
         self.dtype = self.problem.dtype
         self.idx_dtype = problem.IDX_DTYPE
@@ -493,9 +492,8 @@ class ResidualBlock:
 
     def marginalize(self):
         assert not self.is_marginalized(), 'already marginalized'
-
-        retval, Q, R = qr_complete(self.Jl)
-        assert retval == 0, 'error at qr_complete'
+        Q, R = np.linalg.qr(self.Jl, mode='complete')  # NOTE: numba 0.51.1 doesn't support mode argument,
+                                                       #       this uses own qr function at algo/linalg.py
         if self._S is None:
             self._S = np.zeros((self.m + self.nl, self.nb + self.np + self.nl + 1), dtype=Q.dtype)
         Jbp = self.Jp if self.Jb is None else np.concatenate((self.Jb, self.Jp), axis=1)

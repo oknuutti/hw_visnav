@@ -5,12 +5,11 @@ from numba import extending as nb_extending
 from numpy.lib.twodim_base import triu
 
 
-def qr_complete(a):
-    pass
+@nb_extending.overload(np.linalg.qr)
+def qr_impl(a, mode):
+    if nb.literally(mode).literal_value != 'complete':
+        return None
 
-
-@nb_extending.overload(qr_complete)
-def qr_complete_fn(a):
     numba_ez_geqrf = nb.types.ExternalFunction("numba_ez_geqrf", nb.types.intc(
         nb.types.char,  # kind
         nb.types.intp,  # m
@@ -30,20 +29,13 @@ def qr_complete_fn(a):
         nb.types.CPointer(a.dtype),  # tau
     ))
 
-    errs = {
-        1: 'Array must be two-dimensional',
-        2: 'numba_ez_geqrf returned error',
-        3: 'numba_ez_xxgqr returned error',
-    }
-
-    # @nb.njit(nogil=True, parallel=False, cache=True)
-    def _qr_complete(a):
+    def _qr_complete(a, mode):
         """
         Based on numpy.linalg.qr(a, mode='complete'). This doesn't support complex numbers or multiple arrays.
         Had to make own version as numba does not support the 'complete' argument.
         """
         if a.ndim != 2:
-            return 1, None, None
+            assert False, 'fail'  # TODO: exceptions
         m, n = a.shape
         mn = min(m, n)
 
@@ -59,7 +51,7 @@ def qr_complete_fn(a):
         # calculate optimal size of work data 'work'
         res = numba_ez_geqrf(kind, m, n, a.ctypes, max(1, m), tau.ctypes)
         if res != 0:
-            return 2, None, None
+            assert False, 'fail'    # TODO: exceptions
 
         #  generate q from a
         if m > n:
@@ -73,11 +65,11 @@ def qr_complete_fn(a):
         # compute q
         res = numba_ez_xxgqr(kind, m, mc, mn, q.ctypes, max(1, m), tau.ctypes)
         if res != 0:
-            return 3, None, None
+            assert False, 'fail'    # TODO: exceptions
 
         q = q[:mc].T
-        r = a[:, :mc].T
-        return 0, q, triu(r)
+        r = triu(a[:, :mc].T)
+        return q, r
 
     return _qr_complete
 
