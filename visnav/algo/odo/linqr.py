@@ -8,9 +8,12 @@ import numba as nb
 
 from visnav.algo import tools
 from visnav.algo.linalg import is_own_sp_mx
+from visnav.algo.tools import maybe_decorate
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
+
+NUMBA_LEVEL = 0
 
 
 class InnerLinearizerQR:
@@ -23,7 +26,7 @@ class InnerLinearizerQR:
     ) = range(4)
 
     def __init__(self, problem, jacobi_scaling_eps=1e-5, huber_coefs=None, use_weighted_residuals=False,
-                 use_own_sp_mx=False):
+                 use_own_sp_mx=NUMBA_LEVEL >= 4):
         self.problem = problem
         self.dtype = self.problem.dtype
         self.idx_dtype = problem.IDX_DTYPE
@@ -65,7 +68,6 @@ class InnerLinearizerQR:
     def all_blocks(self):
         return self._blocks + self.non_lm_blocks
 
-    #@profile
     def linearize(self):
         mr, mx, ma = self.problem.pts2d.size, self.problem.meas_r.size, self.problem.meas_aa.size
         m = mr + mx + ma
@@ -238,22 +240,23 @@ class InnerLinearizerQR:
     def set_pose_damping(self, _lambda):
         self._pose_damping = _lambda
 
-    #@profile
     def marginalize(self):
         assert self._state == self.STATE_LINEARIZED, 'not linearized yet'
-        with warnings.catch_warnings():
-            # for some reason warns about non-contiguous arrays in np.dot, can't find any though
-            warnings.filterwarnings("ignore")
-            self._marginalize(nb.typed.List(self._blocks))
+        if NUMBA_LEVEL >= 3:
+            with warnings.catch_warnings():
+                # for some reason warns about non-contiguous arrays in np.dot, can't find any though
+                warnings.filterwarnings("ignore")
+                self._marginalize(nb.typed.List(self._blocks))
+        else:
+            self._marginalize(self._blocks)
         self._state = self.STATE_MARGINALIZED
 
     @staticmethod
-    @nb.njit(nogil=True, parallel=False, cache=False)
+    @maybe_decorate(nb.njit(nogil=True, parallel=False, cache=False), NUMBA_LEVEL >= 3)
     def _marginalize(blocks):
         for blk in blocks:
             blk.marginalize()
 
-    #@profile
     def backsub_xl(self, delta_xbp):
         assert self._state == self.STATE_MARGINALIZED, 'not linearized yet'
 
@@ -363,7 +366,7 @@ class InnerLinearizerQR:
         return sp.csc_matrix(Hpp)
 
     @staticmethod
-    @nb.njit(nogil=True, parallel=False, cache=True)
+    @maybe_decorate(nb.njit(nogil=True, parallel=False, cache=True), NUMBA_LEVEL >= 1)
     def _get_Q2TJbp_T_Q2TJbp_blockdiag(_nb, _np, psize, pose_damping, arr_Q2T_Jbp, arr_pose_idxs):
         H = np.zeros((_nb + _np, _nb + _np), dtype=arr_Q2T_Jbp[0].dtype)
         for i, Q2T_Jbp in enumerate(arr_Q2T_Jbp):
@@ -441,24 +444,26 @@ class InnerLinearizerQR:
 
 
 array_type = nb.float32[:, :]
-@nb.experimental.jitclass([
-    ('r_idxs', nb.int32[:]),
-    ('pose_idxs', nb.int32[:]),
-    ('r', array_type),
-    ('Jb', array_type),
-    ('Jp', array_type),
-    ('Jl', array_type),
-    ('psize', nb.intp),
-    ('Jl_col_scale', nb.optional(array_type)),
-    ('nb', nb.intp),
-    ('np', nb.intp),
-    ('nl', nb.intp),
-    ('pnum', nb.intp),
-    ('m', nb.intp),
-    ('_S', nb.optional(array_type)),
-    ('_marginalized', nb.boolean),
-    ('_damping_rots', nb.optional(nb.types.ListType(array_type))),
-])
+
+@maybe_decorate(
+    nb.experimental.jitclass([
+        ('r_idxs', nb.int32[:]),
+        ('pose_idxs', nb.int32[:]),
+        ('r', array_type),
+        ('Jb', array_type),
+        ('Jp', array_type),
+        ('Jl', array_type),
+        ('psize', nb.intp),
+        ('Jl_col_scale', nb.optional(array_type)),
+        ('nb', nb.intp),
+        ('np', nb.intp),
+        ('nl', nb.intp),
+        ('pnum', nb.intp),
+        ('m', nb.intp),
+        ('_S', nb.optional(array_type)),
+        ('_marginalized', nb.boolean),
+        ('_damping_rots', nb.optional(nb.types.ListType(array_type))),
+    ]), NUMBA_LEVEL >= 3)
 class ResidualBlock:
     def __init__(self, r_idxs, pose_idxs, r, Jb, Jp, Jl, psize=6):
         self.r_idxs = r_idxs
@@ -492,18 +497,11 @@ class ResidualBlock:
 
     def marginalize(self):
         assert not self.is_marginalized(), 'already marginalized'
-        Q, R = np.linalg.qr(self.Jl, mode='complete')  # NOTE: numba 0.51.1 doesn't support mode argument,
-                                                       #       this uses own qr function at algo/linalg.py
         if self._S is None:
-            self._S = np.zeros((self.m + self.nl, self.nb + self.np + self.nl + 1), dtype=Q.dtype)
-        Jbp = self.Jp if self.Jb is None else np.concatenate((self.Jb, self.Jp), axis=1)
-        self._S[:self.m, :self.nb + self.np] = Q.T.dot(Jbp)
-        self._S[:self.m, self.nb + self.np:-1] = R
-        self._S[:self.m, -1:] = Q.T.dot(self.r)
+            self._S = np.zeros((self.m + self.nl, self.nb + self.np + self.nl + 1), dtype=self.Jl.dtype)
 
-        # self._S = np.concatenate((
-        #         np.concatenate((Q.T.dot(self.Jp), R, Q.T.dot(self.r)), axis=1),
-        #         np.zeros((self.nl, self.np + self.nl + 1), dtype=Q.dtype)), axis=0)
+        self._marginalize(self._S, self.r, self.Jb, self.Jp, self.Jl)
+
         if 1:
             self.Jb = np.empty((0, 0), dtype=np.float32)
             self.Jp = np.empty((0, 0), dtype=np.float32)
@@ -513,6 +511,21 @@ class ResidualBlock:
             del self.Jb, self.Jp, self.Jl, self.r
 
         self._marginalized = True
+
+    @staticmethod
+    @maybe_decorate(nb.njit(nogil=True, parallel=False, cache=True), NUMBA_LEVEL >= 2)
+    def _marginalize(_S, r, Jb, Jp, Jl):
+        m, nb, _np, nl = r.size, Jb.shape[1], Jp.shape[1], Jl.shape[1]
+
+        Q, R = np.linalg.qr(Jl, mode='complete')  # NOTE: numba 0.51.1 doesn't support mode argument,
+                                                  #       this uses own qr function at algo/linalg.py
+        Jbp = Jp if Jb is None else np.concatenate((Jb, Jp), axis=1)
+        _S[:m, :nb + _np] = Q.T.dot(Jbp)
+        _S[:m, nb + _np:-1] = R
+        _S[:m, -1:] = Q.T.dot(r)
+        # self._S = np.concatenate((
+        #         np.concatenate((Q.T.dot(self.Jp), R, Q.T.dot(self.r)), axis=1),
+        #         np.zeros((self.nl, self.np + self.nl + 1), dtype=Q.dtype)), axis=0)
 
     def damp(self, _lambda):
         assert self.is_marginalized(), 'not yet marginalized'
@@ -532,7 +545,7 @@ class ResidualBlock:
             self._damping_rots = self._damp(self._S, self.nb + self.np, self.nl)
 
     @staticmethod
-    #@nb.njit(nogil=True, parallel=False, cache=True)
+    @maybe_decorate(nb.njit(nogil=True, parallel=False, cache=True), NUMBA_LEVEL >= 1)
     def _damp(S, l_idx, k):
         damping_rots = nb.typed.List.empty_list(array_type)
         for n in range(k):
@@ -548,7 +561,7 @@ class ResidualBlock:
         self._damping_rots = None
 
     @staticmethod
-    #@nb.njit(nogil=True, parallel=False, cache=True)
+    @maybe_decorate(nb.njit(nogil=True, parallel=False, cache=True), NUMBA_LEVEL >= 1)
     def _undamp(damping_rots, S, k):
         for n in range(k-1, -1, -1):
             for m in range(n, -1, -1):

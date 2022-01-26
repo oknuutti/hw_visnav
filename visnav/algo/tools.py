@@ -19,6 +19,15 @@ import quaternion  # adds to numpy  # noqa # pylint: disable=unused-import
 from visnav.settings import *
 
 
+def maybe_decorate(dec, condition):
+    def decorator(func):
+        if not condition:
+            # Return the function unchanged, not decorated.
+            return func
+        return dec(func)
+    return decorator
+
+
 class classproperty(property):
     def __get__(self, cls, owner):
         return classmethod(self.fget).__get__(None, owner)()
@@ -1375,7 +1384,7 @@ def dlogR_dR(R):
     return np.hstack((S1, S2, S3))
 
 
-@nb.njit(nogil=True, parallel=False, cache=True)
+#@nb.njit(nogil=True, parallel=False, cache=True)
 def make_givens(a, b, dtype=np.float64):
     # based on https://www.math.usm.edu/lambers/mat610/sum10/lecture9.pdf
 
@@ -1400,10 +1409,15 @@ def make_givens(a, b, dtype=np.float64):
                      [s, c]], dtype=dtype)
 
 
-@nb.njit(nogil=True, parallel=False, cache=True)
+#@nb.njit(nogil=True, parallel=False, cache=True)
 def apply_givens(A, G, i, j):
-    I = np.array((i, j), dtype=np.int32)
-    A[I, :] = G.dot(A[I, :])
+    I = np.array([i, j], dtype=np.int32)
+    AI = A[I, :]
+    if not AI.flags.contiguous:
+        AI = np.ascontiguousarray(AI)
+    if not G.flags.contiguous:
+        G = np.ascontiguousarray(G)
+    A[I, :] = G.dot(AI)
 
 
 def fixed_precision(val, precision, as_str=False):

@@ -96,7 +96,7 @@ def DictArray2D(shape, dtype):
             self.data = nb.typed.Dict.empty(idx_type, col_dict_type)
 
         def __setitem__(self, idx, val):
-            pass
+            assert False, 'overloading failed'
 
         def __getitem__(self, idx):
             major, minor = idx
@@ -104,7 +104,7 @@ def DictArray2D(shape, dtype):
             return val
 
         def copyto(self, idx, trg):
-            pass
+            assert False, 'overloading failed'
 
         def mult_with_arr(self, other):
             if other.size == 1:
