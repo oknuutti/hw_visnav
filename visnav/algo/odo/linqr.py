@@ -7,13 +7,14 @@ import numba as nb
 #from memory_profiler import profile
 
 from visnav.algo import tools
-from visnav.algo.linalg import is_own_sp_mx
+from visnav.algo.linalg import is_own_sp_mx, DictArray2D, own_sp_mx_to_coo
 from visnav.algo.tools import maybe_decorate
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 NUMBA_LEVEL = 3
+#logging.getLogger('numba').setLevel(logging.DEBUG)
 
 
 class InnerLinearizerQR:
@@ -112,9 +113,13 @@ class InnerLinearizerQR:
             self._a_block = NonLMResidualBlock( self.problem.meas_idxs, ra, Jab, Jap, psize=self._pose_size)
             self._total_error += err
 
-        if NUMBA_LEVEL >= 4:
-            if self._blocks is None:
+        if self._blocks is None:
+            if NUMBA_LEVEL >= 3:
                 self._blocks = nb.typed.List.empty_list(ResidualBlockType, len(self.problem.valid_pts3d))
+            else:
+                self._blocks = []
+
+        if NUMBA_LEVEL >= 4:
             self._bld_lm_blks(self._blocks, self.problem.valid_pts3d, self.problem.pt3d_idxs, self.problem.pose_idxs,
                               rr, Jrb, Jrp, Jrl, self.idx_dtype, self._pose_size)
         else:
@@ -176,10 +181,6 @@ class InnerLinearizerQR:
                 return B
             # safe is very slow, unsafe is dangerous as bugs won't be found
             return A[i, j] if safe else A._get_arrayXarray(i, j)
-
-        # make landmark blocks
-        if self._blocks is None:
-            self._blocks = []
 
         blk_i = 0
         for i in range(len(self.problem.pts3d)):
@@ -409,9 +410,17 @@ class InnerLinearizerQR:
     def get_Q2TJbp_T_Q2TJbp_blockdiag(self):
         assert self._state == self.STATE_MARGINALIZED
 
-        Hpp = self._get_Q2TJbp_T_Q2TJbp_blockdiag(self.nb, self.np, self._pose_size, self._pose_damping,
-                                                  nb.typed.List([blk.Q2T_Jbp for blk in self._blocks]),
-                                                  nb.typed.List([blk.pose_idxs for blk in self._blocks]))
+        # TODO: don't use dense Hpp
+
+        if NUMBA_LEVEL >= 3:
+            Hpp = DictArray2D((self.nb + self.np, self.nb + self.np), dtype=self.dtype)
+            self._get_Q2TJbp_T_Q2TJbp_blockdiag_lv3(self.nb, self.np, self._pose_size,
+                                                    self._pose_damping, self._blocks, Hpp)
+            Hpp = own_sp_mx_to_coo(Hpp).tocsc()
+        else:
+            Hpp = self._get_Q2TJbp_T_Q2TJbp_blockdiag(self.nb, self.np, self._pose_size, self._pose_damping,
+                                                      nb.typed.List([blk.Q2T_Jbp for blk in self._blocks]),
+                                                      nb.typed.List([blk.pose_idxs for blk in self._blocks]))
 
         for blk in self.non_lm_blocks:
             blk_Hpp = blk.Q2T_Jbp.T.dot(blk.Q2T_Jbp)
@@ -420,7 +429,40 @@ class InnerLinearizerQR:
             _, _, i, j = self._block_indexing(blk.pose_idxs, blk.pose_idxs, self._pose_size, self._pose_size)
             Hpp[i+self.nb, j+self.nb] += np.array(blk_Hpp[bi, bj]).flatten()
 
-        return sp.csc_matrix(Hpp)
+        Hpp = sp.csc_matrix(Hpp) if not sp.issparse(Hpp) else Hpp.tocsc() if not sp.isspmatrix_csc(Hpp) else Hpp
+        return Hpp
+
+    @staticmethod
+    @maybe_decorate(nb.njit(nogil=True, parallel=False, cache=True), NUMBA_LEVEL >= 3)
+#    @maybe_decorate(nb.jit(forceobj=True), NUMBA_LEVEL >= 3)
+    def _get_Q2TJbp_T_Q2TJbp_blockdiag_lv3(_nb, _np, psize, pose_damping, blocks, H):
+        for blk in blocks:
+            if _nb > 0:
+                A = np.ascontiguousarray(blk.Q2T_Jbp[:, 0:_nb])   #.copy()
+                blk_Hbb = A.T.dot(A)
+                for i in range(_nb):
+                    i = np.int32(i)
+                    for j in range(_nb):
+                        j = np.int32(j)
+                        H[i, j] = H[i, j] + blk_Hbb[i, j]
+
+            for j, idx in enumerate(blk.pose_idxs):
+                g0, b0 = _nb + idx * psize, _nb + j * psize
+                g1, b1 = g0 + psize, b0 + psize
+                A = np.ascontiguousarray(blk.Q2T_Jbp[:, b0:b1])   # .copy()
+                blk_Hpp = A.T.dot(A)
+                for i, gi in enumerate(range(g0, g1)):
+                    i, gi = np.int32(i), np.int32(gi)
+                    for j, gj in enumerate(range(g0, g1)):
+                        j, gj = np.int32(j), np.int32(gj)
+                        H[gi, gj] = H[gi, gj] + blk_Hpp[i, j]
+
+        if pose_damping is not None:
+            for i in range(_nb + _np):
+                i = np.int32(i)
+                H[i, i] = H[i, i] + H.dtype.type(pose_damping)
+
+        return 0
 
     @staticmethod
     @maybe_decorate(nb.njit(nogil=True, parallel=False, cache=True), NUMBA_LEVEL >= 1)

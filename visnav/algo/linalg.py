@@ -78,33 +78,63 @@ def is_own_sp_mx(arr):
     return arr is not None and arr.__class__.__name__ == 'DictArray2DClass'
 
 
+def own_sp_mx_to_coo(arr):
+    assert is_own_sp_mx(arr), 'only works for instances of class DictArray2DClass'
+    from scipy import sparse as sp
+    coo = sp.coo_matrix(arr.shape, arr.dtype)
+
+    n = arr.nnz()
+    idx_dtype = {'float32': np.int32, 'float64': np.int64}[arr.dtype.name]
+    coo.row, coo.col, coo.data = map(lambda dtype: np.empty((n,), dtype), (idx_dtype, idx_dtype, arr.dtype))
+
+    arr.to_coo(coo.row, coo.col, coo.data)
+
+    return coo
+
+
 def DictArray2D(shape, dtype):
     DictArray2DType = nb.types.deferred_type()
+    dtype = np.dtype(dtype)
 
     nb_type, idx_type, col_dict_type = {
-        np.float32: [nb.float32, nb.int32, nb.types.DictType(nb.int32, nb.float32)],
-        np.float64: [nb.float64, nb.int64, nb.types.DictType(nb.int64, nb.float64)],
-    }[dtype]
+        'float32': [nb.float32, nb.int32, nb.types.DictType(nb.int32, nb.float32)],
+        'float64': [nb.float64, nb.int64, nb.types.DictType(nb.int64, nb.float64)],
+    }[dtype.name]
 
     @nb.experimental.jitclass([
         ('shape', nb.types.UniTuple(idx_type, 2)),
+        ('dtype', nb.typeof(dtype)),
         ('data', nb.types.DictType(idx_type, col_dict_type)),
     ])
     class DictArray2DClass:
-        def __init__(self, shape):
+        def __init__(self, shape, dtype):
             self.shape = shape
+            self.dtype = dtype
             self.data = nb.typed.Dict.empty(idx_type, col_dict_type)
 
         def __setitem__(self, idx, val):
-            assert False, 'overloading failed'
+            major, minor = idx
+            # array indices handled with overloaded functions
+            self.data.setdefault(major, nb.typed.Dict.empty(idx_type, nb_type))[minor] = val
+            # self.overloading_failed = True     # NOTE: overloading has failed if tried to execute this!!
 
         def __getitem__(self, idx):
             major, minor = idx
-            val = self.data.get(major, nb.typed.Dict.empty(idx_type, nb_type)).get(minor, dtype(0.0))
+            val = self.data.get(major, nb.typed.Dict.empty(idx_type, nb_type)).get(minor, self.dtype.type(0.0))
             return val
 
         def copyto(self, idx, trg):
-            assert False, 'overloading failed'
+            self.overloading_failed = True     # NOTE: overloading has failed if tried to execute this!!
+
+        def to_coo(self, rows, cols, data):
+            n = 0
+            for i, row in self.data.items():
+                for j, cell in row.items():
+                    if cell != 0.0:
+                        rows[n] = i
+                        cols[n] = j
+                        data[n] = cell
+                        n += 1
 
         def mult_with_arr(self, other):
             if other.size == 1:
@@ -123,7 +153,8 @@ def DictArray2D(shape, dtype):
                         row[j] *= other[0, j]
 
             else:
-                assert False, 'fail!'    # should do the exceptions better
+                self.wrong_shape_argument = True    # NOTE: argument `other` is wrong shape!!
+                assert False, 'fail!'               #       should do the exceptions better
 
         def isfinite(self):
             for row in self.data.values():
@@ -131,6 +162,14 @@ def DictArray2D(shape, dtype):
                     if not np.isfinite(cell):
                         return False
             return True
+
+        def nnz(self):
+            n = 0
+            for row in self.data.values():
+                for cell in row.values():
+                    if cell != 0.0:
+                        n += 1
+            return n
 
     DictArray2DType.define(DictArray2DClass.class_type.instance_type)
 
@@ -140,7 +179,7 @@ def DictArray2D(shape, dtype):
     #     nb.void(DictArray2DType, nb.types.UniTuple(nb.int32, 2), nb.float32[:]),
     #     nb.void(DictArray2DType, nb.types.Tuple((nb.int32[:], nb.int32)), nb.float32[:]),
     # ]))
-    def copyto_fn(obj, idx, trg):
+    def copyto_impl(obj, idx, trg):
         major, minor = idx
 
         def isarray(x):
@@ -149,22 +188,22 @@ def DictArray2D(shape, dtype):
         if not isarray(major) and not isarray(minor):
             def _copyto(obj, idx, trg):
                 major, minor = idx
-                trg[0] = obj.data.get(major, nb.typed.Dict.empty(idx_type, nb_type)).get(minor, dtype(0.0))
+                trg[0] = obj.data.get(major, nb.typed.Dict.empty(idx_type, nb_type)).get(minor, obj.dtype.type(0.0))
         elif isarray(major) and not isarray(minor):
             def _copyto(obj, idx, trg):
                 major, minor = idx
                 for k, i in enumerate(major):
-                    trg[k] = obj.data.get(i, nb.typed.Dict.empty(idx_type, nb_type)).get(minor, dtype(0.0))
+                    trg[k] = obj.data.get(i, nb.typed.Dict.empty(idx_type, nb_type)).get(minor, obj.dtype.type(0.0))
         elif not isarray(major) and isarray(minor):
             def _copyto(obj, idx, trg):
                 major, minor = idx
                 for k, j in enumerate(minor):
-                    trg[k] = obj.data.get(major, nb.typed.Dict.empty(idx_type, nb_type)).get(j, dtype(0.0))
+                    trg[k] = obj.data.get(major, nb.typed.Dict.empty(idx_type, nb_type)).get(j, obj.dtype.type(0.0))
         elif isarray(major) and isarray(minor):
             def _copyto(obj, idx, trg):
                 major, minor = idx
                 for k, (i, j) in enumerate(zip(major, minor)):
-                    trg[k] = obj.data.get(i, nb.typed.Dict.empty(idx_type, nb_type)).get(j, dtype(0.0))
+                    trg[k] = obj.data.get(i, nb.typed.Dict.empty(idx_type, nb_type)).get(j, obj.dtype.type(0.0))
         else:
             assert False, 'wrong types'
 
@@ -172,7 +211,7 @@ def DictArray2D(shape, dtype):
 
 
     @nb_extending.overload_method(nb.types.misc.ClassInstanceType, '__setitem__')
-    def setitem_fn(obj, idx, val):
+    def setitem_impl(obj, idx, val):
         major, minor = idx
 
         def isarray(x):
@@ -223,4 +262,4 @@ def DictArray2D(shape, dtype):
 
         return _setitem
 
-    return DictArray2DClass(shape)
+    return DictArray2DClass(shape, dtype)
