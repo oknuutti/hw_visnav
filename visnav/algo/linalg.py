@@ -142,13 +142,12 @@ def DictArray2D(shape, dtype):
         def copyto(self, idx, trg):
             assert False, 'overloaded'
 
-        def to_coo(self, rows, cols, data):
-            for k, ((i, j), cell) in enumerate(self.data.items()):
-                rows[k] = i
-                cols[k] = j
-                data[k] = cell
+        def idx_isum_arr(self, rows, cols, data):
+            for i, j, d in zip(rows, cols, data):
+                idx = (self.idx_type.type(i), self.idx_type.type(j))
+                self.data[idx] = self.data.get(idx, self.dtype.type(0.0)) + self.dtype.type(d)
 
-        def mult_with_arr(self, other):
+        def imul_arr(self, other):
             if other.size == 1:
                 for idx, cell in self.data.items():
                     self.data[idx] *= other[0, 0]
@@ -163,6 +162,12 @@ def DictArray2D(shape, dtype):
 
             else:
                 assert False, 'fail!'               #       should do the exceptions better
+
+        def to_coo(self, rows, cols, data):
+            for k, ((i, j), cell) in enumerate(self.data.items()):
+                rows[k] = i
+                cols[k] = j
+                data[k] = cell
 
         def isfinite(self):
             for cell in self.data.values():

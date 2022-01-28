@@ -860,7 +860,7 @@ if __name__ == '__main__':
         print(str(a[33, 43]))
 
 #        a.mult_with(np.ones((200, 1), dtype=np.float64) * 1/11)
-        a.mult_with_arr(np.ones((1, 1)) * 1/11)
+        a.imul_arr(np.ones((1, 1)) * 1 / 11)
 
         b = np.empty(3)
         a.copyto(([54, 66, 67], [877, 199, 202]), b)

@@ -255,7 +255,7 @@ class InnerLinearizerQR:
                 elif sp.issparse(J):
                     wJ.append(sp.diags(dwr_dr.flatten()).dot(J))
                 elif is_own_sp_mx(J):
-                    J.mult_with_arr(dwr_dr.reshape((dwr_dr.size, -1)))
+                    J.imul_arr(dwr_dr.reshape((dwr_dr.size, -1)))
                     wJ.append(J)
                 else:
                     J *= dwr_dr
@@ -421,7 +421,6 @@ class InnerLinearizerQR:
             Hpp = DictArray2D((self.nb + self.np, self.nb + self.np), dtype=self.dtype)
             self._get_Q2TJbp_T_Q2TJbp_blockdiag_lv3(self.nb, self.np, self._pose_size,
                                                     self._pose_damping, self._blocks, Hpp)
-            Hpp = own_sp_mx_to_coo(Hpp).tocsc()
         else:
             # uses way too much memory for large problems due to dense Hpp
             Hpp = self._get_Q2TJbp_T_Q2TJbp_blockdiag(self.nb, self.np, self._pose_size, self._pose_damping,
@@ -433,10 +432,18 @@ class InnerLinearizerQR:
             tmp = np.arange(len(blk.pose_idxs))
             _, _, bi, bj = self._block_indexing(tmp, tmp, self._pose_size, self._pose_size)
             _, _, i, j = self._block_indexing(blk.pose_idxs, blk.pose_idxs, self._pose_size, self._pose_size)
-            Hpp[i+self.nb, j+self.nb] += np.array(blk_Hpp[bi, bj]).flatten()
+            if is_own_sp_mx(Hpp):
+                Hpp.idx_isum_arr(i + self.nb, j + self.nb, np.array(blk_Hpp[bi, bj]).flatten())
+            else:
+                Hpp[i + self.nb, j + self.nb] += np.array(blk_Hpp[bi, bj]).flatten()
 
-        Hpp = sp.csc_matrix(Hpp) if not sp.issparse(Hpp) else Hpp.tocsc() if not sp.isspmatrix_csc(Hpp) else Hpp
-        return Hpp
+        if sp.issparse(Hpp) and sp.isspmatrix_csc(Hpp):
+            return Hpp
+        if sp.issparse(Hpp):
+            return Hpp.tocsc()
+        if is_own_sp_mx(Hpp):
+            return own_sp_mx_to_coo(Hpp).tocsc()
+        return sp.csc_matrix(Hpp)
 
     @staticmethod
     def _get_Q2TJbp_T_Q2TJbp_blockdiag_sp(n_b, n_p, psize, pose_damping, blocks, dtype):
