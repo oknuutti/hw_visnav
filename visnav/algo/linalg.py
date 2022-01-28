@@ -93,7 +93,7 @@ def own_sp_mx_to_coo(arr):
 
 
 def DictArray2D(shape, dtype):
-    DictArray2DType = nb.types.deferred_type()
+#    DictArray2DType = nb.types.deferred_type()
     dtype = np.dtype(dtype)
 
     nb_type, idx_type, col_dict_type = {
@@ -114,17 +114,17 @@ def DictArray2D(shape, dtype):
 
         def __setitem__(self, idx, val):
             major, minor = idx
-            # array indices handled with overloaded functions
+            # array indices handled with overloaded functions  (NOTE: overloading doesnt seem to work though)
             self.data.setdefault(major, nb.typed.Dict.empty(idx_type, nb_type))[minor] = val
-            # self.overloading_failed = True     # NOTE: overloading has failed if tried to execute this!!
 
         def __getitem__(self, idx):
             major, minor = idx
+            # array indices handled with copyto as had problems with returning arrays
             val = self.data.get(major, nb.typed.Dict.empty(idx_type, nb_type)).get(minor, self.dtype.type(0.0))
             return val
 
         def copyto(self, idx, trg):
-            self.overloading_failed = True     # NOTE: overloading has failed if tried to execute this!!
+            raise NotImplementedError('failed to overload __setitem__')
 
         def to_coo(self, rows, cols, data):
             n = 0
@@ -153,7 +153,6 @@ def DictArray2D(shape, dtype):
                         row[j] *= other[0, j]
 
             else:
-                self.wrong_shape_argument = True    # NOTE: argument `other` is wrong shape!!
                 assert False, 'fail!'               #       should do the exceptions better
 
         def isfinite(self):
@@ -171,9 +170,9 @@ def DictArray2D(shape, dtype):
                         n += 1
             return n
 
-    DictArray2DType.define(DictArray2DClass.class_type.instance_type)
+    # DictArray2DType.define(DictArray2DClass.class_type.instance_type)
 
-
+    # or could be DictArray2DClass.class_type.instance_type instead of nb.types.misc.ClassInstanceType?
     @nb_extending.overload_method(nb.types.misc.ClassInstanceType, 'copyto')
     #     , jitoptions=dict(signature=[
     #     nb.void(DictArray2DType, nb.types.UniTuple(nb.int32, 2), nb.float32[:]),
@@ -209,7 +208,7 @@ def DictArray2D(shape, dtype):
 
         return _copyto
 
-
+    # or could be DictArray2DClass.class_type.instance_type instead of nb.types.misc.ClassInstanceType?
     @nb_extending.overload_method(nb.types.misc.ClassInstanceType, '__setitem__')
     def setitem_impl(obj, idx, val):
         major, minor = idx

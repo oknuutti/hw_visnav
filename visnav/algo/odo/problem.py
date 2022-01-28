@@ -263,7 +263,7 @@ class Problem:
             self._J_cache = {}
         if name not in self._J_cache:
             if fmt == 'own':
-                self._J_cache[name] = DictArray2D((m, n), self.dtype)
+                self._J_cache[name] = DictArray2D((np.int32(m), np.int32(n)), self.dtype)
             else:
                 self._J_cache[name] = (np.zeros if fmt == 'dense' else sp.lil_matrix)((m, n), dtype=self.dtype)
         return self._J_cache[name]

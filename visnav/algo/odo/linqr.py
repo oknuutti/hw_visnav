@@ -412,12 +412,18 @@ class InnerLinearizerQR:
 
         # TODO: don't use dense Hpp
 
-        if NUMBA_LEVEL >= 3:
+        if 0:
+            # still too slow
+            Hpp = self._get_Q2TJbp_T_Q2TJbp_blockdiag_sp(self.nb, self.np, self._pose_size,
+                                                          self._pose_damping, self._blocks, self.dtype)
+        elif NUMBA_LEVEL >= 3:
+            # a bit slow, no extra memory used
             Hpp = DictArray2D((self.nb + self.np, self.nb + self.np), dtype=self.dtype)
             self._get_Q2TJbp_T_Q2TJbp_blockdiag_lv3(self.nb, self.np, self._pose_size,
                                                     self._pose_damping, self._blocks, Hpp)
             Hpp = own_sp_mx_to_coo(Hpp).tocsc()
         else:
+            # uses way too much memory
             Hpp = self._get_Q2TJbp_T_Q2TJbp_blockdiag(self.nb, self.np, self._pose_size, self._pose_damping,
                                                       nb.typed.List([blk.Q2T_Jbp for blk in self._blocks]),
                                                       nb.typed.List([blk.pose_idxs for blk in self._blocks]))
@@ -433,36 +439,55 @@ class InnerLinearizerQR:
         return Hpp
 
     @staticmethod
+    def _get_Q2TJbp_T_Q2TJbp_blockdiag_sp(n_b, n_p, psize, pose_damping, blocks, dtype):
+        H = sp.dok_matrix((n_b + n_p, n_b + n_p), dtype=dtype)
+
+        bj, bi = np.meshgrid(np.arange(n_b), np.arange(n_b))
+        pj, pi = np.meshgrid(np.arange(psize), np.arange(psize))
+        bj, bi, pj, pi = map(lambda x: x.flatten(), (bj, bi, pj, pi))
+
+        for blk in blocks:
+            if n_b > 0:
+                A = blk.Q2T_Jbp[:, 0:n_b]  # should copy or call np.ascontiguousarray?
+                blk_Hbb = A.T.dot(A).copy()
+                H[bi, bj] += blk_Hbb.flatten()
+
+            for j, idx in enumerate(blk.pose_idxs):
+                g0, b0 = n_b + idx * psize, n_b + j * psize
+                A = blk.Q2T_Jbp[:, b0:b0+psize].copy()
+                blk_Hpp = A.T.dot(A)
+                H[g0 + pi, g0 + pj] += blk_Hpp.flatten()
+
+        if pose_damping is not None:
+            i = np.arange(n_b + n_p, dtype=np.int32)
+            H[i, i] += dtype.type(pose_damping)
+
+        return H
+
+    @staticmethod
     @maybe_decorate(nb.njit(nogil=True, parallel=False, cache=True), NUMBA_LEVEL >= 3)
-#    @maybe_decorate(nb.jit(forceobj=True), NUMBA_LEVEL >= 3)
     def _get_Q2TJbp_T_Q2TJbp_blockdiag_lv3(_nb, _np, psize, pose_damping, blocks, H):
         for blk in blocks:
             if _nb > 0:
-                A = np.ascontiguousarray(blk.Q2T_Jbp[:, 0:_nb])   #.copy()
+                A = blk.Q2T_Jbp[:, 0:_nb].copy()
                 blk_Hbb = A.T.dot(A)
                 for i in range(_nb):
-                    i = np.int32(i)
                     for j in range(_nb):
-                        j = np.int32(j)
-                        H[i, j] = H[i, j] + blk_Hbb[i, j]
+                        H[i, j] += blk_Hbb[i, j]
 
             for j, idx in enumerate(blk.pose_idxs):
                 g0, b0 = _nb + idx * psize, _nb + j * psize
                 g1, b1 = g0 + psize, b0 + psize
-                A = np.ascontiguousarray(blk.Q2T_Jbp[:, b0:b1])   # .copy()
+                A = blk.Q2T_Jbp[:, b0:b1].copy()
                 blk_Hpp = A.T.dot(A)
                 for i, gi in enumerate(range(g0, g1)):
-                    i, gi = np.int32(i), np.int32(gi)
                     for j, gj in enumerate(range(g0, g1)):
-                        j, gj = np.int32(j), np.int32(gj)
-                        H[gi, gj] = H[gi, gj] + blk_Hpp[i, j]
+                        H[gi, gj] += blk_Hpp[i, j]
 
         if pose_damping is not None:
+            val = np.float32(pose_damping)
             for i in range(_nb + _np):
-                i = np.int32(i)
-                H[i, i] = H[i, i] + H.dtype.type(pose_damping)
-
-        return 0
+                H[i, i] += val
 
     @staticmethod
     @maybe_decorate(nb.njit(nogil=True, parallel=False, cache=True), NUMBA_LEVEL >= 1)

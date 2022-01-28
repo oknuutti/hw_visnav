@@ -10,10 +10,10 @@ from scipy.sparse import linalg as spl
 
 from visnav.algo import tools
 from visnav.algo.odo.linqr import InnerLinearizerQR
-from visnav.algo.tools import Stopwatch, MemProf
+from visnav.algo.tools import Stopwatch
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 
 @dataclass
@@ -81,7 +81,9 @@ class RootBundleAdjuster:
         self._lambda = self.ini_lambda
         self._lambda_vee = self.ini_vee
         self._linearizer = LinearizerQR(prob, **self.lin_opt)
-        tracemalloc.start()
+
+        if logger.level == logging.DEBUG:
+            tracemalloc.start()
 
         if 0 in self.max_repr_err:
             n_obs = len(prob.pts2d)
@@ -138,8 +140,9 @@ class RootBundleAdjuster:
             stats.valid = True
             return stats
 
-        logger.debug('...calling _linearizer.linearize (mem use %.1f GB, peak %.1f GB)' % (
-            *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
+        if logger.level == logging.DEBUG:
+            logger.debug('...calling _linearizer.linearize (mem use %.1f GB, peak %.1f GB)' % (
+                         *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
         self._linearizer.linearize()
 
         j = 0
@@ -161,8 +164,9 @@ class RootBundleAdjuster:
 
     def _inner_step(self, stats: IterationStats, i):
         # solve damped linear system
-        logger.debug('...calling _linearizer.solve (mem use %.1f GB, peak %.1f GB)' % (
-            *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
+        if logger.level == logging.DEBUG:
+            logger.debug('...calling _linearizer.solve (mem use %.1f GB, peak %.1f GB)' % (
+                         *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
         delta_xbp = stats.delta_xbp = self._linearizer.solve(self._lambda)
 
         if not np.all(np.isfinite(delta_xbp)):
@@ -172,20 +176,24 @@ class RootBundleAdjuster:
             stats.valid = False
             return None
 
-        logger.debug('...calling _linearizer.backup_x (mem use %.1f GB, peak %.1f GB)' % (
-            *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
+        if logger.level == logging.DEBUG:
+            logger.debug('...calling _linearizer.backup_x (mem use %.1f GB, peak %.1f GB)' % (
+                         *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
         self._linearizer.backup_x()
 
-        logger.debug('...calling _linearizer.update_x (mem use %.1f GB, peak %.1f GB)' % (
-            *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
+        if logger.level == logging.DEBUG:
+            logger.debug('...calling _linearizer.update_x (mem use %.1f GB, peak %.1f GB)' % (
+                         *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
         l_diff = self._linearizer.update_x(delta_xbp)
 
-        logger.debug('...calling _linearizer.current_cost (mem use %.1f GB, peak %.1f GB)' % (
-            *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
+        if logger.level == logging.DEBUG:
+            logger.debug('...calling _linearizer.current_cost (mem use %.1f GB, peak %.1f GB)' % (
+                         *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
         cost1 = self._linearizer.current_cost()
 
-        logger.debug('...setting stats object (mem use %.1f GB, peak %.1f GB)' % (
-            *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
+        if logger.level == logging.DEBUG:
+            logger.debug('...setting stats object (mem use %.1f GB, peak %.1f GB)' % (
+                         *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
 
         if cost1 is None:
             stats.success = False
@@ -205,19 +213,20 @@ class RootBundleAdjuster:
             # self._linearizer.finish_iter()
             if i in self.max_repr_err:
                 filtered_ratio, cost1 = self._linearizer.filter(self.max_repr_err[i])
-                logger.debug('...filtered out %.3f%% of all observations as repr err > %.0f, cost %.5f => %.5f' % (
-                    filtered_ratio * 100, self.max_repr_err[i], stats.cost, cost1))
+                logger.info('...filtered out %.3f%% of all observations as repr err > %.0f, cost %.5f => %.5f' % (
+                            filtered_ratio * 100, self.max_repr_err[i], stats.cost, cost1))
         else:
             self._lambda *= self._lambda_vee
             self._lambda_vee *= self.vee_factor
             # self._linearizer.finish_iter()
-            logger.debug('...calling _linearizer.restore_x (mem use %.1f GB, peak %.1f GB)' % (
-                *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
+            if logger.level == logging.DEBUG:
+                logger.debug('...calling _linearizer.restore_x (mem use %.1f GB, peak %.1f GB)' % (
+                             *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
 
             self._linearizer.restore_x()
-            logger.debug('...failed with: f: %.5f, df: %.5f, dl: %.5f, df/dl: %.5f => new tr: %s' % (
-                stats.cost, stats.delta_f, stats.l_diff, stats.step_quality,
-                tools.fixed_precision(1 / self._lambda, 3, True),))
+            logger.info('...failed with: f: %.5f, df: %.5f, dl: %.5f, df/dl: %.5f => new tr: %s' % (
+                        stats.cost, stats.delta_f, stats.l_diff, stats.step_quality,
+                        tools.fixed_precision(1 / self._lambda, 3, True),))
 
         return cost1
 
@@ -267,27 +276,32 @@ class LinearizerQR:
         if self.staged_execution:
             self._lqr.linearize()
 
-            logger.debug('...calling _lqr.get_Jbp_diag2 (mem use %.1f GB, peak %.1f GB)' % (
-                *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
+            if logger.level == logging.DEBUG:
+                logger.debug('...calling _lqr.get_Jbp_diag2 (mem use %.1f GB, peak %.1f GB)' % (
+                             *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
             d2 = self._lqr.get_Jbp_diag2()
 
-            logger.debug('...calling _lqr.scale_Jl_cols (mem use %.1f GB, peak %.1f GB)' % (
-                *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
+            if logger.level == logging.DEBUG:
+                logger.debug('...calling _lqr.scale_Jl_cols (mem use %.1f GB, peak %.1f GB)' % (
+                             *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
             self._lqr.scale_Jl_cols()
 
             if use_jacobi_precond:
-                logger.debug('...calling _lqr.get_Jbp_T_Jbp_blockdiag (mem use %.1f GB, peak %.1f GB)' % (
-                    *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
+                if logger.level == logging.DEBUG:
+                    logger.debug('...calling _lqr.get_Jbp_T_Jbp_blockdiag (mem use %.1f GB, peak %.1f GB)' % (
+                                 *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
                 self._precond_mx = self._lqr.get_Jbp_T_Jbp_blockdiag()
 
-            logger.debug('...calling _lqr.marginalize (mem use %.1f GB, peak %.1f GB)' % (
-                *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
+            if logger.level == logging.DEBUG:
+                logger.debug('...calling _lqr.marginalize (mem use %.1f GB, peak %.1f GB)' % (
+                             *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
             self._lqr.marginalize()
         else:
             d2 = self._lqr.get_stage1(self._precond_mx if use_jacobi_precond else None)
 
-        logger.debug('...setting _linearizer._pose_jac_scaling (mem use %.1f GB, peak %.1f GB)' % (
-            *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
+        if logger.level == logging.DEBUG:
+            logger.debug('...setting _linearizer._pose_jac_scaling (mem use %.1f GB, peak %.1f GB)' % (
+                         *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
         self._pose_jac_scaling = 1 / (self.jacobi_scaling_eps + np.sqrt(d2))
         self._new_linearization_point = True
 
@@ -304,21 +318,25 @@ class LinearizerQR:
 
         if self.staged_execution:
             if self._new_linearization_point:
-                logger.debug('...calling _lqr.scale_Jbp_cols (mem use %.1f GB, peak %.1f GB)' % (
-                    *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
+                if logger.level == logging.DEBUG:
+                    logger.debug('...calling _lqr.scale_Jbp_cols (mem use %.1f GB, peak %.1f GB)' % (
+                                 *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
                 self._lqr.scale_Jbp_cols(self._pose_jac_scaling)
 
-            logger.debug('...calling _lqr.set_landmark_damping (mem use %.1f GB, peak %.1f GB)' % (
-                *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
+            if logger.level == logging.DEBUG:
+                logger.debug('...calling _lqr.set_landmark_damping (mem use %.1f GB, peak %.1f GB)' % (
+                             *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
             self._lqr.set_landmark_damping(_lambda)
 
             if use_schur_jacobi_precond:
-                logger.debug('...calling _lqr.get_Q2TJbp_T_Q2TJbp_blockdiag (mem use %.1f GB, peak %.1f GB)' % (
-                    *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
+                if logger.level == logging.DEBUG:
+                    logger.debug('...calling _lqr.get_Q2TJbp_T_Q2TJbp_blockdiag (mem use %.1f GB, peak %.1f GB)' % (
+                                 *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
                 self._precond_mx = self._lqr.get_Q2TJbp_T_Q2TJbp_blockdiag()
 
-            logger.debug('...calling _lqr.get_Q2TJbp_T_Q2Tr (mem use %.1f GB, peak %.1f GB)' % (
-                *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
+            if logger.level == logging.DEBUG:
+                logger.debug('...calling _lqr.get_Q2TJbp_T_Q2Tr (mem use %.1f GB, peak %.1f GB)' % (
+                             *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
             b = self._lqr.get_Q2TJbp_T_Q2Tr()
         else:
             b = self._lqr.get_stage2(_lambda,
@@ -331,8 +349,9 @@ class LinearizerQR:
 
         n = self._precond_mx.shape[0]
         if self.preconditioner_type == LinearizerQR.PRECONDITIONER_TYPE_JACOBI:
-            logger.debug('...setting _lqr._precond_mx (mem use %.1f GB, peak %.1f GB)' % (
-                *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
+            if logger.level == logging.DEBUG:
+                logger.debug('...setting _lqr._precond_mx (mem use %.1f GB, peak %.1f GB)' % (
+                             *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
 
             if self._new_linearization_point:
                 self._precond_mx = self._pose_jac_scaling.dot(self._precond_mx).dot(self._pose_jac_scaling)
@@ -350,8 +369,9 @@ class LinearizerQR:
             M_x = lambda x: spl.spsolve(P, x)
             M = spl.LinearOperator((n, n), M_x, dtype=self.dtype)
         elif 1:
-            logger.debug('...creating M (mem use %.1f GB, peak %.1f GB)' % (
-                *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
+            if logger.level == logging.DEBUG:
+                logger.debug('...creating M (mem use %.1f GB, peak %.1f GB)' % (
+                             *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
 
             M_x = spl.factorized(P)
             M = spl.LinearOperator((n, n), M_x, dtype=self.dtype)
@@ -362,16 +382,18 @@ class LinearizerQR:
             Hpp = P     # precond_mx == P == Hpp (!)
         elif 1:
             # TODO: try using LinearOperator instead
-            logger.debug('...calling _lqr.get_Q2TJbp_T_Q2TJbp_blockdiag (mem use %.1f GB, peak %.1f GB)' % (
-                *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
+            if logger.level == logging.DEBUG:
+                logger.debug('...calling _lqr.get_Q2TJbp_T_Q2TJbp_blockdiag (mem use %.1f GB, peak %.1f GB)' % (
+                             *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
 
             Hpp = self._lqr.get_Q2TJbp_T_Q2TJbp_blockdiag()
         else:
             Hpp_x = lambda x: self._lqr.right_multiply(x)
             Hpp = spl.LinearOperator((n, n), Hpp_x, dtype=self.dtype)
 
-        logger.debug('...calling spl.cg (mem use %.1f GB, peak %.1f GB)' % (
-            *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
+        if logger.level == logging.DEBUG:
+            logger.debug('...calling spl.cg (mem use %.1f GB, peak %.1f GB)' % (
+                         *map(lambda x: x / 1024 / 1024 / 1024, tracemalloc.get_traced_memory()),))
 
         delta_xbp, info = spl.cg(Hpp, b, M=M, tol=self.lin_cg_tol, maxiter=self.lin_cg_maxiter)  # TODO: Hpp == P ??
 
