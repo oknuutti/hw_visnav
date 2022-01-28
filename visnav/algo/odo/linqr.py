@@ -413,17 +413,17 @@ class InnerLinearizerQR:
         # TODO: don't use dense Hpp
 
         if 0:
-            # still too slow
+            # too slow
             Hpp = self._get_Q2TJbp_T_Q2TJbp_blockdiag_sp(self.nb, self.np, self._pose_size,
-                                                          self._pose_damping, self._blocks, self.dtype)
+                                                         self._pose_damping, self._blocks, self.dtype)
         elif NUMBA_LEVEL >= 3:
-            # a bit slow, no extra memory used
+            # no extra memory used
             Hpp = DictArray2D((self.nb + self.np, self.nb + self.np), dtype=self.dtype)
             self._get_Q2TJbp_T_Q2TJbp_blockdiag_lv3(self.nb, self.np, self._pose_size,
                                                     self._pose_damping, self._blocks, Hpp)
             Hpp = own_sp_mx_to_coo(Hpp).tocsc()
         else:
-            # uses way too much memory
+            # uses way too much memory for large problems due to dense Hpp
             Hpp = self._get_Q2TJbp_T_Q2TJbp_blockdiag(self.nb, self.np, self._pose_size, self._pose_damping,
                                                       nb.typed.List([blk.Q2T_Jbp for blk in self._blocks]),
                                                       nb.typed.List([blk.pose_idxs for blk in self._blocks]))
@@ -473,7 +473,7 @@ class InnerLinearizerQR:
                 blk_Hbb = A.T.dot(A)
                 for i in range(_nb):
                     for j in range(_nb):
-                        H[i, j] += blk_Hbb[i, j]
+                        H[i, j] = H[i, j] + blk_Hbb[i, j]
 
             for j, idx in enumerate(blk.pose_idxs):
                 g0, b0 = _nb + idx * psize, _nb + j * psize
@@ -482,12 +482,12 @@ class InnerLinearizerQR:
                 blk_Hpp = A.T.dot(A)
                 for i, gi in enumerate(range(g0, g1)):
                     for j, gj in enumerate(range(g0, g1)):
-                        H[gi, gj] += blk_Hpp[i, j]
+                        H[gi, gj] = H[gi, gj] + blk_Hpp[i, j]
 
         if pose_damping is not None:
             val = np.float32(pose_damping)
             for i in range(_nb + _np):
-                H[i, i] += val
+                H[i, i] = H[i, i] + val
 
     @staticmethod
     @maybe_decorate(nb.njit(nogil=True, parallel=False, cache=True), NUMBA_LEVEL >= 1)

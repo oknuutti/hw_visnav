@@ -1,3 +1,5 @@
+import ctypes
+
 import numpy as np
 import numba as nb
 from numba import extending as nb_extending
@@ -95,80 +97,81 @@ def own_sp_mx_to_coo(arr):
 def DictArray2D(shape, dtype):
 #    DictArray2DType = nb.types.deferred_type()
     dtype = np.dtype(dtype)
-
-    nb_type, idx_type, col_dict_type = {
-        'float32': [nb.float32, nb.int32, nb.types.DictType(nb.int32, nb.float32)],
-        'float64': [nb.float64, nb.int64, nb.types.DictType(nb.int64, nb.float64)],
+    np_idx_type = {
+        'float32': np.dtype(np.int32),
+        'float64': np.dtype(np.int64),
     }[dtype.name]
+
+    nb_type, idx_type, didx_type = {
+        'float32': [nb.float32, nb.int32, nb.types.UniTuple(nb.int32, 2)],
+        'float64': [nb.float64, nb.int64, nb.types.UniTuple(nb.int64, 2)],
+    }[dtype.name]
+    dict_type = nb.types.DictType(didx_type, nb_type)
 
     @nb.experimental.jitclass([
         ('shape', nb.types.UniTuple(idx_type, 2)),
         ('dtype', nb.typeof(dtype)),
-        ('data', nb.types.DictType(idx_type, col_dict_type)),
+        ('idx_type', nb.typeof(np_idx_type)),
+        ('data', dict_type),
     ])
     class DictArray2DClass:
         def __init__(self, shape, dtype):
             self.shape = shape
             self.dtype = dtype
-            self.data = nb.typed.Dict.empty(idx_type, col_dict_type)
+            self.idx_type = np_idx_type
+            self.data = nb.typed.Dict.empty(didx_type, nb_type)
 
         def __setitem__(self, idx, val):
-            major, minor = idx
             # array indices handled with overloaded functions  (NOTE: overloading doesnt seem to work though)
-            self.data.setdefault(major, nb.typed.Dict.empty(idx_type, nb_type))[minor] = val
+
+            # NOTE: overloading doesnt seem to work when calling from nopython,
+            #       uncommenting the following assert enables overloading when calling from normal python,
+            #       however, __setitem__ then fails even for the simple indexing case when called from nopython
+            # assert False, 'overloaded'
+
+            i, j = idx
+            idx = (self.idx_type.type(i), self.idx_type.type(j))
+            self.data[idx] = val
 
         def __getitem__(self, idx):
-            major, minor = idx
             # array indices handled with copyto as had problems with returning arrays
-            val = self.data.get(major, nb.typed.Dict.empty(idx_type, nb_type)).get(minor, self.dtype.type(0.0))
-            return val
+            i, j = idx
+            idx = (self.idx_type.type(i), self.idx_type.type(j))
+            return self.data.get(idx, self.dtype.type(0.0))
 
         def copyto(self, idx, trg):
-            raise NotImplementedError('failed to overload __setitem__')
+            assert False, 'overloaded'
 
         def to_coo(self, rows, cols, data):
-            n = 0
-            for i, row in self.data.items():
-                for j, cell in row.items():
-                    if cell != 0.0:
-                        rows[n] = i
-                        cols[n] = j
-                        data[n] = cell
-                        n += 1
+            for k, ((i, j), cell) in enumerate(self.data.items()):
+                rows[k] = i
+                cols[k] = j
+                data[k] = cell
 
         def mult_with_arr(self, other):
             if other.size == 1:
-                for row in self.data.values():
-                    for key in row.keys():
-                        row[key] *= other[0, 0]
+                for idx, cell in self.data.items():
+                    self.data[idx] *= other[0, 0]
 
             elif self.shape[0] == other.shape[0]:
-                for i, row in self.data.items():
-                    for j in row.keys():
-                        row[j] *= other[i, 0]
+                for (i, j), cell in self.data.items():
+                    self.data[(i, j)] *= other[i, 0]
 
             elif self.shape[1] == other.shape[1]:
-                for row in self.data.values():
-                    for j in row.keys():
-                        row[j] *= other[0, j]
+                for (i, j), cell in self.data.items():
+                    self.data[(i, j)] *= other[j, 0]
 
             else:
                 assert False, 'fail!'               #       should do the exceptions better
 
         def isfinite(self):
-            for row in self.data.values():
-                for cell in row.values():
-                    if not np.isfinite(cell):
-                        return False
+            for cell in self.data.values():
+                if not np.isfinite(cell):
+                    return False
             return True
 
         def nnz(self):
-            n = 0
-            for row in self.data.values():
-                for cell in row.values():
-                    if cell != 0.0:
-                        n += 1
-            return n
+            return len(self.data)
 
     # DictArray2DType.define(DictArray2DClass.class_type.instance_type)
 
@@ -187,22 +190,29 @@ def DictArray2D(shape, dtype):
         if not isarray(major) and not isarray(minor):
             def _copyto(obj, idx, trg):
                 major, minor = idx
-                trg[0] = obj.data.get(major, nb.typed.Dict.empty(idx_type, nb_type)).get(minor, obj.dtype.type(0.0))
+                idx = (obj.idx_type.type(major), obj.idx_type.type(minor))
+                trg[0] = obj.data.get(idx, obj.dtype.type(0.0))
         elif isarray(major) and not isarray(minor):
             def _copyto(obj, idx, trg):
                 major, minor = idx
+                minor = obj.idx_type.type(minor)
                 for k, i in enumerate(major):
-                    trg[k] = obj.data.get(i, nb.typed.Dict.empty(idx_type, nb_type)).get(minor, obj.dtype.type(0.0))
+                    i = obj.idx_type.type(i)
+                    trg[k] = obj.data.get((i, minor), obj.dtype.type(0.0))
         elif not isarray(major) and isarray(minor):
             def _copyto(obj, idx, trg):
                 major, minor = idx
+                major = obj.idx_type.type(major)
                 for k, j in enumerate(minor):
-                    trg[k] = obj.data.get(major, nb.typed.Dict.empty(idx_type, nb_type)).get(j, obj.dtype.type(0.0))
+                    j = obj.idx_type.type(j)
+                    trg[k] = obj.data.get((major, j), obj.dtype.type(0.0))
         elif isarray(major) and isarray(minor):
             def _copyto(obj, idx, trg):
                 major, minor = idx
                 for k, (i, j) in enumerate(zip(major, minor)):
-                    trg[k] = obj.data.get(i, nb.typed.Dict.empty(idx_type, nb_type)).get(j, obj.dtype.type(0.0))
+                    i = obj.idx_type.type(i)
+                    j = obj.idx_type.type(j)
+                    trg[k] = obj.data.get((i, j), obj.dtype.type(0.0))
         else:
             assert False, 'wrong types'
 
@@ -219,43 +229,56 @@ def DictArray2D(shape, dtype):
         if not isarray(major) and not isarray(minor):
             def _setitem(obj, idx, val):
                 major, minor = idx
-                obj.data.setdefault(major, nb.typed.Dict.empty(idx_type, nb_type))[minor] = val
+                idx = (obj.idx_type.type(major), obj.idx_type.type(minor))
+                obj.data[idx] = val
 
         elif isarray(major) and not isarray(minor):
             if isarray(val):
                 def _setitem(obj, idx, val):
                     major, minor = idx
+                    minor = obj.idx_type.type(minor)
                     for k, i in enumerate(major):
-                        obj.data.setdefault(i, nb.typed.Dict.empty(idx_type, nb_type))[minor] = val[k]
+                        i = obj.idx_type.type(i)
+                        obj.data[(i, minor)] = val[k]
             else:
                 def _setitem(obj, idx, val):
                     major, minor = idx
+                    minor = obj.idx_type.type(minor)
                     for k, i in enumerate(major):
-                        obj.data.setdefault(i, nb.typed.Dict.empty(idx_type, nb_type))[minor] = val
+                        i = obj.idx_type.type(i)
+                        obj.data[(i, minor)] = val
 
         elif not isarray(major) and isarray(minor):
             if isarray(val):
                 def _setitem(obj, idx, val):
                     major, minor = idx
+                    major = obj.idx_type.type(major)
                     for k, j in enumerate(minor):
-                        obj.data.setdefault(major, nb.typed.Dict.empty(idx_type, nb_type))[j] = val[k]
+                        j = obj.idx_type.type(j)
+                        obj.data[(major, j)] = val[k]
             else:
                 def _setitem(obj, idx, val):
                     major, minor = idx
+                    major = obj.idx_type.type(major)
                     for k, j in enumerate(minor):
-                        obj.data.setdefault(major, nb.typed.Dict.empty(idx_type, nb_type))[j] = val
+                        j = obj.idx_type.type(j)
+                        obj.data[(major, j)] = val
 
         elif isarray(major) and isarray(minor):
             if isarray(val):
                 def _setitem(obj, idx, val):
                     major, minor = idx
                     for k, (i, j) in enumerate(zip(major, minor)):
-                        obj.data.setdefault(i, nb.typed.Dict.empty(idx_type, nb_type))[j] = val[k]
+                        i = obj.idx_type.type(i)
+                        j = obj.idx_type.type(j)
+                        obj.data[(i, j)] = val[k]
             else:
                 def _setitem(obj, idx, val):
                     major, minor = idx
                     for k, (i, j) in enumerate(zip(major, minor)):
-                        obj.data.setdefault(i, nb.typed.Dict.empty(idx_type, nb_type))[j] = val
+                        i = obj.idx_type.type(i)
+                        j = obj.idx_type.type(j)
+                        obj.data[(i, j)] = val
         else:
             assert False, 'wrong types'
 
