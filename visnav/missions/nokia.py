@@ -290,9 +290,9 @@ class NokiaSensor(Mission):
 
             'max_keyframes': 48,
             'ba_interval': 8,
-            'window_fifo_len': 8,
+            'window_fifo_len': 48,
             'max_ba_fun_eval': 100 * 10,
-            'loc_err_sd': np.inf if 0 else np.array([2., 2., 2.]),  # y == alt (was [2, 10, 2])
+            'loc_err_sd': np.inf if 0 else np.array([6., 6., 6.]),  # y == alt (was [2, 10, 2])
             'ori_err_sd': np.inf if 1 else math.radians(10.0),
             'min_retain_obs': 4,
 

@@ -1555,7 +1555,7 @@ class VisualOdometry:
 
     def prune_keyframes(self):
         with self._3d_map_lock:
-            if 0:
+            if self.window_fifo_len >= self.max_keyframes:
                 rem_kf_ids = [kf.id for kf in self.state.keyframes[:-self.max_keyframes]]
             else:
                 # remove all keyframes with zero active keypoints (respect protected fifo part)

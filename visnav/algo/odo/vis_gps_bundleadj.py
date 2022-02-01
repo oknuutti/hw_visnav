@@ -35,7 +35,7 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
                        px_err_sd: np.ndarray, meas_r: np.ndarray, meas_aa: np.ndarray, t_off: np.ndarray,
                        meas_idxs: np.ndarray, loc_err_sd: float, ori_err_sd: float,
                        prior_r: np.ndarray = None, prior_J: np.ndarray = None, prior_x: np.ndarray = None,
-                       prior_k: np.ndarray = None, prior_cam_idxs: np.ndarray = None,
+                       prior_k: np.ndarray = None, prior_cam_idxs: np.ndarray = None, prior_weight = 1.0,
                        marginalize_pose_idxs: np.ndarray = None, marginalize_pt3d_idxs: np.ndarray = None,
                        dtype=np.float64, px_err_weight=1,
                        n_cam_intr=0, log_writer=None, max_nfev=None, skip_pose_n=1, poses_only=False, huber_coef=False,
@@ -127,7 +127,7 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
         pose0, fixed_pt3d, pts2d, v_pts2d, K, px_err_sd, meas_r, meas_aa = map(
             lambda x: x.astype(dtype), (pose0, fixed_pt3d, pts2d, v_pts2d, K, px_err_sd, meas_r, meas_aa))
 
-    curr_prior_J, prior_x_idxs, prior_weight = None, None, 1.0
+    curr_prior_J, prior_x_idxs = None, None
     if prior_J is not None and len(prior_r) > 0:
         a = n_cams * 6
         b = a + len(meas_idxs) * (1 if ENABLE_DT_ADJ else 0)
@@ -239,7 +239,7 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
     new_prior, prior_len = (None,) * 4, 0 if prior_r is None else len(prior_r)
     if marginalize_pose_idxs is not None and (len(marginalize_pose_idxs) + len(marginalize_pt3d_idxs) + prior_len > 0):
         new_prior = marginalize(res.x, res.fun, res.jac, marginalize_pose_idxs, marginalize_pt3d_idxs,
-                                n_cams, n_pts, n_dist, n_cam_intr, meas_idxs, prior_len)
+                                n_cams, n_pts, n_dist, n_cam_intr, meas_idxs, prior_len, prior_weight)
 
     if prior_r is not None and len(prior_r) > 0:
         res.fun = res.fun[:-len(prior_r)]
@@ -931,7 +931,7 @@ def project(pts3d, poses, K, dist_coefs=None):
 
 
 def marginalize(x, r, J, marginalize_pose_idxs, marginalize_kp3d_idxs,
-                n_cams, n_pts, n_dist, n_cam_intr, measure_idxs, prior_rows):
+                n_cams, n_pts, n_dist, n_cam_intr, measure_idxs, prior_rows, prior_weight=1.0):
 
     a = n_cams * 6
     b = a + len(measure_idxs) * (1 if ENABLE_DT_ADJ else 0)
@@ -967,6 +967,9 @@ def marginalize(x, r, J, marginalize_pose_idxs, marginalize_kp3d_idxs,
     if prior_rows > 0:
         # always include all prior related rows
         J_rows[-prior_rows:] = True
+        if prior_weight != 1.0:
+            J[-prior_rows:, :] *= 1/prior_weight
+            r[-prior_rows:] *= 1/prior_weight
 
     if sp.issparse(J):
         J_cols = np.zeros((J.shape[1],), dtype=bool)
