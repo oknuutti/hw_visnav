@@ -1352,7 +1352,7 @@ class VisualOdometry:
                 # np.sqrt(np.linalg.norm(f.repr_err.get(id, 0))**2 + self.repr_err(f)**2)
                 # self.repr_err(f)
                 # np.sqrt(self.repr_err(f)**2 + self.repr_err(f, adaptive=False)**2)
-                self.repr_err(f, adaptive=False)
+                self.max_repr_err(f, adaptive=False)
             )
             for i, f in enumerate(keyframes)
                 for id, uv in (f.kps_uv if distorted else f.kps_uv_norm).items() if id in idmap

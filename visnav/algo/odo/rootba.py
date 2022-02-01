@@ -45,7 +45,7 @@ class RootBundleAdjuster:
 
     MAX_INNER_ITERS = np.inf
 
-    def __init__(self, ini_tr_rad, min_tr_rad, max_tr_rad, ini_vee, vee_factor, thread_n, max_iters, max_time,
+    def __init__(self, ini_tr_rad, min_tr_rad, max_tr_rad, ini_vee, vee_factor, n_workers, max_iters, max_time,
                  min_step_quality, xtol, rtol, ftol, max_repr_err, jacobi_scaling_eps,
                  lin_cg_maxiter, lin_cg_tol, preconditioner_type, huber_coefs, use_weighted_residuals):
         self.ini_lambda = 1 / ini_tr_rad
@@ -53,7 +53,6 @@ class RootBundleAdjuster:
         self.max_lambda = 1 / min_tr_rad
         self.ini_vee = ini_vee
         self.vee_factor = vee_factor
-        self.thread_n = thread_n
         self.max_iters = max_iters
         self.max_time = max_time
         self.min_step_quality = min_step_quality
@@ -68,6 +67,7 @@ class RootBundleAdjuster:
             preconditioner_type=preconditioner_type,
             huber_coefs=huber_coefs,
             use_weighted_residuals=use_weighted_residuals,
+            n_workers=n_workers,
         )
 
         self._timer = None
@@ -239,7 +239,7 @@ class LinearizerQR:
 
     def __init__(self, problem, jacobi_scaling_eps=0, lin_cg_maxiter=500, lin_cg_tol=1e-5,
                  preconditioner_type=PRECONDITIONER_TYPE_SCHUR_JACOBI, staged_execution=True,
-                 huber_coefs=None, use_weighted_residuals=False):
+                 huber_coefs=None, use_weighted_residuals=False, n_workers=0):
         self.problem = problem
         self.dtype = self.problem.dtype
 
@@ -255,7 +255,7 @@ class LinearizerQR:
         self._pose_jac_scaling = None
         self._new_linearization_point = True
         self._precond_mx = None                 # precond_blocks_
-        self._lqr = InnerLinearizerQR(self.problem, jacobi_scaling_eps=self.jacobi_scaling_eps,
+        self._lqr = InnerLinearizerQR(self.problem, jacobi_scaling_eps=self.jacobi_scaling_eps, n_workers=n_workers,
                                       huber_coefs=huber_coefs, use_weighted_residuals=use_weighted_residuals)
     # def start_iter(self):
     #     pass

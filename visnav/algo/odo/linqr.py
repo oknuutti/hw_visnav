@@ -1,5 +1,6 @@
 import logging
 import warnings
+import multiprocessing as mp
 
 import numpy as np
 from scipy import sparse as sp
@@ -27,7 +28,7 @@ class InnerLinearizerQR:
     ) = range(4)
 
     def __init__(self, problem, jacobi_scaling_eps=1e-5, huber_coefs=None, use_weighted_residuals=False,
-                 use_own_sp_mx=NUMBA_LEVEL >= 4):
+                 use_own_sp_mx=NUMBA_LEVEL >= 4, n_workers=0):
         self.problem = problem
         self.dtype = self.problem.dtype
         self.idx_dtype = problem.IDX_DTYPE
@@ -39,6 +40,8 @@ class InnerLinearizerQR:
         self.huber_coef_ori = huber_coefs[2]
         self.use_weighted_residuals = use_weighted_residuals
         self.use_own_sp_mx = use_own_sp_mx
+        self.n_workers = min(n_workers, mp.cpu_count() - 1)
+        # self.worker_pool = mp.Pool(self.n_workers) if self.n_workers > 1 else None
 
         self.use_valid_projections_only = True
         self._pose_damping = None
@@ -46,6 +49,7 @@ class InnerLinearizerQR:
         self._blocks = None
         self._x_block = None
         self._a_block = None
+        self._f_block = None
         self._pose_size = self.problem.pose_size
         self._pose_n = len(self.problem.poses)
         self.nb = len(self.problem.xb)
@@ -63,7 +67,8 @@ class InnerLinearizerQR:
     @property
     def non_lm_blocks(self):
         return ([self._x_block] if self._x_block is not None else []) \
-             + ([self._a_block] if self._a_block is not None else [])
+             + ([self._a_block] if self._a_block is not None else []) \
+             + ([self._f_block] if self._f_block is not None else [])
 
     @property
     def all_blocks(self):
@@ -113,6 +118,24 @@ class InnerLinearizerQR:
             self._a_block = NonLMResidualBlock( self.problem.meas_idxs, ra, Jab, Jap, psize=self._pose_size)
             self._total_error += err
 
+        if self.problem.frozen_points is not None:
+            r_idxs = np.where(self.problem.frozen_points[self.problem.pt3d_idxs])[0].astype(self.idx_dtype)
+            blk_np = len(r_idxs)
+
+            if blk_np > 0:
+                pose_idxs = self.problem.pose_idxs[r_idxs]
+
+                # indexing sparse array faster this way instead of Jl[v_i, i:i+3]
+                rr_i, _, Jrp_i, Jrp_j = self._block_indexing(r_idxs, pose_idxs, 2, self._pose_size)
+                _, _, blk_Jp_i, blk_Jp_j = self._block_indexing(np.arange(blk_np, dtype=self.idx_dtype),
+                                                                np.arange(blk_np, dtype=self.idx_dtype), 2,
+                                                                self._pose_size)
+
+                blk_rr, blk_Jrb = rr[rr_i], Jrb[r_idxs, :]
+                blk_Jrp = np.zeros((blk_np * 2, blk_np * self._pose_size), dtype=self.dtype)
+                blk_Jrp[blk_Jp_i, blk_Jp_j] = self._sp_index(Jrp, Jrp_i, Jrp_j)
+                self._f_block = NonLMResidualBlock(pose_idxs, blk_rr, blk_Jrb, blk_Jrp, psize=self._pose_size)
+
         if self._blocks is None:
             if NUMBA_LEVEL >= 3:
                 self._blocks = nb.typed.List.empty_list(ResidualBlockType, len(self.problem.valid_pts3d))
@@ -132,10 +155,13 @@ class InnerLinearizerQR:
     def _bld_lm_blks(blocks, valid_pts3d, pt3d_idxs, pose_idxs, rr, Jrb, Jrp, Jrl, idx_dtype, pose_size):
         # TODO: debug, some problem with logic present, results are poorer than previous method
         #       - However, not sure if worthwhile to fix, seems execution times are very similar
-        #       - NUMBA_LEVEL == 2-3, seems best execution time -wise, not certain about memory use
+        #       - NUMBA_LEVEL == 3, seems best execution time -wise, also ok memory use
 
         blk_i = 0
         for pt_i in np.arange(len(valid_pts3d), dtype=idx_dtype):
+            if not valid_pts3d[pt_i]:
+                continue
+
             r_idxs = np.where(pt3d_idxs == pt_i)[0].astype(idx_dtype)
             blk_pose_idxs = pose_idxs[r_idxs]
             blk_np = len(r_idxs)
@@ -174,18 +200,12 @@ class InnerLinearizerQR:
                 blk.S[i * 2 + 1, -1] = rr[ri * 2 + 1, idx_dtype(0)]
 
     def build_landmark_blocks(self, rr, Jrb, Jrp, Jrl):
-        def index(A, i, j, safe=False):
-            if is_own_sp_mx(A):
-                B = np.empty(len(i), dtype=self.dtype)
-                A.copyto((i, j), B)
-                return B
-            # safe is very slow, unsafe is dangerous as bugs won't be found
-            return A[i, j] if safe else A._get_arrayXarray(i, j)
-
         blk_i = 0
         for i in range(len(self.problem.pts3d)):
+            if not self.problem.valid_pts3d[i]:
+                continue
+
             r_idxs = np.where(self.problem.pt3d_idxs == i)[0].astype(self.idx_dtype)
-            pose_idxs = self.problem.pose_idxs[r_idxs]
             blk_np = len(r_idxs)
 
             if blk_np < 2:
@@ -194,6 +214,7 @@ class InnerLinearizerQR:
                 continue
 
             # indexing sparse array faster this way instead of Jl[v_i, i:i+3]
+            pose_idxs = self.problem.pose_idxs[r_idxs]
             _, _, Jrl_i, Jrl_j = self._block_indexing(r_idxs, np.ones((len(r_idxs),), dtype=self.idx_dtype) * i, 2, 3)
             rr_i, _, Jrp_i, Jrp_j = self._block_indexing(r_idxs, pose_idxs, 2, self._pose_size)
             _, _, blk_Jp_i, blk_Jp_j = self._block_indexing(np.arange(blk_np, dtype=self.idx_dtype),
@@ -208,17 +229,25 @@ class InnerLinearizerQR:
 
             # create landmark jacobian matrix, assign the three columns related to this landmark
             blk_Jl = np.zeros((blk_np*2, 3), dtype=self.dtype)
-            blk_Jl[:blk_np*2, :] = np.array(index(Jrl, Jrl_i, Jrl_j).reshape((-1, 3)), dtype=self.dtype)
+            blk_Jl[:blk_np*2, :] = np.array(self._sp_index(Jrl, Jrl_i, Jrl_j).reshape((-1, 3)), dtype=self.dtype)
 
             # create pose/frame jacobian matrix, assign all frames that observe this landmark
             blk_Jp = np.zeros((blk_np*2, blk_np*self._pose_size), dtype=self.dtype)
-            blk_Jp[blk_Jp_i, blk_Jp_j] = index(Jrp, Jrp_i, Jrp_j)
+            blk_Jp[blk_Jp_i, blk_Jp_j] = self._sp_index(Jrp, Jrp_i, Jrp_j)
 
             if len(self._blocks) <= blk_i:
                 m, n_b, n_p, n_l = blk_r.size, blk_Jb.shape[1], blk_Jp.shape[1], blk_Jl.shape[1]
                 self._blocks.append(ResidualBlock(r_idxs, pose_idxs, m, n_b, n_p, n_l, self._pose_size))
             self._blocks[blk_i].new_linearization_point(blk_r, blk_Jb, blk_Jp, blk_Jl)
             blk_i += 1
+
+    def _sp_index(self, A, i, j, safe=False):
+        if is_own_sp_mx(A):
+            B = np.empty(len(i), dtype=self.dtype)
+            A.copyto((i, j), B)
+            return B
+        # safe is very slow, unsafe is dangerous as bugs won't be found
+        return A[i, j] if safe else A._get_arrayXarray(i, j)
 
     @staticmethod
     def _block_indexing(row_idxs, col_idxs, block_rows, block_cols):
@@ -474,13 +503,14 @@ class InnerLinearizerQR:
     @staticmethod
     @maybe_decorate(nb.njit(nogil=True, parallel=False, cache=True), NUMBA_LEVEL >= 3)
     def _get_Q2TJbp_T_Q2TJbp_blockdiag_lv3(_nb, _np, psize, pose_damping, blocks, H):
-        for blk in blocks:
+        for k in range(len(blocks)):
+            blk = blocks[k]
             if _nb > 0:
                 A = blk.Q2T_Jbp[:, 0:_nb].copy()
                 blk_Hbb = A.T.dot(A)
                 for i in range(_nb):
                     for j in range(_nb):
-                        H[i, j] = H[i, j] + blk_Hbb[i, j]
+                        H[i, j] += blk_Hbb[i, j]
 
             for j, idx in enumerate(blk.pose_idxs):
                 g0, b0 = _nb + idx * psize, _nb + j * psize
@@ -489,12 +519,12 @@ class InnerLinearizerQR:
                 blk_Hpp = A.T.dot(A)
                 for i, gi in enumerate(range(g0, g1)):
                     for j, gj in enumerate(range(g0, g1)):
-                        H[gi, gj] = H[gi, gj] + blk_Hpp[i, j]
+                        H[gi, gj] += blk_Hpp[i, j]
 
         if pose_damping is not None:
             val = np.float32(pose_damping)
             for i in range(_nb + _np):
-                H[i, i] = H[i, i] + val
+                H[i, i] += val
 
     @staticmethod
     @maybe_decorate(nb.njit(nogil=True, parallel=False, cache=True), NUMBA_LEVEL >= 1)

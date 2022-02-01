@@ -69,9 +69,11 @@ def main():
     parser = argparse.ArgumentParser(description='Run global BA on a batch or a set of related batches')
     parser.add_argument('--path', nargs='+', required=True, help='path to folder with result.pickle and kapture-folder')
     parser.add_argument('--matches-path', type=str, help='path to across-batch feature match file')
+    parser.add_argument('--frozen-batches', nargs='+', help='path to kapture-containing folder of batches that want to freeze')
     parser.add_argument('--img-sc', default=0.5, type=float, help='image scale')
     parser.add_argument('--nadir-looking', action='store_true', help='is cam looking down? used for plots only')
     parser.add_argument('--plot', action='store_true', help='plot result')
+    parser.add_argument('--plot-only', action='store_true', help='plot initial result, exit')
     parser.add_argument('--ini-fl', type=float, help='initial value for focal length')
     parser.add_argument('--ini-cx', type=float, help='initial value for x principal point')
     parser.add_argument('--ini-cy', type=float, help='initial value for y principal point')
@@ -91,23 +93,24 @@ def main():
     parser.add_argument('--skip-fm', action='store_true', help='Skip feature matching across batches')
     parser.add_argument('--skip-ba', action='store_true', help='Skip global BA')
     parser.add_argument('--float32', action='store_true', help='use 32-bit floats instead of 64-bits')
+    parser.add_argument('--workers', type=int, default=0, help='how many worker processes to allow')
     parser.add_argument('--normalize-images', action='store_true',
                         help='After all is done, normalize images based on current camera params')
     parser.add_argument('--fe-n', type=int, default=10, help='Extract AKAZE features every n frames')
     parser.add_argument('--fe-triang-int', type=int, default=5, help='AKAZE feature triangulation interval in keyframes')
     args = parser.parse_args()
 
-    if not args.skip_fe:
+    if not args.skip_fe and not args.plot_only:
         run_fe(args)
 
-    if not args.skip_fm:
+    if not args.skip_fm and not args.plot_only:
         assert args.matches_path, 'no feature match file path given'
         run_fm(args)
 
-    if not args.skip_ba:
+    if not args.skip_ba or args.plot_only:
         run_ba(args)
 
-    if args.normalize_images:
+    if args.normalize_images and not args.plot_only:
         pass
         # TODO: (6) normalize images (and idealize cam params) so that can continue with depth estimation using depthmaps.py
 
@@ -189,7 +192,8 @@ def run_fm(args):
         return
 
     # Example values:
-    #   batch-id = 'data/output/27'
+    #   path = 'data/output/27-kapt'
+    #   batch-id = 27
     #   frame-id = 6   (for image cam/frame000006.jpg)
     #   feature-id: 4  (4th feature extracted for given frame)
     cam_params = {}  # {batch-id: cam_params, ...}
@@ -200,6 +204,13 @@ def run_fm(args):
 
     res_pts3d = []  # [[3d-point, ...], ...]
     res_obser_map = {}  # {(batch-id, frame-id, feature-id): pt3d-id, ...}  # pt3d-id is the index of list res_pts3d
+    processed_pairs = set()
+    frozen_pts3d = set()
+    if os.path.exists(args.matches_path):
+        with open(args.matches_path, 'rb') as fh:
+            res_pts3d, res_obser_map, processed_pairs = pickle.load(fh)
+        frozen_bids = list(map(path2batchid, args.frozen_batches))
+        frozen_pts3d = {pt3d_id for (bid, fid, kid), pt3d_id in res_obser_map.items() if bid in frozen_bids}
 
     img_files = {}  # for plotting only
 
@@ -207,30 +218,44 @@ def run_fm(args):
     for i, path1 in enumerate(args.path):
         for j, path2 in zip(range(i + 1, len(args.path)), args.path[i+1:]):
             k += 1
-            logger.info('Finding feature matches and doing initial triangulation for %s and %s (%d/%d)' % (
-                path1, path2, k, n*(n-1)/2))
-            find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d, res_obser_map,
-                         args.plot, img_files)
+            b1, b2 = map(path2batchid, (path1, path2))
+            if (b1, b2) in processed_pairs or (b2, b1) in processed_pairs:
+                logger.info('Already processed %s and %s (%d/%d)' % (path1, path2, k, n*(n-1)/2))
+            else:
+                logger.info('Finding feature matches and doing initial triangulation for %s and %s (%d/%d)' % (
+                    path1, path2, k, n*(n-1)/2))
+                find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d, res_obser_map,
+                             args.plot, img_files)
+                processed_pairs.add((b1, b2))
 
-    # calculate mean of each entry in res_pts3d
-    res_pts3d = np.array([np.mean(np.array(pts3d), axis=0) for pts3d in res_pts3d])
+    # calculate mean of each entry in res_pts3d, except if point observed by a frozen batch
+    res_pts3d = np.array([np.atleast_2d(np.array(pts3d))[0, :] if i in frozen_pts3d
+                          else np.mean(np.atleast_2d(np.array(pts3d)), axis=0)
+                          for i, pts3d in enumerate(res_pts3d)])
 
     # save res_pts3d, res_obser so that can use for global ba
     with open(args.matches_path, 'wb') as fh:
-        pickle.dump((res_pts3d, res_obser_map), fh)
+        pickle.dump((res_pts3d, res_obser_map, processed_pairs), fh)
+
+
+def path2batchid(path):
+    return path.split('/')[-1].split('-')[0]
 
 
 def find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d, res_obser, plot=False, img_files=None):
     # find all frames with akaze features, load poses and observations
+    bid1, bid2 = map(path2batchid, (path1, path2))
+
     for path in (path1, path2):
-        if path in cam_params:
+        bid = path2batchid(path)
+        if bid in cam_params:
             continue
 
         kapt_path = os.path.join(path, 'kapture')
         kapt = kapture_from_dir(kapt_path)
-        cam_params[path] = get_cam_params(kapt, SENSOR_NAME)
+        cam_params[bid] = get_cam_params(kapt, SENSOR_NAME)
 
-        sensor_id, cam = cam_params[path][0], cam_obj(cam_params[path])
+        sensor_id, cam = cam_params[bid][0], cam_obj(cam_params[bid])
         img2fid = dict([(fname[sensor_id], id) for id, fname in kapt.records_camera.items()])
         kp_type = kapt.keypoints[EXTRACTED_FEATURE_NAME]
         ds_type = kapt.descriptors[EXTRACTED_FEATURE_NAME]
@@ -238,27 +263,27 @@ def find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d
         for img_file in kapt.keypoints[EXTRACTED_FEATURE_NAME]:
             frame_id = img2fid[img_file]
             traj = kapt.trajectories[(frame_id, sensor_id)]
-            poses[(path, frame_id)] = Pose(traj.t, traj.r)
-            pts2d[(path, frame_id)] = cam.undistort(image_keypoints_from_file(
+            poses[(bid, frame_id)] = Pose(traj.t, traj.r)
+            pts2d[(bid, frame_id)] = cam.undistort(image_keypoints_from_file(
                 get_keypoints_fullpath(EXTRACTED_FEATURE_NAME, kapt_path, img_file), kp_type.dtype, kp_type.dsize))
-            descr[(path, frame_id)] = image_descriptors_from_file(
+            descr[(bid, frame_id)] = image_descriptors_from_file(
                 get_descriptors_fullpath(EXTRACTED_FEATURE_NAME, kapt_path, img_file), ds_type.dtype, ds_type.dsize)
 
             # {feat_id: pt3d_id, ...}
             feat_to_pt3d = {feat_id: pt3d_id
                             for pt3d_id, t in kapt.observations.items() if EXTRACTED_FEATURE_NAME in t
                             for f, feat_id in t[EXTRACTED_FEATURE_NAME] if f == img_file}
-            obser.update({(path, frame_id, feat_id): kapt.points3d[pt3d_id][:3]
+            obser.update({(bid, frame_id, feat_id): kapt.points3d[pt3d_id][:3]
                           for feat_id, pt3d_id in feat_to_pt3d.items()})
 
             if plot:
-                img_files[(path, frame_id)] = get_record_fullpath(kapt_path, img_file)
+                img_files[(bid, frame_id)] = get_record_fullpath(kapt_path, img_file)
 
     # TODO: in some distant future, find closest pose based on GFTT/AKAZE locations instead of drone location
     #       (similar to what is done in navex/datasets/preproc)
     # for each pose in batch1, find closest pose from batch2 (based on location only)
-    fids1, locs1 = zip(*[(fid, pose.loc) for (path, fid), pose in poses.items() if path == path1])
-    fids2, locs2 = zip(*[(fid, pose.loc) for (path, fid), pose in poses.items() if path == path2])
+    fids1, locs1 = zip(*[(fid, pose.loc) for (bid, fid), pose in poses.items() if bid == bid1])
+    fids2, locs2 = zip(*[(fid, pose.loc) for (bid, fid), pose in poses.items() if bid == bid2])
     tree = cKDTree(np.array(locs2))
     d, idxs2 = tree.query(locs1)
 
@@ -270,20 +295,21 @@ def find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d
             # match features, verify with 3d-2d-ransac both ways, add 3d points to list
             d = []
             for path, fid in zip((path1, path2), (fid1, fids2[idx2])):
-                cam = cam_obj(cam_params[path])
-                pts3d = np.array([obser[(path, fid, i)] for i in range(len(pts2d[(path, fid)]))])
-                d.append((cam.cam_mx, pts2d[(path, fid)], descr[(path, fid)], pts3d))
+                bid = path2batchid(path)
+                cam = cam_obj(cam_params[bid])
+                pts3d = np.array([obser[(bid, fid, i)] for i in range(len(pts2d[(bid, fid)]))])
+                d.append((cam.cam_mx, pts2d[(bid, fid)], descr[(bid, fid)], pts3d))
 
             if plot:
-                plot_matches(img_files[(path1, fid1)], img_files[(path2, fids2[idx2])],
-                             pts2d[(path1, fid1)], pts2d[(path2, fids2[idx2])], kps_only=True)
+                plot_matches(img_files[(bid1, fid1)], img_files[(bid2, fids2[idx2])],
+                             pts2d[(bid1, fid1)], pts2d[(bid2, fids2[idx2])], kps_only=True)
 
             matches1, matches2 = match_and_validate(*d[0], *d[1])
 
             if matches1 is not None:
                 for feat_id1, feat_id2 in zip(matches1, matches2):
-                    key1 = (path1, fid1, feat_id1)
-                    key2 = (path2, fids2[idx2], feat_id2)
+                    key1 = (bid1, fid1, feat_id1)
+                    key2 = (bid2, fids2[idx2], feat_id2)
                     pt3d_id = None
                     if key1 in res_obser:
                         pt3d_id = res_obser[key1]
@@ -300,7 +326,7 @@ def find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d
                 successes += 1
                 pbar.set_postfix({'successful matches': successes})
                 if plot:
-                    plot_matches(img_files[(path1, fid1)], img_files[(path2, fids2[idx2])],
+                    plot_matches(img_files[(bid1, fid1)], img_files[(bid2, fids2[idx2])],
                                  d[0][1][matches1, ...], d[1][1][matches2, ...])
 
 
@@ -313,7 +339,7 @@ def run_ba(args):
         max_tr_rad=1e16,
         ini_vee=2.0,
         vee_factor=2.0,
-        thread_n=1,
+        n_workers=args.workers,
         max_iters=args.max_iters,
         max_time=args.max_time,   # in sec
         min_step_quality=0,
@@ -339,8 +365,8 @@ def run_ba(args):
         with open(args.matches_path, 'rb') as fh:
             # [3d-point, ...]
             # {(batch-id, frame-id, feature-id): pt3d-id, ...}  # pt3d-id is the index to above list
-            akaze_pts3d, akaze_obser_map = pickle.load(fh)
-        akaze_obser_map = {(bid.split('/')[-1], fid, kid): pt3d_id for (bid, fid, kid), pt3d_id in akaze_obser_map.items()}
+            akaze_pts3d, akaze_obser_map, *_ = pickle.load(fh)
+        akaze_obser_map = {(path2batchid(bid), fid, kid): pt3d_id for (bid, fid, kid), pt3d_id in akaze_obser_map.items()}
     else:
         assert len(args.path) == 1, 'optimizing multiple batches separately not supported, please specify ' \
                                     '--matches-path for optimizing the given batches together'
@@ -351,16 +377,20 @@ def run_ba(args):
 
     for i, path in enumerate(args.path):
         with open(os.path.join(path, 'result.pickle'), 'rb') as fh:
-            orig_keyframes, *_ = pickle.load(fh)
+            orig_keyframes, map3d, frame_names, meta_names, *_ = pickle.load(fh)
         del _
+        if not args.plot_only:
+            del map3d, frame_names, meta_names
 
         kapt_path = os.path.join(path, 'kapture')
         kapt = kapture_from_dir(kapt_path)
         sensor_id, width, height, fl_x, fl_y, pp_x, pp_y, *dist_coefs = get_cam_params(kapt, SENSOR_NAME)
         arr_kapt.append((kapt, width, height))
 
-        if DEBUG and 1:
+        if args.plot_only:
+            plot_results(orig_keyframes, map3d, frame_names, meta_names, nadir_looking=args.nadir_looking)
             replay_kapt(kapt_path, kapt)
+            continue
 
         if args.ini_fl:
             fl_x = fl_y = args.ini_fl * args.img_sc
@@ -413,18 +443,25 @@ def run_ba(args):
         arr_meas_idxs.append(_meas_idxs)
         arr_akaze_obser.append(akaze_obser)
         arr_frames.append(frames)
-        batch_ids.append(path.split('/')[-1])
+        batch_ids.append(path2batchid(path))
 
-    pts2d, batch_idxs, cam_params, cam_param_idxs, poses, pose_idxs, pts3d, pt3d_idxs, pt3d_gftt_n, meas_r, meas_aa, meas_idxs = \
-            join_batches(arr_pts2d, arr_cam_params, arr_cam_param_idxs, arr_poses, arr_pose_idxs, arr_pts3d,
-                         arr_pt3d_idxs, arr_meas_r, arr_meas_aa, arr_meas_idxs, arr_akaze_obser, arr_frames,
-                         batch_ids, akaze_pts3d, akaze_obser_map)
+    if args.plot_only:
+        exit()
+
+    frozen_batches = [path2batchid(path) for path in args.frozen_batches]
+
+    pts2d, batch_idxs, cam_params, cam_param_idxs, poses, pose_idxs, pts3d, pt3d_idxs, frozen_points, pt3d_gftt_n, \
+            meas_r, meas_aa, meas_idxs = join_batches(arr_pts2d, arr_cam_params, arr_cam_param_idxs, arr_poses,
+                                                      arr_pose_idxs, arr_pts3d, arr_pt3d_idxs, arr_meas_r, arr_meas_aa,
+                                                      arr_meas_idxs, arr_akaze_obser, arr_frames, batch_ids,
+                                                      akaze_pts3d, akaze_obser_map, frozen_batches)
 
     del arr_pts2d, arr_cam_params, arr_cam_param_idxs, arr_poses, arr_pose_idxs, arr_pts3d, arr_pt3d_idxs, arr_meas_r, \
         arr_meas_aa, arr_meas_idxs, arr_akaze_obser, arr_frames, batch_ids, akaze_pts3d, akaze_obser_map
 
-    problem = Problem(pts2d, batch_idxs, cam_params, cam_param_idxs, poses, pose_idxs, pts3d, pt3d_idxs, meas_r, meas_aa,
-                      meas_idxs, PX_ERR_SD, LOC_ERR_SD, ORI_ERR_SD, dtype=np.float32 if args.float32 else np.float64)
+    problem = Problem(pts2d, batch_idxs, cam_params, cam_param_idxs, poses, pose_idxs, pts3d, pt3d_idxs, frozen_points,
+                      meas_r, meas_aa, meas_idxs, PX_ERR_SD, LOC_ERR_SD, ORI_ERR_SD,
+                      dtype=np.float32 if args.float32 else np.float64)
 
     del pts2d, batch_idxs, cam_params, cam_param_idxs, poses, pose_idxs, pts3d, pt3d_idxs, meas_r, meas_aa, meas_idxs
 
@@ -532,7 +569,8 @@ def save_and_plot(problem, args, arr_kapt, pt3d_gftt_n, log=False, save=False, p
             keyframes = keyframes[:len(poses)]
             for j, pose in enumerate(poses):
                 keyframes[j]['pose'].post = pose
-            map3d = [Keypoint(pt3d=pts3d[j, :]) for j in range(len(pts3d))]
+            map3d = [(setattr(map3d[j], 'pt3d', pts3d[j, :]) or map3d[j]) if len(map3d) > j
+                     else Keypoint(pt3d=pts3d[j, :]) for j in range(len(pts3d))]
 
         if save:
             with open(os.path.join(path, 'ba-result.pickle'), 'wb') as fh:
@@ -547,9 +585,9 @@ def save_and_plot(problem, args, arr_kapt, pt3d_gftt_n, log=False, save=False, p
     if save:
         # update joint-obs.pickle with new 3d-points
         with open(args.matches_path, 'rb') as fh:
-            _, akaze_obser_map = pickle.load(fh)
+            _, akaze_obser_map, processed_pairs = pickle.load(fh)
         with open(args.matches_path, 'wb') as fh:
-            pickle.dump((all_pts3d[pt3d_gftt_n:], akaze_obser_map), fh)
+            pickle.dump((all_pts3d[pt3d_gftt_n:], akaze_obser_map, processed_pairs), fh)
 
 
 #@profile
@@ -726,10 +764,9 @@ def match_and_validate(cam_mx1, kps1, descr1, pts3d1, cam_mx2, kps2, descr2, pts
     return (*zip(*[[m.queryIdx, m.trainIdx] for m in matches[list(inliers)]]),)
 
 
-#@profile
 def join_batches(arr_pts2d, arr_cam_params, arr_cam_param_idxs, arr_poses, arr_pose_idxs, arr_pts3d, arr_pt3d_idxs,
                  arr_meas_r, arr_meas_aa, arr_meas_idxs, arr_akaze_obser, arr_frames, batch_ids,
-                 akaze_pts3d=None, akaze_obser_map=None):
+                 akaze_pts3d=None, akaze_obser_map=None, frozen_batches=None):
 
     assert len(arr_pts2d) == len(arr_cam_params) == len(arr_cam_param_idxs) == len(arr_poses) == len(arr_pose_idxs) \
            == len(arr_pts3d) == len(arr_pt3d_idxs) == len(arr_meas_r) == len(arr_meas_aa) == len(arr_meas_idxs), \
@@ -759,6 +796,7 @@ def join_batches(arr_pts2d, arr_cam_params, arr_cam_param_idxs, arr_poses, arr_p
         _batch_idxs = np.zeros((len(akaze_obser_map),), dtype=int)
         _pose_idxs = np.zeros((len(akaze_obser_map),), dtype=int)
         _pt3d_idxs = np.zeros((len(akaze_obser_map),), dtype=int)
+        frozen_points = np.zeros((pt3d_count + len(akaze_pts3d),), dtype=bool) if frozen_batches else None
         i = 0
         for (batch_id, frame_id, feature_id), id_pt3d in akaze_obser_map.items():
             if batch_id in bid2idx:
@@ -768,6 +806,8 @@ def join_batches(arr_pts2d, arr_cam_params, arr_cam_param_idxs, arr_poses, arr_p
                 _pose_idxs[i] = fid2idx[bi][frame_id] + pose_counts[bi]
                 _pt3d_idxs[i] = id_pt3d + pt3d_count
                 i += 1
+            if frozen_batches and batch_id in frozen_batches:
+                frozen_points[id_pt3d + pt3d_count] = True
 
         arr_pts2d.append(_pts2d[:i, :])
         batch_idxs.append(_batch_idxs[:i])
@@ -779,8 +819,8 @@ def join_batches(arr_pts2d, arr_cam_params, arr_cam_param_idxs, arr_poses, arr_p
         lambda x: None if np.any([k is None for k in x]) else np.concatenate(x, axis=0),
         (arr_pts2d, batch_idxs, arr_poses, pose_idxs, arr_pts3d, pt3d_idxs, arr_meas_r, arr_meas_aa, meas_idxs))
 
-    return pts2d, batch_idxs, arr_cam_params, arr_cam_param_idxs, poses, pose_idxs, pts3d, pt3d_idxs, pt3d_count, \
-           meas_r, meas_aa, meas_idxs
+    return pts2d, batch_idxs, arr_cam_params, arr_cam_param_idxs, poses, pose_idxs, pts3d, pt3d_idxs, frozen_points, \
+           pt3d_count, meas_r, meas_aa, meas_idxs
 
 
 def plot_matches(img_path1, img_path2, kps1, kps2, kps_only=False):
@@ -804,7 +844,7 @@ def replay_probem(img_paths: List[str], p: Problem):
     replay(img_paths, p.pts2d, p.cam_params, p.poses, p.pose_idxs, p.pts3d, p.pt3d_idxs)
 
 
-def replay_kapt(kapt_path: str, kapt: Kapture = None):
+def replay_kapt(kapt_path: str, kapt: Kapture = None, frame_ids=None):
     if kapt is None:
         kapt = kapture_from_dir(kapt_path)
     cam_params = get_cam_params(kapt, SENSOR_NAME)
@@ -835,7 +875,7 @@ def replay(img_paths, pts2d, cam_params, poses, pose_idxs, pts3d, pt3d_idxs, fra
 
         q_cf = tools.angleaxis_to_q(pose[:3])
         pts3d_cf = tools.q_times_mx(q_cf, p_pts3d) + pose[3:]
-        pts2d_proj = (cam.project(pts3d_cf.astype(np.float32)) + 0.5).astype(int)
+        pts2d_proj = np.atleast_2d(cam.project(pts3d_cf.astype(np.float32)) + 0.5).astype(int)
 
         for (x, y), (xp, yp) in zip(p_pts2d, pts2d_proj):
             image = cv2.circle(image, (x, y), kp_size, kp_color, 1)   # negative thickness => filled circle
@@ -843,9 +883,17 @@ def replay(img_paths, pts2d, cam_params, poses, pose_idxs, pts3d, pt3d_idxs, fra
             image = cv2.line(image, (xp, yp), (x, y), kp_color, 1)
 
         cv2.imshow('keypoint reprojection', image)
+
+        frame_id = None
         if frame_ids is not None:
-            cv2.setWindowTitle('keypoint reprojection', 'frame #%d' % frame_ids[i])
-        cv2.waitKey()
+            frame_id = frame_ids[i]
+        elif isinstance(img_path, str):
+            frame_id = img_path.split('/')[-1].split('.')[0]
+
+        if frame_id is not None:
+            cv2.setWindowTitle('keypoint reprojection', 'frame %s' % frame_id)
+        if cv2.waitKey() == 27:   # if esc, stop replay, otherwise new frame
+            break
 
 
 if __name__ == '__main__':

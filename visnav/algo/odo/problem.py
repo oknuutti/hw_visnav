@@ -5,8 +5,6 @@ import numpy as np
 import quaternion
 from scipy import sparse as sp
 
-#from memory_profiler import profile
-
 from visnav.algo import tools
 from visnav.algo.linalg import DictArray2D, is_own_sp_mx
 from visnav.algo.tools import Manifold
@@ -18,9 +16,8 @@ logger.setLevel(logging.DEBUG)
 class Problem:
     IDX_DTYPE = np.int32
 
-    #@profile
-    def __init__(self, pts2d, batch_idxs, cam_params, cam_param_idxs, poses, pose_idxs, pts3d, pt3d_idxs, meas_r, meas_aa,
-                 meas_idxs, px_err_sd, loc_err_sd, ori_err_sd, dtype):
+    def __init__(self, pts2d, batch_idxs, cam_params, cam_param_idxs, poses, pose_idxs, pts3d, pt3d_idxs, frozen_points,
+                 meas_r, meas_aa, meas_idxs, px_err_sd, loc_err_sd, ori_err_sd, dtype):
 
         self.pts2d = pts2d.astype(dtype)
 
@@ -34,7 +31,12 @@ class Problem:
 
         self.pts3d = pts3d.astype(dtype)
         self.pt3d_idxs = pt3d_idxs.astype(Problem.IDX_DTYPE)
-        self.valid_pts3d = np.ones((len(self.pts3d),), dtype=bool)
+        self.valid_pts3d = np.ones((len(self.pts3d),), dtype=bool) if frozen_points is None else \
+                           np.logical_not(frozen_points)
+        self.frozen_points = frozen_points
+        assert self.valid_pts3d.shape[0] == self.pts3d.shape[0], 'pts3d and valid_points needs to be same length'
+
+        # TODO: excluding frozen points not enough, need to use the residuals and related jacobian rows
 
         self.meas_r = np.array([], dtype=dtype) if meas_r is None else meas_r.astype(dtype)
         self.meas_aa = np.array([], dtype=dtype) if meas_aa is None else meas_aa.astype(dtype)
@@ -119,7 +121,6 @@ class Problem:
         self.cache = None
         return np.where(np.logical_not(I))[0]
 
-    #@profile
     def residual(self, parts=False):
         self.maybe_populate_cache()
         errs = [self.residual_repr()]
@@ -129,7 +130,6 @@ class Problem:
             errs.append(self.residual_ori())
         return errs if parts else np.concatenate(errs, axis=0)
 
-    #@profile
     def jacobian(self, parts=False, r_fmt=('dense', 'csr', 'csr'), m_fmt=('dense', 'csr')):
         self.maybe_populate_cache()
 
@@ -176,7 +176,6 @@ class Problem:
         self.cache = None
         self._cached_repr_err = None
 
-    #@profile
     def maybe_populate_cache(self):
         if self.cache is not None:
             return
