@@ -645,7 +645,10 @@ class VisualOdometry:
             ids, old_kp2d, old_kp2d_norm = list(map(np.array, zip(*tmp) if len(tmp) > 0 else ([], [], [])))
             dt_arr = np.ones((len(ids),)) * (nf.time - lf.time).total_seconds()
 
-            new_kp2d, mask, err = cv2.calcOpticalFlowPyrLK(lf.image, nf.image, old_kp2d, None, **self.lk_params)
+            if len(old_kp2d) > 0:
+                new_kp2d, mask, err = cv2.calcOpticalFlowPyrLK(lf.image, nf.image, old_kp2d, None, **self.lk_params)
+            else:
+                new_kp2d, mask = map(np.array, ([], []))
 
             if self.refine_kp_uv and np.sum(mask) > 0:
                 new_kp2d, mask = self.refine_gftt(new_frame, new_kp2d, mask)

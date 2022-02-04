@@ -582,7 +582,7 @@ def save_and_plot(problem, args, arr_kapt, pt3d_gftt_n, log=False, save=False, p
         if plot:
             plot_results(keyframes, map3d, frame_names, meta_names, nadir_looking=args.nadir_looking)
 
-    if save:
+    if save and args.matches_path:
         # update joint-obs.pickle with new 3d-points
         with open(args.matches_path, 'rb') as fh:
             _, akaze_obser_map, processed_pairs = pickle.load(fh)
