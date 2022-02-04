@@ -139,8 +139,16 @@ def main():
                     est_w2c_bf_q = (-nf.pose.post).to_global(mission.b2c).quat
                     meas_w2c_bf_q = (-nf.pose.prior).to_global(mission.b2c).quat * mission.odo.ori_off_q.conj()
                     new_ori_off_q = meas_w2c_bf_q.conj() * est_w2c_bf_q
-                    mission.odo.ori_off_q = tools.mean_q([mission.odo.ori_off_q, new_ori_off_q], [0.9, 0.1])
+                    filtered_ori_off_q = tools.mean_q([mission.odo.ori_off_q, new_ori_off_q], [0.8, 0.2])
+                    if 0:
+                        # TODO: debug, something wrong here as roll and pitch explode
+                        mission.odo.ori_off_q = filtered_ori_off_q
+                    else:
+                        y, p, r = tools.q_to_ypr(filtered_ori_off_q)
+                        mission.odo.ori_off_q = tools.ypr_to_q(y, 0, 0)
                     ori_offs.append(mission.odo.ori_off_q)
+                    logger.info('new gimbal offset: %s' % (
+                        list(map(lambda x: round(math.degrees(x), 2), tools.q_to_ypr(mission.odo.ori_off_q))),))
 
                 pts3d = np.array([pt.pt3d for pt in mission.odo.state.map3d.values() if pt.active])
                 if len(pts3d) > 0 and nf.pose.post:

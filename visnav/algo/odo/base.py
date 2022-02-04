@@ -182,13 +182,13 @@ class VisualOdometry:
     DEF_ROT_SDS = np.ones(3) * 1e-2
 
     # keyframe addition
-    DEF_NEW_KF_MIN_INLIER_RATIO = 0.70             # remaining inliers from previous keyframe features
+    DEF_NEW_KF_MIN_KP_RATIO = 0.70                 # remaining inliers from previous keyframe features
     DEF_NEW_KF_MIN_DISPL_FOV_RATIO = 0.008         # displacement relative to the fov for triangulation
     DEF_NEW_KF_TRIANGULATION_TRIGGER_RATIO = 0.2   # ratio of 2d points tracked that can be triangulated
     DEF_INI_KF_TRIANGULATION_TRIGGER = 20          # need at least this qty of 2d points that can be tri. for first kf
-    DEF_NEW_KF_TRANS_KP3D_ANGLE = math.radians(3)  # change in viewpoint relative to a 3d point
-    DEF_NEW_KF_TRANS_KP3D_RATIO = 0.15             # ratio of 3d points with significant viewpoint change
-    DEF_NEW_KF_ROT_ANGLE = math.radians(5)        # new keyframe if orientation changed by this much
+    DEF_NEW_KF_MIN_KP_DISPL = 0.04                 # change in viewpoint relative to a 3d point
+    DEF_NEW_KF_KP_DISPL_RATIO = 0.15               # ratio of 3d points with significant viewpoint change
+    DEF_NEW_KF_ROT_ANGLE = math.radians(5)         # new keyframe if orientation changed by this much
     DEF_REPR_ERR_FOV_RATIO = 0.0005                # expected reprojection error (related to DEF_NEW_KF_MIN_DISPL_FOV_RATIO)
     DEF_MAX_REPR_ERR_FOV_RATIO = 0.003             # max tolerable reprojection error (related to DEF_NEW_KF_MIN_DISPL_FOV_RATIO)
     DEF_KF_BIAS_SDS = np.ones(6) * 5e-4            # bias drift sds, x, y, z, then so3
@@ -1067,8 +1067,8 @@ class VisualOdometry:
         #        and len(self.triangulation_kps(nf)) > self.ini_kf_triangulation_trigger
 
         #   a) should detect new feats as old ones don't work
-        if len(nf.kps_uv)/rf.ini_kp_count < self.new_kf_min_inlier_ratio:
-            logger.debug('new kf: too few feats')
+        if len(nf.kps_uv)/self.max_keypoints < self.new_kf_min_kp_ratio:
+            logger.debug('new kf: too few keypoints')
             return True
 
         #   b) orientation changed significantly
@@ -1079,16 +1079,22 @@ class VisualOdometry:
         #   d) viewpoint changed for many 3d points
         if self.use_ba \
                 and len(self.state.map3d) > 0 \
-                and len(self.viewpoint_changed_kps(nf))/len(self.state.map3d) > self.new_kf_trans_kp3d_ratio:
+                and len(self.viewpoint_changed_kps(nf))/len(nf.kps_uv) > self.new_kf_kp_displ_ratio:
             logger.debug('new kf: viewpoint change')
             return True
 
         #   e) can triangulate many 2d points
         if len(self.state.map2d) > 0 and self.state.first_result_given:
-            k, n = len(self.triangulation_kps(nf)), len(self.state.map2d)
             actives = len([pt for pt in self.state.map3d.values() if pt.inlier_count > 0 and pt.active])
-            if k > 0 and (k / n > self.new_kf_triangulation_trigger_ratio or actives < self.min_inliers * 2):
-                logger.debug('new kf: triangulation %.0f%% (%d/%d)' % (100 * k/n, k, n))
+            if self.new_kf_triangulation_trigger_ratio < 1.0 or actives < self.min_inliers * 2:
+                k, n = len(self.triangulation_kps(nf)), len(self.state.map2d)
+                if k > 0 and (k / n > self.new_kf_triangulation_trigger_ratio or actives < self.min_inliers * 2):
+                    logger.debug('new kf: triangulation %.0f%% (%d/%d)' % (100 * k/n, k, n))
+                    return True
+                elif actives < self.min_inliers * 2:
+                    logger.debug('loosing track soon: only %d active 3d points, cannot triangulate more' % (actives,))
+        elif len(self.state.map2d) >= self.ini_kf_triangulation_trigger and not self.state.first_result_given:
+            if len(self.triangulation_kps(nf)) >= self.ini_kf_triangulation_trigger:
                 return True
 
         logger.debug('no new kf')
@@ -1119,9 +1125,10 @@ class VisualOdometry:
             return kpset
 
         # TODO: do as a configuration param, change also at sanity_check_pt3d/
-        max_repr_err_mult = 3.0
-
-        if (new_frame.repr_err_sd or 0) > self.repr_err(new_frame, adaptive=False) * max_repr_err_mult:
+        max_repr_err_mult = 4.0
+        max_repr_err = self.repr_err(new_frame, adaptive=False) * max_repr_err_mult
+        if (new_frame.repr_err_sd or 0) > max_repr_err:
+            logger.debug('frame repr err too high for triangulation (%.2f > %.2f)' % (new_frame.repr_err_sd, max_repr_err))
             return {}
 
         n = len(self.state.keyframes)
@@ -1166,14 +1173,18 @@ class VisualOdometry:
 
         ref_frame = self.state.keyframes[-1]
 
-        tmp = [(id, self.state.map3d[id].pt3d)
-               for id, uv in new_frame.kps_uv.items()
-               if id in self.state.map3d]
-        ids, pts3d = list(map(np.array, zip(*tmp) if len(tmp) > 0 else ([], [])))
-        #pts3d = np.array(pts3d).reshape(-1, 3)
-        dloc = (new_frame.pose.any.loc - ref_frame.pose.any.loc).reshape(1, 3)
-        da = tools.angle_between_rows(pts3d, pts3d + dloc)
-        kpset = set(ids[da > self.new_kf_trans_kp3d_angle])
+        tmp = [(id, uv, ref_frame.kps_uv_norm[id])
+               for id, uv in new_frame.kps_uv_norm.items()
+               if id in ref_frame.kps_uv_norm]
+        ids, n_uv_arr, r_uv_arr = list(map(np.array, zip(*tmp) if len(tmp) > 0 else ([], [], [])))
+        p_uvs = tools.q_times_img_coords(new_frame.pose.any.quat * ref_frame.pose.post.quat.conj(),
+                                         r_uv_arr.squeeze(), self.cam, opengl=False, distort=False)
+        displ = np.linalg.norm(p_uvs - n_uv_arr.squeeze(), axis=1)
+        fov_d = np.linalg.norm(np.array(new_frame.image.shape) / new_frame.img_sc)
+        rel_displ = displ / fov_d
+        kpset = set(ids[rel_displ > self.new_kf_min_kp_displ])
+        logger.debug('avg kp displ: %.3f, over lim: %.1f%%' % (np.mean(rel_displ),
+                                                               100*np.mean(rel_displ > self.new_kf_min_kp_displ)))
 
         self.cache['viewpoint_changed_kps'] = kpset
         return kpset

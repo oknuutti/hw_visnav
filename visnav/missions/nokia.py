@@ -285,11 +285,18 @@ class NokiaSensor(Mission):
             'use_3d2d_ransac': False,
             'opt_init_ransac': False,
             # 'est_3d2d_iter_count': 10000,
-            'new_kf_min_displ_fov_ratio': 0.016,
             'ini_kf_triangulation_trigger': 40,
 
+            'new_kf_min_kp_ratio': 0.80,                    # remaining inliers from previous keyframe features
+            'new_kf_min_displ_fov_ratio': 0.016,            # displacement relative to the fov for triangulation
+            'new_kf_triangulation_trigger_ratio': 1.01 if 1 else 0.1,     # ratio of 2d points tracked that can be triangulated
+            'new_kf_rot_angle': math.radians(10),           # new keyframe if orientation changed by this much
+            'new_kf_min_kp_displ': 0.032,                    # fov relative displacement for significant viewpoint change
+            'new_kf_kp_displ_ratio': 0.2,                   # new keyframe if ratio of keypoints with
+                                                            # significant viewpoint change surpasses this
+
             'max_keyframes': 48,
-            'ba_interval': 8,
+            'ba_interval': 3,
             'window_fifo_len': 48,
             'max_ba_fun_eval': 100 * 10,
             'loc_err_sd': np.inf if 0 else np.array([6., 6., 6.]),  # y == alt (was [2, 10, 2])

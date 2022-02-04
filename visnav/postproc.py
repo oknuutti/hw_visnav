@@ -209,7 +209,7 @@ def run_fm(args):
     if os.path.exists(args.matches_path):
         with open(args.matches_path, 'rb') as fh:
             res_pts3d, res_obser_map, processed_pairs = pickle.load(fh)
-        frozen_bids = list(map(path2batchid, args.frozen_batches))
+        frozen_bids = list(map(path2batchid, args.frozen_batches or []))
         frozen_pts3d = {pt3d_id for (bid, fid, kid), pt3d_id in res_obser_map.items() if bid in frozen_bids}
 
     img_files = {}  # for plotting only
@@ -448,7 +448,7 @@ def run_ba(args):
     if args.plot_only:
         exit()
 
-    frozen_batches = [path2batchid(path) for path in args.frozen_batches]
+    frozen_batches = [path2batchid(path) for path in (args.frozen_batches or [])]
 
     pts2d, batch_idxs, cam_params, cam_param_idxs, poses, pose_idxs, pts3d, pt3d_idxs, frozen_points, pt3d_gftt_n, \
             meas_r, meas_aa, meas_idxs = join_batches(arr_pts2d, arr_cam_params, arr_cam_param_idxs, arr_poses,

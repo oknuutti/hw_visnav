@@ -98,9 +98,33 @@ class VisualGPSNav(VisualOdometry):
             super(VisualGPSNav, self).initialize_track(new_frame)
 
     def is_new_keyframe(self, new_frame):
-        if new_frame.measure and new_frame.pose.post:
-            return True
-        return super(VisualGPSNav, self).is_new_keyframe(new_frame)
+        if not new_frame.pose.post:
+            return False
+
+        # Favour keyframes with gps measurements.
+        # However, if really needed, allow a new keyframe even without a gps measurement.
+        # If all_meas is true, include all gps measurements in keyframes
+        all_meas = False
+
+        if new_frame.measure:
+            if all_meas:
+                is_new_kf = True
+                logger.debug('new kf: new gps measure')
+            else:
+                is_new_kf = None
+        elif not self.state.first_result_given:
+            is_new_kf = False
+        elif len(new_frame.kps_uv) / self.max_keypoints < self.new_kf_min_kp_ratio * 0.8:
+            is_new_kf = True
+            logger.debug('new kf: too few keypoints, no gps measure')
+        elif len([pt for pt in self.state.map3d.values() if pt.inlier_count > 0 and pt.active]) < self.min_inliers * 2:
+            is_new_kf = len(self.triangulation_kps(new_frame)) > 0
+            if is_new_kf:
+                logger.debug('new kf: active 3d points < 2 x min_inliers, no gps measure')
+        else:
+            is_new_kf = False
+
+        return super(VisualGPSNav, self).is_new_keyframe(new_frame) if is_new_kf is None else is_new_kf
 
     def solve_2d2d(self, ref_frame, new_frame, use_prior=False):
         if 1 and (ref_frame.measure is None or new_frame.measure is None):
