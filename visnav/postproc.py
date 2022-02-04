@@ -772,7 +772,7 @@ def join_batches(arr_pts2d, arr_cam_params, arr_cam_param_idxs, arr_poses, arr_p
            == len(arr_pts3d) == len(arr_pt3d_idxs) == len(arr_meas_r) == len(arr_meas_aa) == len(arr_meas_idxs), \
            'not all parameters are of same length'
 
-    batch_idxs, pose_idxs, pt3d_idxs, meas_idxs = [], [], [], []
+    batch_idxs, pose_idxs, pt3d_idxs, meas_idxs, frozen_points = [], [], [], [], None
 
     pt3d_count = 0
     pose_count, pose_counts = 0, []
