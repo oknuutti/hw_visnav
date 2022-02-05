@@ -220,12 +220,10 @@ def run_fm(args):
             k += 1
             b1, b2 = map(path2batchid, (path1, path2))
             if (b1, b2) in processed_pairs or (b2, b1) in processed_pairs:
-                logger.info('Already processed %s and %s (%d/%d)' % (path1, path2, k, n*(n-1)/2))
+                logger.info('Already processed %s and %s (%d/%d)' % (b1, b2, k, n*(n-1)/2))
             else:
-                logger.info('Finding feature matches and doing initial triangulation for %s and %s (%d/%d)' % (
-                    path1, path2, k, n*(n-1)/2))
                 find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d, res_obser_map,
-                             args.plot, img_files)
+                             args.plot, img_files, desc='Processing %s and %s (%d/%d)' % (b1, b2, k, n*(n-1)/2))
                 processed_pairs.add((b1, b2))
 
     # calculate mean of each entry in res_pts3d, except if point observed by a frozen batch
@@ -242,7 +240,8 @@ def path2batchid(path):
     return path.split('/')[-1].split('-')[0]
 
 
-def find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d, res_obser, plot=False, img_files=None):
+def find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d, res_obser, plot=False,
+                 img_files=None, desc=None):
     # find all frames with akaze features, load poses and observations
     bid1, bid2 = map(path2batchid, (path1, path2))
 
@@ -289,7 +288,7 @@ def find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d
 
     # loop through matched frames
     successes = 0
-    pbar = tqdm(zip(fids1, idxs2), total=len(fids1))
+    pbar = tqdm(zip(fids1, idxs2), total=len(fids1), desc=desc)
     for fid1, idx2 in pbar:
         if idx2 < len(fids2):
             # match features, verify with 3d-2d-ransac both ways, add 3d points to list
