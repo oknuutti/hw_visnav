@@ -93,11 +93,13 @@ def main():
     parser.add_argument('--skip-fm', action='store_true', help='Skip feature matching across batches')
     parser.add_argument('--skip-ba', action='store_true', help='Skip global BA')
     parser.add_argument('--float32', action='store_true', help='use 32-bit floats instead of 64-bits')
+    parser.add_argument('--filter', type=float, help='filter out observations with repr err larger than this')
     parser.add_argument('--workers', type=int, default=0, help='how many worker processes to allow')
     parser.add_argument('--normalize-images', action='store_true',
                         help='After all is done, normalize images based on current camera params')
     parser.add_argument('--fe-n', type=int, default=10, help='Extract AKAZE features every n frames')
     parser.add_argument('--fe-triang-int', type=int, default=5, help='AKAZE feature triangulation interval in keyframes')
+    parser.add_argument('--feature-name', default=EXTRACTED_FEATURE_NAME, choices=('akaze', 'r2d2'), help='what features to extract')
     args = parser.parse_args()
 
     if not args.skip_fe and not args.plot_only:
@@ -126,16 +128,16 @@ def run_fe(args):
         if kapt.descriptors is None:
             kapt.descriptors = {}
 
-        if EXTRACTED_FEATURE_NAME in kapt.keypoints:
+        if args.feature_name in kapt.keypoints:
             # remove all previous features of same type
-            for img_file in kapt.keypoints[EXTRACTED_FEATURE_NAME]:
-                os.unlink(get_keypoints_fullpath(EXTRACTED_FEATURE_NAME, kapt_path, img_file))
-                os.unlink(get_descriptors_fullpath(EXTRACTED_FEATURE_NAME, kapt_path, img_file))
+            for img_file in kapt.keypoints[args.feature_name]:
+                os.unlink(get_keypoints_fullpath(args.feature_name, kapt_path, img_file))
+                os.unlink(get_descriptors_fullpath(args.feature_name, kapt_path, img_file))
             # remove also related 3d-points and observations
             rem_pt3d = []
             for pt3d_id, obs in kapt.observations.items():
-                if EXTRACTED_FEATURE_NAME in obs:
-                    obs.pop(EXTRACTED_FEATURE_NAME)
+                if args.feature_name in obs:
+                    obs.pop(args.feature_name)
                     if len(obs) == 0:
                         rem_pt3d.append(pt3d_id)
             for pt3d_id in rem_pt3d:
@@ -146,22 +148,29 @@ def run_fe(args):
                        'can only remove all the 3d-points after a certain index'
                 kapt.points3d = kapt.points3d[:min_id, :]
 
-        kapt.keypoints[EXTRACTED_FEATURE_NAME] = kt.Keypoints(EXTRACTED_FEATURE_NAME, np.float32, 2)
-        kapt.descriptors[EXTRACTED_FEATURE_NAME] = kt.Descriptors(EXTRACTED_FEATURE_NAME, np.uint8, 61,
-                                                                  EXTRACTED_FEATURE_NAME, 'hamming')
+        kapt.keypoints[args.feature_name] = kt.Keypoints(args.feature_name, np.float32, 2)
 
-        logger.info('Extracting %s-features from every %dth frame' % (EXTRACTED_FEATURE_NAME, args.fe_n))
-        records = list(kapt.records_camera.values())
+        if args.feature_name == 'akaze':
+            kapt.descriptors[args.feature_name] = kt.Descriptors(args.feature_name, np.uint8, 61,
+                                                                 args.feature_name, 'hamming')
+        else:
+            assert args.feature_name == 'r2d2', 'invalid feature %s' % (args.feature_name,)
+            kapt.descriptors[args.feature_name] = kt.Descriptors(args.feature_name, np.float32, 128,
+                                                                 args.feature_name, 'L2')
+
+        logger.info('Extracting %s-features from every %dth frame' % (args.feature_name, args.fe_n))
+        records = list(kapt.records_camera.items())
         for j in tqdm(range(0, len(records) - args.fe_triang_int, args.fe_n)):
             d = []
             for k in (0, args.fe_triang_int):
-                img_file = records[j+k][sensor_id]
-                img_path = get_record_fullpath(kapt_path, img_file)
-                kps, descs = extract_features(img_path, args)
-                d.append((img_file, kps, descs))
+                fid, img_files = records[j+k]
+                sc_q = kapt.trajectories[(fid, sensor_id)].r
+                img_path = get_record_fullpath(kapt_path, img_files[sensor_id])
+                kps, descs = extract_features(img_path, sc_q, args)
+                d.append((img_files[sensor_id], kps, descs))
 
             # match features based on descriptors, triangulate matches, filter out bad ones
-            pts3d, idx1, idx2 = triangulate(kapt, cam_params, *d[0], *d[1])
+            pts3d, idx1, idx2 = triangulate(kapt, cam_params, *d[0], *d[1], args.feature_name)
 
             if pts3d is not None:
                 # write 3d points to kapture
@@ -172,16 +181,16 @@ def run_fe(args):
 
                 for (img_file, kps, descs), idx in zip(d, (idx1, idx2)):
                     # write keypoints and descriptors to kapture
-                    kapt.keypoints[EXTRACTED_FEATURE_NAME].add(img_file)
-                    kapt.descriptors[EXTRACTED_FEATURE_NAME].add(img_file)
-                    image_keypoints_to_file(get_keypoints_fullpath(EXTRACTED_FEATURE_NAME, kapt_path, img_file),
+                    kapt.keypoints[args.feature_name].add(img_file)
+                    kapt.descriptors[args.feature_name].add(img_file)
+                    image_keypoints_to_file(get_keypoints_fullpath(args.feature_name, kapt_path, img_file),
                                             kps[idx, :])
-                    image_descriptors_to_file(get_descriptors_fullpath(EXTRACTED_FEATURE_NAME, kapt_path, img_file),
+                    image_descriptors_to_file(get_descriptors_fullpath(args.feature_name, kapt_path, img_file),
                                               descs[idx, :])
 
                     # write observations to kapture
                     for id in range(len(idx)):
-                        kapt.observations.add(pt3d_id_start + id, EXTRACTED_FEATURE_NAME, img_file, id)
+                        kapt.observations.add(pt3d_id_start + id, args.feature_name, img_file, id)
 
         kapture_to_dir(kapt_path, kapt)
 
@@ -347,7 +356,7 @@ def run_ba(args):
         ftol=args.ftol,  #3e-4,
 
         # filter out observations with large reprojection errors at these iterations
-        max_repr_err={},  #0: 320, 1: 64, 2: 32, 3: 16, 4: 12, 6: 8},
+        max_repr_err={0: args.filter} if args.filter else {},  #0: 320, 1: 64, 2: 32, 3: 16, 4: 12, 6: 8},
 
         jacobi_scaling_eps=0,
         lin_cg_maxiter=500,
@@ -662,17 +671,27 @@ def update_kapture(kapt_path, kapt, cam_params, poses, pts3d):
     kapture_to_dir(kapt_path, kapt)
 
 
-def extract_features(img_path, args):
-    if EXTRACTED_FEATURE_NAME == 'akaze':
-        det = cv2.AKAZE_create(**EXTRACTED_FEATURE_PARAMS[EXTRACTED_FEATURE_NAME])
+def extract_features(img_path, sc_q, args):
+    if args.feature_name == 'akaze':
+        if extract_features.detector is None:
+            extract_features.detector = cv2.AKAZE_create(**EXTRACTED_FEATURE_PARAMS[args.feature_name])
+        det = extract_features.detector
+        img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+        kps = detect_gridded(det, img, None, *EXTRACTED_FEATURE_GRID, EXTRACTED_FEATURE_COUNT)
+        kps, descs = det.compute(img, kps)
+    elif args.feature_name == 'r2d2':
+        if extract_features.detector is None:
+            from visnav.algo.cnndet import CNN_Detector
+            extract_features.detector = CNN_Detector(args.feature_name, gpu=None)
+        img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
+        kps, descs = extract_features.detector.normalizeDetectAndCompute(img, sc_q)
     else:
-        assert False, 'feature extractor "%s" not implemented' % EXTRACTED_FEATURE_NAME
+        assert False, 'feature extractor "%s" not implemented' % args.feature_name
 
-    img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
-    kps = detect_gridded(det, img, None, *EXTRACTED_FEATURE_GRID, EXTRACTED_FEATURE_COUNT)
-    kps, descs = det.compute(img, kps)
     kps = np.array([k.pt for k in kps], dtype='f4').reshape((-1, 2))
     return kps, descs
+
+extract_features.detector = None
 
 
 def cam_obj(cam_params):
@@ -682,12 +701,12 @@ def cam_obj(cam_params):
     return cam
 
 
-def triangulate(kapt, cam_params, img_file1, kps1, descs1, img_file2, kps2, descs2):
+def triangulate(kapt, cam_params, img_file1, kps1, descs1, img_file2, kps2, descs2, feature_name):
     if descs1 is None or descs2 is None or len(descs1) < MIN_INLIERS or len(descs2) < MIN_INLIERS:
         return None, None, None
 
     # match features based on descriptors, cross check for validity, sort keypoints so that indices indicate matches
-    matcher = cv2.BFMatcher(cv2.NORM_HAMMING, True)
+    matcher = cv2.BFMatcher(cv2.NORM_HAMMING if feature_name == 'akaze' else cv2.NORM_L2, True)
     matches = matcher.match(descs1, descs2)
     if len(matches) < MIN_INLIERS:
         return None, None, None

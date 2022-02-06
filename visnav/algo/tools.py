@@ -406,21 +406,42 @@ def get_logger(name, level=logging.INFO, fmt='%(asctime)s %(levelname)-8s %(mess
     return logger
 
 
-def angle_between_v(v1, v2):
-    # Notice: only returns angles between 0 and 180 deg
+def angle_between_v(v1, v2, direction=False):
+    # Notice: only returns angles between 0 and 180 deg if direction == False
 
     try:
-        v1 = np.reshape(v1, (1, -1))
-        v2 = np.reshape(v2, (-1, 1))
+        v1 = v1.flatten()
+        v2 = v2.flatten()
 
-        n1 = normalize_v(v1)
-        n2 = normalize_v(v2)
+        n1 = v1 / np.linalg.norm(v1)
+        n2 = v2 / np.linalg.norm(v2)
+        ca = n1.dot(n2)
 
-        cos_angle = n1.dot(n2)
+        if direction is not False:
+            c = np.cross(n1, n2)
+            d = c.dot(direction)
+            ra = math.asin(np.clip(np.linalg.norm(c), -1, 1))
+
+            if ca > 0 and d > 0:
+                # 1st quadrant
+                angle = ra
+            elif ca < 0 and d > 0:
+                # 2nd quadrant
+                angle = np.pi - ra
+            elif ca < 0 and d < 0:
+                # 3rd quadrant
+                angle = -np.pi + ra
+            elif ca > 0 and d < 0:
+                # 4th quadrant
+                angle = -ra
+            else:
+                assert False, 'invalid logic'
+        else:
+            angle = math.acos(np.clip(ca, -1, 1))
     except TypeError as e:
         raise Exception('Bad vectors:\n\tv1: %s\n\tv2: %s' % (v1, v2)) from e
 
-    return math.acos(np.clip(cos_angle, -1, 1))
+    return angle
 
 
 def angle_between_v_mx(a, B, normalize=True):

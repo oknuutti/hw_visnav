@@ -8,6 +8,7 @@
       <excludeFolder url="file://$MODULE_DIR$/3rdparty" />
       <excludeFolder url="file://$MODULE_DIR$/data" />
       <excludeFolder url="file://$MODULE_DIR$/sensehat" />
+      <excludeFolder url="file://$MODULE_DIR$/.tmp.drivedownload" />
     </content>
     <orderEntry type="jdk" jdkName="Python 3.7 (hw_visnav)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
