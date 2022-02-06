@@ -112,6 +112,7 @@ class Problem:
         # for now, just remove difficult to fit 3d point observations
         rr = self._cached_repr_err if self._cached_repr_err is not None else self.residual_repr()
         I = np.linalg.norm(rr.reshape((-1, 2)), axis=1) <= max_repr_err
+        self.batch_idxs = self.batch_idxs[I]
         self.pt3d_idxs = self.pt3d_idxs[I]
         self.pose_idxs = self.pose_idxs[I]
         self.pts2d = self.pts2d[I, :]
