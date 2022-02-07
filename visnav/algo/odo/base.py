@@ -648,7 +648,7 @@ class VisualOdometry:
             if len(old_kp2d) > 0:
                 new_kp2d, mask, err = cv2.calcOpticalFlowPyrLK(lf.image, nf.image, old_kp2d, None, **self.lk_params)
             else:
-                new_kp2d, mask = map(np.array, ([], []))
+                new_kp2d, mask = np.array([]), np.array([], dtype=bool)
 
             if self.refine_kp_uv and np.sum(mask) > 0:
                 new_kp2d, mask = self.refine_gftt(new_frame, new_kp2d, mask)
@@ -685,7 +685,7 @@ class VisualOdometry:
         # extra sanity check on tracked points, set mask to false if keypoint quality too poor
         if np.sum(mask) > 0:
             mask = self.check_features(nf, old_kp2d, old_kp2d_norm, new_kp2d, new_kp2d_norm, mask)
-        
+
         if 0:
             self._plot_tracks(nf.image, old_kp2d, new_kp2d, mask)
 
