@@ -653,6 +653,10 @@ class VisualOdometry:
             if self.refine_kp_uv and np.sum(mask) > 0:
                 new_kp2d, mask = self.refine_gftt(new_frame, new_kp2d, mask)
 
+        if np.sum(mask) == 0:
+            logger.info('Tracking: %d/%d' % (len(new_kp2d), len(old_kp2d)))
+            return
+
         new_kp2d_norm = self.cam.undistort(np.array(new_kp2d) / nf.img_sc)
         kps_uv_vel = np.array([(uv1 - uv0) / dt for dt, uv0, uv1 in zip(dt_arr, old_kp2d_norm, new_kp2d_norm)])
 
@@ -683,9 +687,7 @@ class VisualOdometry:
                 kps_uv_vel = np.array([(uv1 - uv0) / dt for dt, uv0, uv1 in zip(dt_arr, old_kp2d_norm, new_kp2d_norm)])
 
         # extra sanity check on tracked points, set mask to false if keypoint quality too poor
-        if np.sum(mask) > 0:
-            mask = self.check_features(nf, old_kp2d, old_kp2d_norm, new_kp2d, new_kp2d_norm, mask)
-
+        mask = self.check_features(nf, old_kp2d, old_kp2d_norm, new_kp2d, new_kp2d_norm, mask)
         if 0:
             self._plot_tracks(nf.image, old_kp2d, new_kp2d, mask)
 
