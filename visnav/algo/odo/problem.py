@@ -16,8 +16,9 @@ logger.setLevel(logging.DEBUG)
 class Problem:
     IDX_DTYPE = np.int32
 
-    def __init__(self, pts2d, batch_idxs, cam_params, cam_param_idxs, poses, pose_idxs, pts3d, pt3d_idxs, frozen_points,
-                 meas_r, meas_aa, meas_idxs, px_err_sd, loc_err_sd, ori_err_sd, dtype):
+    def __init__(self, pts2d, batch_idxs, cam_params, cam_param_idxs, poses, pose_idxs, pose_batch,
+                 pts3d, pt3d_idxs, pt3d_batch, frozen_points, meas_r, meas_aa, meas_idxs,
+                 px_err_sd, loc_err_sd, ori_err_sd, dtype):
 
         self.pts2d = pts2d.astype(dtype)
 
@@ -28,9 +29,11 @@ class Problem:
         self.poses = Manifold(poses.shape, buffer=poses.astype(dtype), dtype=dtype)
         self.poses.set_so3_groups(self._get_so3_grouping(len(poses)))
         self.pose_idxs = pose_idxs.astype(Problem.IDX_DTYPE)
+        self.pose_batch = pose_batch.astype(Problem.IDX_DTYPE)
 
         self.pts3d = pts3d.astype(dtype)
         self.pt3d_idxs = pt3d_idxs.astype(Problem.IDX_DTYPE)
+        self.pt3d_batch = pt3d_batch
         self.valid_pts3d = np.ones((len(self.pts3d),), dtype=bool) if frozen_points is None else \
                            np.logical_not(frozen_points)
         self.frozen_points = frozen_points
