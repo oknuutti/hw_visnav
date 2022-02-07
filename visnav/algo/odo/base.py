@@ -1176,6 +1176,10 @@ class VisualOdometry:
 
         ref_frame = self.state.keyframes[-1]
 
+        if ref_frame.pose.post is None or new_frame.pose.any is None:
+            self.cache['viewpoint_changed_kps'] = set()
+            return set()
+
         tmp = [(id, uv, ref_frame.kps_uv_norm[id])
                for id, uv in new_frame.kps_uv_norm.items()
                if id in ref_frame.kps_uv_norm]
