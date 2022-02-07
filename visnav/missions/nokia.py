@@ -299,12 +299,14 @@ class NokiaSensor(Mission):
             'ba_interval': 3,
             'window_fifo_len': 48,
             'max_ba_fun_eval': 100 * 10,
-            'loc_err_sd': np.inf if 0 else np.array([6., 6., 6.]),  # y == alt (was [2, 10, 2])
-            'ori_err_sd': np.inf if 1 else math.radians(30.0),
+            'loc_err_sd': np.inf if 0 else np.array([3., 3., 3.]),  # y == alt (was [2, 10, 2])
+            'ori_err_sd': np.inf if 0 else math.radians(30.0),
             'min_retain_obs': 4,
 
-            'ba_dist_coef': False,          # optimize k1, k2
-            'ba_n_cam_intr': 0,             # optimize principal point, not focal length
+            # TODO: find out why dist coef and cam intrinsics optimization doesnt work (jacobian seem to be correct)
+            'ba_dist_coef': False,         # optimize k1, k2
+            'ba_n_cam_intr': 0,            # optimize 1) focal length only, 2) principal point only, 3) both fl and pp
+
             'enable_marginalization': True,
         }
 

@@ -646,7 +646,7 @@ def get_ba_params(kapt_path, keyframes, kapt, sensor_id, feature_name=EXTRACTED_
     # TODO: should remove unobservable poses (and 3d-points), maybe after initial ba?
 
     poses = np.array([[*tools.q_to_angleaxis(kapt.trajectories[id][sensor_id].r, True),
-                       *kapt.trajectories[id][sensor_id].t] for id, fname in frames]).astype(float)
+                       *kapt.trajectories[id][sensor_id].t.flatten()] for id, fname in frames], dtype=float)
 
     if keyframes is not None:
         meas_idxs = np.array([i for i, kf in enumerate(keyframes) if kf['meas'] is not None and i < len(poses)], dtype=int)

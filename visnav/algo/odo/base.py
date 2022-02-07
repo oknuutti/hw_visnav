@@ -1366,7 +1366,7 @@ class VisualOdometry:
                 # np.sqrt(np.linalg.norm(f.repr_err.get(id, 0))**2 + self.repr_err(f)**2)
                 # self.repr_err(f)
                 # np.sqrt(self.repr_err(f)**2 + self.repr_err(f, adaptive=False)**2)
-                self.repr_err(f, adaptive=False)
+                self.max_repr_err(f, adaptive=False)
             )
             for i, f in enumerate(keyframes)
                 for id, uv in (f.kps_uv if distorted else f.kps_uv_norm).items() if id in idmap
@@ -1473,8 +1473,6 @@ class VisualOdometry:
                 self.cam.cam_mx[0, 2], self.cam.cam_mx[1, 2] = cam_intr[-2:]
 
         if dist_ba is not None or cam_intr is not None:
-            # TODO: debug dist_ba and cam_intr assignment, currently tracking fails after
-            #       assigning new params
             self.update_uv_norms(keyframes)
 
         # update keyframes that are newer than those included in the bundle adjustment run

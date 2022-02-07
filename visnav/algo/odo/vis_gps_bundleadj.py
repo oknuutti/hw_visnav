@@ -102,7 +102,7 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
         x0.append(dist_coefs[:n_dist])
 
     if n_cam_intr > 0:
-        x0.append(([K[0, 0] + K[1, 1]] if n_cam_intr != 2 else [])
+        x0.append(([(K[0, 0] + K[1, 1])/2] if n_cam_intr != 2 else [])
                   + ([K[0, 2], K[1, 2]] if n_cam_intr > 1 else []))
 
     x0 = np.hstack(x0)
@@ -191,7 +191,7 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
 
         return J
 
-    if CHECK_JACOBIAN and n_cams >= 6: #  and n_dist > 0:
+    if CHECK_JACOBIAN and n_cam_intr > 0: #  and n_dist > 0:
         if 1:
             J = jac(x0, False).toarray()
             J_ = numerical_jacobian(lambda x: _costfun(x, pose0, fixed_pt3d, n_cams, n_pts, n_dist, n_cam_intr, cam_idxs, pt3d_idxs,
@@ -204,6 +204,10 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
                             meas_r, meas_aa, meas_idxs, loc_err_sd, ori_err_sd, huber_coef)
             J_ = numerical_jacobian(lambda x: _rotated_points(x, pose0, fixed_pt3d, n_cams, n_pts, n_dist, cam_idxs, pt3d_idxs, pts2d, v_pts2d, K, px_err_sd,
                                       meas_r, meas_aa, meas_idxs, loc_err_sd, ori_err_sd, huber_coef), x0, 1e-4)
+
+        if 1:
+            J = J[:100, -100:]
+            J_ = J_[:100, -100:]
 
         import matplotlib.pyplot as plt
         fig, axs = plt.subplots(1, 2, sharex=True, sharey=True)
@@ -609,9 +613,9 @@ def _jacobian(params, pose0, fixed_pt3d, n_cams, n_pts, n_dist, n_cam_intr, cam_
     #           [-fy*Yc/Zc*R**2, -fy*Yc/Zc*R**4]]
     #
     if dist_coefs is not None:
-        J[2 * i + 0, n1 + n2 + n3 + 0] = tmp = -fx*Xn*R2
+        J[2 * i + 0, n1 + n2 + n3 + 0] = tmp = -fx*Xn*R2 / px_err_sd.flatten()
         J[2 * i + 0, n1 + n2 + n3 + 1] = tmp * R2
-        J[2 * i + 1, n1 + n2 + n3 + 0] = tmp = -fy*Yn*R2
+        J[2 * i + 1, n1 + n2 + n3 + 0] = tmp = -fy*Yn*R2 / px_err_sd.flatten()
         J[2 * i + 1, n1 + n2 + n3 + 1] = tmp * R2
 
     # camera intrinsics (I=[fl, cx, cy]) affect reprojection error terms
@@ -621,11 +625,11 @@ def _jacobian(params, pose0, fixed_pt3d, n_cams, n_pts, n_dist, n_cam_intr, cam_
     #          [-Yn, 0, -1]]
     if n_cam_intr > 0:
         if n_cam_intr != 2:
-            J[2 * i + 0, n1 + n2 + n3 + n4 + 0] = -Xn
-            J[2 * i + 1, n1 + n2 + n3 + n4 + 0] = -Yn
+            J[2 * i + 0, n1 + n2 + n3 + n4 + 0] = -Xn / px_err_sd.flatten()
+            J[2 * i + 1, n1 + n2 + n3 + n4 + 0] = -Yn / px_err_sd.flatten()
         if n_cam_intr > 1:
-            J[2 * i + 0, n1 + n2 + n3 + n4 + (1 if n_cam_intr != 2 else 0)] = -1
-            J[2 * i + 1, n1 + n2 + n3 + n4 + (2 if n_cam_intr != 2 else 1)] = -1
+            J[2 * i + 0, n1 + n2 + n3 + n4 + (1 if n_cam_intr != 2 else 0)] = -1 / px_err_sd.flatten()
+            J[2 * i + 1, n1 + n2 + n3 + n4 + (2 if n_cam_intr != 2 else 1)] = -1 / px_err_sd.flatten()
 
     # # time offsets affect reprojection error terms (possible to do in a better way?)
     # if ENABLE_DT_ADJ:
