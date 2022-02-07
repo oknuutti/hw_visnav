@@ -683,7 +683,9 @@ class VisualOdometry:
                 kps_uv_vel = np.array([(uv1 - uv0) / dt for dt, uv0, uv1 in zip(dt_arr, old_kp2d_norm, new_kp2d_norm)])
 
         # extra sanity check on tracked points, set mask to false if keypoint quality too poor
-        mask = self.check_features(nf, old_kp2d, old_kp2d_norm, new_kp2d, new_kp2d_norm, mask)
+        if np.sum(mask) > 0:
+            mask = self.check_features(nf, old_kp2d, old_kp2d_norm, new_kp2d, new_kp2d_norm, mask)
+        
         if 0:
             self._plot_tracks(nf.image, old_kp2d, new_kp2d, mask)
 
