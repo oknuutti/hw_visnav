@@ -105,6 +105,8 @@ class VisualGPSNav(VisualOdometry):
         # However, if really needed, allow a new keyframe even without a gps measurement.
         # If all_meas is true, include all gps measurements in keyframes
         all_meas = False
+        require_meas = True     # to disable, would need some constraints on pose change between frames (e.g. imu)
+                                #  - without such constraints, poses jump between gps and vo results
 
         if new_frame.measure:
             if all_meas:
@@ -112,6 +114,8 @@ class VisualGPSNav(VisualOdometry):
                 logger.debug('new kf: new gps measure')
             else:
                 is_new_kf = None
+        elif require_meas:
+            is_new_kf = False
         elif not self.state.first_result_given:
             is_new_kf = False
         elif len(new_frame.kps_uv) / self.max_keypoints < self.new_kf_min_kp_ratio * 0.8:

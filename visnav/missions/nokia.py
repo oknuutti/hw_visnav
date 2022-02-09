@@ -1,10 +1,12 @@
 import logging
 import math
 from datetime import datetime
+import re
 
 import numpy as np
 import quaternion
 import cv2
+from tqdm import tqdm
 
 from TelemetryParsing import readTelemetryCsv
 
@@ -111,6 +113,16 @@ class NokiaSensor(Mission):
         time0 = t_time[0].astype(np.float64) / 1e6
         t_time = (t_time - t_time[0]).astype(np.float64) / 1e6
         t_data = list(zip(*t_data))
+
+        # hardcoded for now
+        m = re.search(r'(^|\\|/)([\w-]+)\.mp4$', self.video_path)
+        gap_offset_fids, gap_offsets = map(list, zip(*{
+            'HD_CAM_2020_12_17_14_50_40': [[5019, 9.0]],               # 14 (by eye: 6300-6700 & 7800-8100)
+            'HD_CAM_2021_02_04_15_18_17': [[5447, 6.9]],               # 18 (by eye: 6300-6700 & 11750-12150)
+            'HD_CAM_2021_03_04_11_50_25': [[5149, 3.0], [8152, 8.9]],  # 19 (by eye: 5150-5400; 8220-8500 & 9400-9650)
+            'HD_CAM_2021_03_04_13_33_15': [[4965, 6.9], [8013, 1.3]],  # 20 (by eye: 6500-6900; 9150-9600)
+        }.get(m[2], {})))
+
         if self.undist_img:
             cam = self.init_cam()
             map_u, map_v = cv2.initUndistortRectifyMap(cam.cam_mx if self.cam_mx is None else np.array(self.cam_mx).reshape((3, 3)),
@@ -121,7 +133,10 @@ class NokiaSensor(Mission):
             cap = cv2.VideoCapture(self.video_path)
             fps = cap.get(cv2.CAP_PROP_FPS)
             f_id, t_id, t_t, f_t_raw1 = 0, 0, 0, None
-            last_measure, ret = False, True
+            missing_frames, last_measure, ret = False, False, True
+            fts, fdt, inspect = [], [], False
+            if inspect:
+                pbar = tqdm(total=int(cap.get(cv2.CAP_PROP_FRAME_COUNT)))
 
             while cap.isOpened() and ret and not last_measure:
                 f_id += 1
@@ -130,15 +145,50 @@ class NokiaSensor(Mission):
                     continue
 
                 f_t_raw0, f_t_raw1 = f_t_raw1, cap.get(cv2.CAP_PROP_POS_MSEC) / 1000
-                if f_t_raw0 is not None and f_t_raw1 == 0:
-                    # for some reason sometimes (at the end of a video?) CAP_PROP_POS_MSEC returns zero
-                    f_t_raw1 = f_t_raw0 + 1/fps
+
+                if inspect and f_t_raw0 is not None:
+                    pbar.update(1)
+                    fdt.append((f_id, f_t_raw1 - f_t_raw0))
+
+                # For some reason sometimes CAP_PROP_POS_MSEC returns zero. Othertimes, f_t_raw1 - f_t_raw0 is
+                # very short (0.01-25ms or even negative, e.g. -100ms), even though frames seem to progress normally.
+                # It does seem to give some information still, as delays ranging from 200ms to 2s are observed and they
+                # seem to correspond to "jumps" in images.
+                if f_t_raw0 is not None:
+                    if f_t_raw1 == 0:
+                        f_t_raw1 = f_t_raw0 + 1/fps
+                    elif f_t_raw1 - f_t_raw0 < 0.5/fps:
+                        self.video_toff += 1/fps - (f_t_raw1 - f_t_raw0)
 
                 f_t = f_t_raw1 + self.video_toff
-                if self.first_frame is not None and f_id < self.first_frame:
+                if self.first_frame is not None and f_id < self.first_frame and not inspect:
                     continue
-                elif self.last_frame is not None and f_id > self.last_frame:
+                elif self.last_frame is not None and f_id > self.last_frame and not inspect:
                     break
+                elif np.all(img == img[0, 0, 0]):
+                    missing_frames = True
+                    if inspect:
+                        fts.append((f_id, f_t))
+                    continue
+
+                if missing_frames:
+                    missing_frames = False
+                    err_msg = 'Missing frames before frame id %d, no custom time offset given' % f_id
+                    if f_id not in gap_offset_fids:
+                        if inspect:
+                            print(err_msg)
+                        else:
+                            assert False, err_msg
+
+                while len(gap_offset_fids) > 0 and f_id >= gap_offset_fids[0]:
+                    gap_offset_fids.pop(0)
+                    t_off = gap_offsets.pop(0)
+                    self.video_toff += t_off
+                    f_t += t_off
+
+                if inspect:
+                    fts.append((f_id, f_t))
+                    continue
 
                 # read a measurement
                 meas = None
@@ -202,6 +252,20 @@ class NokiaSensor(Mission):
                 yield img, f_t, 'frame-%d (%s)' % (f_id, f_ts), meas, ('meas-%d (%s)' % (t_id, t_ts)) if meas else None, None
 
             cap.release()
+
+            if inspect:
+                import matplotlib.pyplot as plt
+                fig, axs = plt.subplots(2, 1, sharex=True, sharey=True)
+
+                fdt = np.array(fdt)
+                axs[0].plot(fdt[:-1, 0], fdt[1:, 1])
+                axs[0].set_title('raw frame times')
+
+                fts = np.array(fts)
+                axs[1].plot(fts[:-1, 0], np.diff(fts[:, 1]))
+                axs[1].set_title('corrected frame times')
+
+                plt.show()
 
         return data_gen(), time0, NokiaSensor.COORD0
 
@@ -300,7 +364,7 @@ class NokiaSensor(Mission):
             'window_fifo_len': 48,
             'max_ba_fun_eval': 100 * 10,
             'loc_err_sd': np.inf if 0 else np.array([3., 3., 3.]),  # y == alt (was [2, 10, 2])
-            'ori_err_sd': np.inf if 0 else math.radians(30.0),
+            'ori_err_sd': np.inf if 0 else math.radians(60.0),
             'min_retain_obs': 4,
 
             # TODO: find out why dist coef and cam intrinsics optimization doesnt work (jacobian seem to be correct)
