@@ -116,12 +116,13 @@ class NokiaSensor(Mission):
 
         # hardcoded for now
         m = re.search(r'(^|\\|/)([\w-]+)\.mp4$', self.video_path)
-        gap_offset_fids, gap_offsets = map(list, zip(*{
+        tmp = {
             'HD_CAM_2020_12_17_14_50_40': [[5019, 9.0]],               # 14 (by eye: 6300-6700 & 7800-8100)
             'HD_CAM_2021_02_04_15_18_17': [[5447, 6.9]],               # 18 (by eye: 6300-6700 & 11750-12150)
             'HD_CAM_2021_03_04_11_50_25': [[5149, 3.0], [8152, 8.9]],  # 19 (by eye: 5150-5400; 8220-8500 & 9400-9650)
             'HD_CAM_2021_03_04_13_33_15': [[4965, 6.9], [8013, 1.3]],  # 20 (by eye: 6500-6900; 9150-9600)
-        }.get(m[2], {})))
+        }.get(m[2], [])
+        gap_offset_fids, gap_offsets = map(list, zip(*tmp)) if len(tmp) > 0 else ([], [])
 
         if self.undist_img:
             cam = self.init_cam()
