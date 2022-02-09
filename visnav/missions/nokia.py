@@ -126,9 +126,10 @@ class NokiaSensor(Mission):
 
         # invalid frame ranges hardcoded for now
         tmp = {
-            'HD_CAM_2020_12_17_14_50_40': [[7723, 7800]],              # 14, intermittently lost frames
-            'HD_CAM_2021_03_04_13_33_15': [[7847, 8050]],              # 20, intermittently lost frames
-            'HD_CAM-1__17062021_143756_459453786': [[8100, 10300]],    # 28, over sea and tracking waves
+            'HD_CAM-1__514659341_03_12_2020_16_12_44': [[30730, 33900]],            # 10, mostly over sea
+            'HD_CAM_2020_12_17_14_50_40': [[7723, 7800]],                           # 14, intermittently lost frames
+            'HD_CAM_2021_03_04_13_33_15': [[7847, 8050]],                           # 20, intermittently lost frames
+            'HD_CAM-1__17062021_143756_459453786': [[6800, 7380], [8100, 10300]],   # 28, over sea and tracking waves
         }.get(m[2], [])
         invalid_range_s, invalid_range_e = map(np.int64, zip(*tmp) if len(tmp) > 0 else ([], []))
 
@@ -166,8 +167,8 @@ class NokiaSensor(Mission):
                 if f_t_raw0 is not None:
                     if f_t_raw1 == 0:
                         f_t_raw1 = f_t_raw0 + 1/fps
-                    elif f_t_raw1 - f_t_raw0 < 0.5/fps:
-                        self.video_toff += 1/fps - (f_t_raw1 - f_t_raw0)
+                    elif f_t_raw1 - f_t_raw0 < 0:  # 0.5/fps:
+                        self.video_toff += -(f_t_raw1 - f_t_raw0)  # + 1/fps
 
                 f_t = f_t_raw1 + self.video_toff
                 if self.first_frame is not None and f_id < self.first_frame and not inspect:
