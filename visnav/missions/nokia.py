@@ -114,7 +114,7 @@ class NokiaSensor(Mission):
         t_time = (t_time - t_time[0]).astype(np.float64) / 1e6
         t_data = list(zip(*t_data))
 
-        # hardcoded for now
+        # missing frame time offsets hardcoded for now
         m = re.search(r'(^|\\|/)([\w-]+)\.mp4$', self.video_path)
         tmp = {
             'HD_CAM_2020_12_17_14_50_40': [[5019, 9.0]],               # 14 (by eye: 6300-6700 & 7800-8100)
@@ -123,6 +123,14 @@ class NokiaSensor(Mission):
             'HD_CAM_2021_03_04_13_33_15': [[4965, 6.9], [8013, 1.3]],  # 20 (by eye: 6500-6900; 9150-9600)
         }.get(m[2], [])
         gap_offset_fids, gap_offsets = map(list, zip(*tmp)) if len(tmp) > 0 else ([], [])
+
+        # invalid frame ranges hardcoded for now
+        tmp = {
+            'HD_CAM_2020_12_17_14_50_40': [[7723, 7800]],              # 14, intermittently lost frames
+            'HD_CAM_2021_03_04_13_33_15': [[7847, 8050]],              # 20, intermittently lost frames
+            'HD_CAM-1__17062021_143756_459453786': [[8100, 10300]],    # 28, over sea and tracking waves
+        }.get(m[2], [])
+        invalid_range_s, invalid_range_e = map(np.int64, zip(*tmp) if len(tmp) > 0 else ([], []))
 
         if self.undist_img:
             cam = self.init_cam()
@@ -166,6 +174,8 @@ class NokiaSensor(Mission):
                     continue
                 elif self.last_frame is not None and f_id > self.last_frame and not inspect:
                     break
+                elif np.any(np.logical_and(invalid_range_s <= f_id, f_id < invalid_range_e)) and not inspect:
+                    continue
                 elif np.all(img == img[0, 0, 0]):
                     missing_frames = True
                     if inspect:
