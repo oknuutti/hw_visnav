@@ -9,6 +9,10 @@
       <excludeFolder url="file://$MODULE_DIR$/data" />
       <excludeFolder url="file://$MODULE_DIR$/sensehat" />
       <excludeFolder url="file://$MODULE_DIR$/.tmp.drivedownload" />
+      <excludeFolder url="file://$MODULE_DIR$/hwproto-apps/ardunavapp" />
+      <excludeFolder url="file://$MODULE_DIR$/hwproto-apps/arduparserapp" />
+      <excludeFolder url="file://$MODULE_DIR$/hwproto-apps/gpio-demo" />
+      <excludeFolder url="file://$MODULE_DIR$/hwproto-apps/peekpoke" />
     </content>
     <orderEntry type="jdk" jdkName="Python 3.7 (hw_visnav)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />

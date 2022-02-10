@@ -831,7 +831,7 @@ def join_batches(arr_pts2d, arr_cam_params, arr_cam_param_idxs, arr_poses, arr_p
                 _batch_idxs[i] = bi
                 _pose_idxs[i] = fid2idx[bi][frame_id] + pose_counts[bi]
                 _pt3d_idxs[i] = id_pt3d + pt3d_count
-                _pt3d_batch[i, bi] = True
+                _pt3d_batch[id_pt3d, bi] = True
                 i += 1
             if frozen_batches and batch_id in frozen_batches:
                 frozen_points[id_pt3d + pt3d_count] = True
@@ -840,7 +840,7 @@ def join_batches(arr_pts2d, arr_cam_params, arr_cam_param_idxs, arr_poses, arr_p
         batch_idxs.append(_batch_idxs[:i])
         pose_idxs.append(_pose_idxs[:i])
         pt3d_idxs.append(_pt3d_idxs[:i])
-        pt3d_batch.append(_pt3d_batch[:i, :])
+        pt3d_batch.append(_pt3d_batch)
         arr_pts3d = arr_pts3d + [akaze_pts3d]
 
     pts2d, batch_idxs, poses, pose_idxs, pose_batch, pts3d, pt3d_idxs, pt3d_batch, meas_r, meas_aa, meas_idxs = map(

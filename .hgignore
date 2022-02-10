@@ -1,9 +1,12 @@
 syntax:regex
 ^[^/]*\.txt$
+^[^/]*\.pdf$
+^[^/]*\.docx$
 
 syntax:glob
 
 # custom own stuff
+hwproto-apps/
 arducam/
 data/
 .tmp.drivedownload/

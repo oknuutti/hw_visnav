@@ -6,5 +6,6 @@
     <mapping directory="$PROJECT_DIR$/3rdparty/mavlink" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/3rdparty/nokia-ds" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/3rdparty/pymavlink" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/hwproto-apps/ardunavapp" vcs="Git" />
   </component>
 </project>
