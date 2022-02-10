@@ -126,7 +126,7 @@ class NokiaSensor(Mission):
 
         # invalid frame ranges hardcoded for now
         tmp = {
-            'HD_CAM-1__514659341_03_12_2020_16_12_44': [[30730, 33900]],            # 10, mostly over sea
+            'HD_CAM-1__514659341_03_12_2020_16_12_44': [[30730, 33850]],            # 10, mostly over sea
             'HD_CAM_2020_12_17_14_50_40': [[7723, 7800]],                           # 14, intermittently lost frames
             'HD_CAM_2021_03_04_13_33_15': [[7847, 8050]],                           # 20, intermittently lost frames
             'HD_CAM-1__17062021_143756_459453786': [[6800, 7380], [8100, 10300]],   # 28, over sea and tracking waves
