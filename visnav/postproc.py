@@ -510,7 +510,7 @@ def run_ba(args):
         arr_meas_aa, arr_meas_idxs, arr_akaze_obser, arr_frames, batch_ids, akaze_pts3d, akaze_obser_map
 
     problem = Problem(pts2d, batch_idxs, cam_params, cam_param_idxs, poses, pose_idxs, pose_batch,
-                      pts3d, pt3d_idxs, pt3d_batch, frozen_points, meas_r, meas_aa, meas_idxs, akaze_repr_err_count,
+                      pts3d, pt3d_idxs, pt3d_batch, frozen_points, akaze_repr_err_count, meas_r, meas_aa, meas_idxs,
                       PX_ERR_SD, LOC_ERR_SD, ORI_ERR_SD, dtype=np.float32 if args.float32 else np.float64)
 
     del pts2d, batch_idxs, cam_params, cam_param_idxs, poses, pose_idxs, pts3d, pt3d_idxs, meas_r, meas_aa, meas_idxs
