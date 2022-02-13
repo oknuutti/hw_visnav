@@ -295,9 +295,9 @@ class InnerLinearizerQR:
 
         abs_r = np.abs(r)
         I = abs_r > huber_coef
-        huber_weight = np.ones_like(r) * residual_weight
+        huber_weight = np.ones_like(r)
         huber_weight[I] *= np.sqrt(huber_coef / abs_r[I])
-        dwr_dr = np.sqrt(huber_weight)
+        dwr_dr = np.sqrt(residual_weight * huber_weight)
 
         wr = dwr_dr * r
 
@@ -317,7 +317,7 @@ class InnerLinearizerQR:
                     J *= dwr_dr
                     wJ.append(J)
 
-        err = np.sum(0.5 * (2 - huber_weight) * huber_weight * r ** 2)
+        err = np.sum(0.5 * residual_weight * huber_weight * (2 - huber_weight) * r ** 2)
         return wr, wJ, err
 
     def initial_cost(self):
