@@ -101,8 +101,18 @@ class InnerLinearizerQR:
                 self._state = self.STATE_NUMERICAL_FAILURE
                 return
 
-        rr, (Jrb, Jrp, Jrl), err = self._apply_huber(rr, (Jrb, Jrp, Jrl), m, self.huber_coef_repr)
-        self._total_error = err
+        if self.problem.akaze_repr_err_count == 0:
+            rr, (Jrb, Jrp, Jrl), err = self._apply_huber(rr, (Jrb, Jrp, Jrl), m, self.huber_coef_repr)
+            self._total_error = err
+        else:
+            c = self.problem.akaze_repr_err_count
+            rr1, (Jrb1, Jrp1, Jrl1), err1 = self._apply_huber(rr[:-c], (Jrb[:-c, :], Jrp[:-c, :], Jrl[:-c, :]), m, self.huber_coef_repr)
+            rr2, (Jrb2, Jrp2, Jrl2), err2 = self._apply_huber(rr[-c:], (Jrb[-c:, :], Jrp[-c:, :], Jrl[-c:, :]), m, self.huber_coef_repr)
+            rr = np.concatenate((rr1, rr2), axis=0)
+            Jrb = np.concatenate((Jrb1, Jrb2), axis=0)
+            Jrp = np.concatenate((Jrp1, Jrp2), axis=0)
+            Jrl = np.concatenate((Jrl1, Jrl2), axis=0)
+            self._total_error = err1 + err2
 
         if mx > 0:
             Jxb, Jxp, _ = JxJa[0]

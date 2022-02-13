@@ -17,7 +17,7 @@ class Problem:
     IDX_DTYPE = np.int32
 
     def __init__(self, pts2d, batch_idxs, cam_params, cam_param_idxs, poses, pose_idxs, pose_batch,
-                 pts3d, pt3d_idxs, pt3d_batch, frozen_points, meas_r, meas_aa, meas_idxs,
+                 pts3d, pt3d_idxs, pt3d_batch, frozen_points, akaze_repr_err_count, meas_r, meas_aa, meas_idxs,
                  px_err_sd, loc_err_sd, ori_err_sd, dtype):
 
         self.pts2d = pts2d.astype(dtype)
@@ -39,7 +39,7 @@ class Problem:
         self.frozen_points = frozen_points
         assert self.valid_pts3d.shape[0] == self.pts3d.shape[0], 'pts3d and valid_points needs to be same length'
 
-        # TODO: excluding frozen points not enough, need to use the residuals and related jacobian rows
+        self.akaze_repr_err_count = akaze_repr_err_count
 
         self.meas_r = np.array([], dtype=dtype) if meas_r is None else meas_r.astype(dtype)
         self.meas_aa = np.array([], dtype=dtype) if meas_aa is None else meas_aa.astype(dtype)

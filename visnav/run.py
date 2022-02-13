@@ -414,7 +414,7 @@ def plot_results(keyframes=None, map3d=None, frame_names=None, meta_names=None, 
             ax.set_ylabel("north", fontsize=12)
             line = ax.scatter(x, y, s=20, c=z, marker='o', vmin=-5., vmax=100., cmap=cm.get_cmap('jet'))  #, vmax=20.)
             fig.colorbar(line)
-            tools.hover_annotate(fig, ax, line, [str(v) for v in z])
+            tools.hover_annotate(fig, ax, line, ['%.1f' % v for v in z])
         else:
             fig = plt.figure()
             ax = fig.add_subplot(111, projection='3d')

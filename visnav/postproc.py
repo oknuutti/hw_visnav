@@ -57,8 +57,6 @@ logger = tools.get_logger("main")
 
 
 # TODO: the following:
-#  - profile memory usage
-#  - better akaze extraction and matching
 #  - (6) implement image normalization and cam idealization for depth map estimation (here or at depthmaps.py?)
 #  - ? find intra batch global keyframe matches
 #  /- try https://pythonhosted.org/sppy/ to speed up sparse matrix manipulations,
@@ -74,6 +72,7 @@ def main():
     parser.add_argument('--nadir-looking', action='store_true', help='is cam looking down? used for plots only')
     parser.add_argument('--plot', action='store_true', help='plot result')
     parser.add_argument('--plot-only', action='store_true', help='plot initial result, exit')
+    parser.add_argument('--plot-matches-only', action='store_true', help='plot akaze feature matches, exit')
     parser.add_argument('--ini-fl', type=float, help='initial value for focal length')
     parser.add_argument('--ini-cx', type=float, help='initial value for x principal point')
     parser.add_argument('--ini-cy', type=float, help='initial value for y principal point')
@@ -105,7 +104,7 @@ def main():
     if not args.skip_fe and not args.plot_only:
         run_fe(args)
 
-    if not args.skip_fm and not args.plot_only:
+    if not args.skip_fm and not args.plot_only or args.plot_matches_only:
         assert args.matches_path, 'no feature match file path given'
         run_fm(args)
 
@@ -113,8 +112,31 @@ def main():
         run_ba(args)
 
     if args.normalize_images and not args.plot_only:
-        pass
-        # TODO: (6) normalize images (and idealize cam params) so that can continue with depth estimation using depthmaps.py
+        run_ni(args)
+
+
+def run_ni(args):
+    # normalizes images (and idealizes cam params) so that can continue with depth estimation using depthmaps.py
+    for i, path in enumerate(args.path):
+        kapt_path = os.path.join(path, 'kapture')
+        kapt = kapture_from_dir(kapt_path)
+        sensor_id, width, height, fl_x, fl_y, pp_x, pp_y, *dist_coefs = cam_params = get_cam_params(kapt, SENSOR_NAME)
+
+        cam = cam_obj(cam_params)
+        map_u, map_v = cv2.initUndistortRectifyMap(cam.cam_mx, cam.dist_coefs, None,
+                                                   cam.cam_mx, (cam.width, cam.height), cv2.CV_16SC2)
+
+        # undistort image
+        for fid, img_files in tqdm(kapt.records_camera.items(), desc='Undistorting images'):
+            img_path = get_record_fullpath(kapt_path, img_files[sensor_id])
+            img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
+            undist_img = cv2.remap(img, map_u, map_v, interpolation=cv2.INTER_LINEAR)
+            cv2.imwrite(img_path, undist_img)
+
+        # idealize cam distortion
+        cam_params[-len(dist_coefs):] = 0.0
+        set_cam_params(kapt, SENSOR_NAME, cam_params)
+        kapture_to_dir(kapt_path, kapt)
 
 
 def run_fe(args):
@@ -228,13 +250,16 @@ def run_fm(args):
         for j, path2 in zip(range(i + 1, len(args.path)), args.path[i+1:]):
             k += 1
             b1, b2 = map(path2batchid, (path1, path2))
-            if (b1, b2) in processed_pairs or (b2, b1) in processed_pairs:
+            if not args.plot_matches_only and ((b1, b2) in processed_pairs or (b2, b1) in processed_pairs):
                 logger.info('Already processed %s and %s (%d/%d)' % (b1, b2, k, n*(n-1)/2))
             else:
                 find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d, res_obser_map,
-                             args.feature_name, args.plot, img_files,
+                             args.feature_name, args.plot, img_files, plot_only=args.plot_matches_only,
                              desc='Processing %s and %s (%d/%d)' % (b1, b2, k, n*(n-1)/2))
                 processed_pairs.add((b1, b2))
+
+    if args.plot_matches_only:
+        return
 
     # calculate mean of each entry in res_pts3d, except if point observed by a frozen batch
     res_pts3d = np.array([np.atleast_2d(np.array(pts3d))[0, :] if i in frozen_pts3d
@@ -251,7 +276,7 @@ def path2batchid(path):
 
 
 def find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d, res_obser, feature_name,
-                 plot=False, img_files=None, desc=None):
+                 plot=False, img_files=None, plot_only=False, desc=None):
     # find all frames with akaze features, load poses and observations
     bid1, bid2 = map(path2batchid, (path1, path2))
 
@@ -285,8 +310,23 @@ def find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d
             obser.update({(bid, frame_id, feat_id): kapt.points3d[pt3d_id][:3]
                           for feat_id, pt3d_id in feat_to_pt3d.items()})
 
-            if plot:
+            if plot or plot_only:
                 img_files[(bid, frame_id)] = get_record_fullpath(kapt_path, img_file)
+
+    if plot_only:
+        fids1, kids1, fids2, kids2, pts3d = get_pairs(res_obser, res_pts3d, bid1, bid2)
+        for fid1, kid1, fid2, kid2, pt3d in tqdm(zip(fids1, kids1, fids2, kids2, pts3d),
+                                                 total=len(fids1), desc='%s - %s pairs' % (bid1, bid2)):
+            repr_kps = []
+            for bid, fid in [(bid1, fid1), (bid2, fid2)]:
+                pose, cam = poses[(bid, fid)], cam_obj(cam_params[bid])
+                pts3d_cf = tools.q_times_mx(pose.quat, pt3d) + pose.loc
+                repr_kps.append(np.atleast_2d(cam.project(pts3d_cf.astype(np.float32)) + 0.5).astype(int))
+
+            plot_matches(img_files[(bid1, fid1)], img_files[(bid2, fid2)],
+                         pts2d[(bid1, fid1)][kid1.astype(int)], pts2d[(bid2, fid2)][kid2.astype(int)],
+                         repr_kps1=repr_kps[0], repr_kps2=repr_kps[1])
+        return
 
     # TODO: in some distant future, find closest pose based on GFTT/AKAZE locations instead of drone location
     #       (similar to what is done in navex/datasets/preproc)
@@ -344,7 +384,7 @@ def run_ba(args):
     # check https://github.com/NikolausDemmel/rootba/blob/master/src/rootba/bal/solver_options.hpp
     solver = RootBundleAdjuster(
         ini_tr_rad=args.ini_tr,
-        min_tr_rad=1e-32,
+        min_tr_rad=1e-15 if args.float32 else 1e-32,
         max_tr_rad=1e7 if args.float32 else 1e16,
         ini_vee=2.0,
         vee_factor=2.0,
@@ -460,7 +500,7 @@ def run_ba(args):
     frozen_batches = [path2batchid(path) for path in (args.frozen_batches or [])]
 
     pts2d, batch_idxs, cam_params, cam_param_idxs, poses, pose_idxs, pose_batch, pts3d, pt3d_idxs, pt3d_batch, \
-            frozen_points, pt3d_gftt_n, meas_r, meas_aa, meas_idxs = \
+            frozen_points, pt3d_gftt_n, meas_r, meas_aa, meas_idxs, akaze_repr_err_count = \
                     join_batches(arr_pts2d, arr_cam_params, arr_cam_param_idxs, arr_poses,
                                  arr_pose_idxs, arr_pts3d, arr_pt3d_idxs, arr_meas_r, arr_meas_aa,
                                  arr_meas_idxs, arr_akaze_obser, arr_frames, batch_ids,
@@ -470,7 +510,7 @@ def run_ba(args):
         arr_meas_aa, arr_meas_idxs, arr_akaze_obser, arr_frames, batch_ids, akaze_pts3d, akaze_obser_map
 
     problem = Problem(pts2d, batch_idxs, cam_params, cam_param_idxs, poses, pose_idxs, pose_batch,
-                      pts3d, pt3d_idxs, pt3d_batch, frozen_points, meas_r, meas_aa, meas_idxs,
+                      pts3d, pt3d_idxs, pt3d_batch, frozen_points, meas_r, meas_aa, meas_idxs, akaze_repr_err_count,
                       PX_ERR_SD, LOC_ERR_SD, ORI_ERR_SD, dtype=np.float32 if args.float32 else np.float64)
 
     del pts2d, batch_idxs, cam_params, cam_param_idxs, poses, pose_idxs, pts3d, pt3d_idxs, meas_r, meas_aa, meas_idxs
@@ -816,6 +856,7 @@ def join_batches(arr_pts2d, arr_cam_params, arr_cam_param_idxs, arr_poses, arr_p
         pose_count += len(_poses)
         pt3d_count += len(_pts3d)
 
+    i = 0
     if akaze_pts3d is not None:
         _pts2d = np.zeros((len(akaze_obser_map), 2))
         _batch_idxs = np.zeros((len(akaze_obser_map),), dtype=int)
@@ -823,7 +864,6 @@ def join_batches(arr_pts2d, arr_cam_params, arr_cam_param_idxs, arr_poses, arr_p
         _pt3d_idxs = np.zeros((len(akaze_obser_map),), dtype=int)
         _pt3d_batch = np.zeros((len(akaze_pts3d), len(batch_ids)), dtype=bool)
         frozen_points = np.zeros((pt3d_count + len(akaze_pts3d),), dtype=bool) if frozen_batches else None
-        i = 0
         for (batch_id, frame_id, feature_id), id_pt3d in akaze_obser_map.items():
             if batch_id in bid2idx:
                 bi = bid2idx[batch_id]
@@ -842,6 +882,7 @@ def join_batches(arr_pts2d, arr_cam_params, arr_cam_param_idxs, arr_poses, arr_p
         pt3d_idxs.append(_pt3d_idxs[:i])
         pt3d_batch.append(_pt3d_batch)
         arr_pts3d = arr_pts3d + [akaze_pts3d]
+    akaze_repr_err_count = i
 
     pts2d, batch_idxs, poses, pose_idxs, pose_batch, pts3d, pt3d_idxs, pt3d_batch, meas_r, meas_aa, meas_idxs = map(
         lambda x: None if np.any([k is None for k in x]) else np.concatenate(x, axis=0),
@@ -849,24 +890,74 @@ def join_batches(arr_pts2d, arr_cam_params, arr_cam_param_idxs, arr_poses, arr_p
          arr_meas_r, arr_meas_aa, meas_idxs))
 
     return pts2d, batch_idxs, arr_cam_params, arr_cam_param_idxs, poses, pose_idxs, pose_batch, \
-           pts3d, pt3d_idxs, pt3d_batch, frozen_points, pt3d_count, meas_r, meas_aa, meas_idxs
+           pts3d, pt3d_idxs, pt3d_batch, frozen_points, pt3d_count, meas_r, meas_aa, meas_idxs, akaze_repr_err_count
 
 
-def plot_matches(img_path1, img_path2, kps1, kps2, kps_only=False):
+def get_pairs(all_obser, all_kps3d, bid1, bid2):
+    # obser: {(bid, fid, kid): kp3d_id, ....}
+
+    all_fids = {bid1: {}, bid2: {}}
+    for (bid, fid, kid), kp3d_id in all_obser.items():
+        if bid in all_fids:
+            all_fids[bid].setdefault(fid, np.zeros((len(all_kps3d),), dtype=np.uint32))[kp3d_id] = kid + 1
+
+    all_fids1, all_obs1 = zip(*[(fid, obs) for fid, obs in all_fids[bid1].items()])
+    all_fids1, all_obs1 = map(lambda x: np.array(x, dtype=np.uint32), (all_fids1, all_obs1))
+
+    all_fids2, all_obs2 = zip(*[(fid, obs) for fid, obs in all_fids[bid2].items()])
+    all_fids2, all_obs2 = map(lambda x: np.array(x, dtype=np.uint32), (all_fids2, all_obs2))
+
+    # TODO: debug
+
+    tree = cKDTree(all_obs2 > 0)
+    d, idxs2 = tree.query(all_obs1 > 0, p=1)
+
+    common = np.logical_and(all_obs1, all_obs2[idxs2, :])
+    I = np.sum(common, axis=1) >= (MIN_INLIERS if 0 else 1)
+    idx = np.where(I)[0]
+    kps3d = np.array([all_kps3d[row, :] for row in common[I, :]], dtype=object)
+
+    fids1 = all_fids1[I]
+    kids1 = np.array([all_obs1[i, common[i, :]] - 1 for i in idx], dtype=object)  # TODO: for some reason 0s selected => -1 => 4294967295
+
+    fids2 = all_fids2[idxs2[I]]
+    kids2 = np.array([all_obs2[idxs2[i], common[i, :]] - 1 for i in idx], dtype=object)
+
+    I = np.argsort(fids1)
+    return fids1[I], kids1[I], fids2[I], kids2[I], kps3d[I]
+
+
+def plot_matches(img_path1, img_path2, kps1, kps2, repr_kps1=None, repr_kps2=None, kps_only=False):
     def arr2kp(arr, size=7):
         return [cv2.KeyPoint(p[0, 0], p[0, 1], size) for p in arr]
 
-    matches = [cv2.DMatch(i, i, 0, 0) for i in range(len(kps1))]
     img1, img2 = map(lambda x: cv2.imread(x), (img_path1, img_path2))
-    if kps_only:
+
+    if repr_kps1 is not None:
+        assert repr_kps2 is not None, 'need also repr_kps2 to plot reprojections'
+        img = np.concatenate([draw_keypoints(img1, kps1, repr_kps1),
+                              draw_keypoints(img2, kps2, repr_kps2)], axis=1)
+    elif kps_only:
         img = np.concatenate((cv2.drawKeypoints(img1, arr2kp(kps1), None),
                               cv2.drawKeypoints(img2, arr2kp(kps2), None)), axis=1)
     else:
+        matches = [cv2.DMatch(i, i, 0, 0) for i in range(len(kps1))]
         img = cv2.drawMatches(img1, arr2kp(kps1), img2, arr2kp(kps2), matches, None)
+
     cv2.imshow('keypoints' if kps_only else 'matches', img)
     if not kps_only:
-        cv2.setWindowTitle('matches', '%d matches' % len(matches))
+        cv2.setWindowTitle('matches', '%d matches' % len(kps1))
     cv2.waitKey(1 if kps_only else 0)
+
+
+def draw_keypoints(image, kps, repr_kps, c_diam=7, r_diam=5, c_col=(255, 255, 0), r_col=(255, 255, 0)):
+    kps, repr_kps = np.atleast_2d(kps.squeeze()), np.atleast_2d(repr_kps.squeeze())
+    for (x, y), (xp, yp) in zip(kps, repr_kps):
+        x, y, xp, yp = map(int, (x, y, xp, yp))
+        image = cv2.circle(image, (x, y), c_diam, c_col, 1)  # negative thickness => filled circle
+        image = cv2.rectangle(image, (xp - r_diam//2, yp - r_diam//2), (xp + r_diam//2, yp + r_diam//2), r_col, 1)
+        image = cv2.line(image, (xp, yp), (x, y), r_col, 1)
+    return image
 
 
 def replay_probem(img_paths: List[str], p: Problem):
