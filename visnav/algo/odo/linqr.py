@@ -109,9 +109,9 @@ class InnerLinearizerQR:
             rr1, (Jrb1, Jrp1, Jrl1), err1 = self._apply_huber(rr[:-c], (Jrb[:-c, :], Jrp[:-c, :], Jrl[:-c, :]), m, self.huber_coef_repr)
             rr2, (Jrb2, Jrp2, Jrl2), err2 = self._apply_huber(rr[-c:], (Jrb[-c:, :], Jrp[-c:, :], Jrl[-c:, :]), m, self.huber_coef_repr)
             rr = np.concatenate((rr1, rr2), axis=0)
-            Jrb = np.concatenate((Jrb1, Jrb2), axis=0)
-            Jrp = np.concatenate((Jrp1, Jrp2), axis=0)
-            Jrl = np.concatenate((Jrl1, Jrl2), axis=0)
+            Jrb = np.concatenate((np.atleast_2d(Jrb1), np.atleast_2d(Jrb2)), axis=0)
+            Jrp = np.concatenate((np.atleast_2d(Jrp1), np.atleast_2d(Jrp2)), axis=0)
+            Jrl = np.concatenate((np.atleast_2d(Jrl1), np.atleast_2d(Jrl2)), axis=0)
             self._total_error = err1 + err2
 
         if mx > 0:
