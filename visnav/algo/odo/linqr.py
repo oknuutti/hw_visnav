@@ -108,10 +108,10 @@ class InnerLinearizerQR:
             c = self.problem.akaze_repr_err_count
             rr1, (Jrb1, Jrp1, Jrl1), err1 = self._apply_huber(rr[:-c], (Jrb[:-c, :], Jrp[:-c, :], Jrl[:-c, :]), m, self.huber_coef_repr)
             rr2, (Jrb2, Jrp2, Jrl2), err2 = self._apply_huber(rr[-c:], (Jrb[-c:, :], Jrp[-c:, :], Jrl[-c:, :]), m, self.huber_coef_repr)
-            rr = np.concatenate((rr1, rr2), axis=0)
-            Jrb = np.concatenate((np.atleast_2d(Jrb1), np.atleast_2d(Jrb2)), axis=0)
-            Jrp = np.concatenate((np.atleast_2d(Jrp1), np.atleast_2d(Jrp2)), axis=0)
-            Jrl = np.concatenate((np.atleast_2d(Jrl1), np.atleast_2d(Jrl2)), axis=0)
+            rr = self._sp_vstack((rr1, rr2))
+            Jrb = self._sp_vstack((np.atleast_2d(Jrb1), np.atleast_2d(Jrb2)))
+            Jrp = self._sp_vstack((np.atleast_2d(Jrp1), np.atleast_2d(Jrp2)))
+            Jrl = self._sp_vstack((np.atleast_2d(Jrl1), np.atleast_2d(Jrl2)))
             self._total_error = err1 + err2
 
         if mx > 0:
@@ -159,6 +159,23 @@ class InnerLinearizerQR:
             self.build_landmark_blocks(rr, Jrb, Jrp, Jrl)
 
         self._state = self.STATE_LINEARIZED
+
+    def _sp_vstack(self, arrs):
+        assert len(arrs) > 0, 'len(arrs) == 0'
+        tot_len = sum(a.shape[0] for a in arrs)
+
+        if is_own_sp_mx(arrs[0]):
+            B = np.empty((tot_len, arrs[0].shape[1]), dtype=self.dtype)
+            r = 0
+            for A in arrs:
+                i, j = zip(*np.ndindex(A.shape))
+                A.copyto((i, j), B[r:r+A.shape[0], :])
+                r += A.shape[0]
+            return B
+        elif np.any([sp.issparse(a) for a in arrs]):
+            return sp.vstack(arrs)
+        else:
+            return np.vstack(arrs)
 
     @staticmethod
     @maybe_decorate(nb.njit(nogil=True, parallel=False, cache=True), NUMBA_LEVEL >= 4)
