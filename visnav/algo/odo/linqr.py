@@ -295,9 +295,9 @@ class InnerLinearizerQR:
 
         abs_r = np.abs(r)
         I = abs_r > huber_coef
-        huber_weight = np.ones_like(r)
+        huber_weight = np.ones_like(r) * residual_weight
         huber_weight[I] *= np.sqrt(huber_coef / abs_r[I])
-        dwr_dr = np.sqrt(residual_weight * huber_weight)
+        dwr_dr = np.sqrt(huber_weight)
 
         wr = dwr_dr * r
 
@@ -330,7 +330,13 @@ class InnerLinearizerQR:
         nr, nx, na = self.problem.pts2d.size, self.problem.meas_r.size, self.problem.meas_aa.size
         rr, *rxra = self.problem.residual(parts=True)
 
-        _, _, err = self._apply_huber(rr, None, nr+nx+na, self.huber_coef_repr)
+        if self.problem.akaze_repr_err_count == 0:
+            _, _, err = self._apply_huber(rr, None, nr+nx+na, self.huber_coef_repr)
+        else:
+            c = self.problem.akaze_repr_err_count
+            _, _, err1 = self._apply_huber(rr[:-c], None, nr+nx+na, self.huber_coef_repr)
+            _, _, err2 = self._apply_huber(rr[-c:], None, nr+nx+na, self.huber_coef_repr)
+            err = err1 + err2
         total_error = err
 
         if nx > 0:
