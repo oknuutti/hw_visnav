@@ -109,9 +109,9 @@ class InnerLinearizerQR:
             rr1, (Jrb1, Jrp1, Jrl1), err1 = self._apply_huber(rr[:-c], (Jrb[:-c, :], Jrp[:-c, :], Jrl[:-c, :]), m, self.huber_coef_repr)
             rr2, (Jrb2, Jrp2, Jrl2), err2 = self._apply_huber(rr[-c:], (Jrb[-c:, :], Jrp[-c:, :], Jrl[-c:, :]), m, self.huber_coef_repr)
             rr = self._sp_vstack((rr1, rr2))
-            Jrb = self._sp_vstack((np.atleast_2d(Jrb1), np.atleast_2d(Jrb2)))
-            Jrp = self._sp_vstack((np.atleast_2d(Jrp1), np.atleast_2d(Jrp2)))
-            Jrl = self._sp_vstack((np.atleast_2d(Jrl1), np.atleast_2d(Jrl2)))
+            Jrb = self._sp_vstack((Jrb1, Jrb2))
+            Jrp = self._sp_vstack((Jrp1, Jrp2))
+            Jrl = self._sp_vstack((Jrl1, Jrl2))
             self._total_error = err1 + err2
 
         if mx > 0:
@@ -175,7 +175,7 @@ class InnerLinearizerQR:
         elif np.any([sp.issparse(a) for a in arrs]):
             return sp.vstack(arrs)
         else:
-            return np.vstack(arrs)
+            return np.vstack([np.atleast_2d(a) for a in arrs])
 
     @staticmethod
     @maybe_decorate(nb.njit(nogil=True, parallel=False, cache=True), NUMBA_LEVEL >= 4)
@@ -274,7 +274,7 @@ class InnerLinearizerQR:
             A.copyto((i, j), B)
             return B
         # safe is very slow, unsafe is dangerous as bugs won't be found
-        return A[i, j] if safe else A._get_arrayXarray(i, j)
+        return A[i, j] if safe or not sp.issparse(A) else A._get_arrayXarray(i, j)
 
     @staticmethod
     def _block_indexing(row_idxs, col_idxs, block_rows, block_cols):
