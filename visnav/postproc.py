@@ -33,7 +33,7 @@ from visnav.run import plot_results
 
 DEBUG = 0
 PX_ERR_SD = 2  # 0.55   #  0.55    # |(960, 540)| * 0.0005 => 1101 * 0.0005 => 0.55
-LOC_ERR_SD = (6.0, 6.0, 6.0) if 1 else (np.inf,)
+LOC_ERR_SD = (6.0,) if 1 else (np.inf,)
 ORI_ERR_SD = (math.radians(30.0) if 0 else np.inf,)
 HUBER_COEFS = None  # (1.0, 5.0, 0.5)
 SENSOR_NAME = 'cam'
@@ -83,6 +83,9 @@ def main():
     parser.add_argument('--max-time', type=int, default=0, help='max ba duration in seconds')
     parser.add_argument('--ftol', type=float, default=1e-5, help='stop ba if cost decreases less than this')
 
+    parser.add_argument('--repr-sd', type=float, default=PX_ERR_SD, help='reprojectrion error standard deviation [px]')
+    parser.add_argument('--loc-sd', nargs='+', type=float, default=LOC_ERR_SD, help='location error standard deviation [m]')
+    parser.add_argument('--ori-sd', nargs='+', type=float, default=ORI_ERR_SD, help='orientation error standard deviation [deg]')
     parser.add_argument('--fix-fl', action='store_true', help='do not optimize focal length')
     parser.add_argument('--fix-pp', action='store_true', help='do not optimize principal point')
     parser.add_argument('--fix-dist', action='store_true', help='do not optimize distortion coefs')
@@ -511,7 +514,7 @@ def run_ba(args):
 
     problem = Problem(pts2d, batch_idxs, cam_params, cam_param_idxs, poses, pose_idxs, pose_batch,
                       pts3d, pt3d_idxs, pt3d_batch, frozen_points, akaze_repr_err_count, meas_r, meas_aa, meas_idxs,
-                      PX_ERR_SD, LOC_ERR_SD, ORI_ERR_SD, dtype=np.float32 if args.float32 else np.float64)
+                      args.repr_sd, args.loc_sd, args.ori_sd, dtype=np.float32 if args.float32 else np.float64)
 
     del pts2d, batch_idxs, cam_params, cam_param_idxs, poses, pose_idxs, pts3d, pt3d_idxs, meas_r, meas_aa, meas_idxs
 
@@ -567,9 +570,9 @@ def run_ba(args):
         J = problem.jacobian()
         r = problem.residual()
 
-        a0, K, loc_err_sd = np.array([]), np.array([[fl_x, 0, pp_x], [0, fl_y, pp_y], [0, 0, 1]]), np.array(LOC_ERR_SD)
+        a0, K, loc_err_sd = np.array([]), np.array([[fl_x, 0, pp_x], [0, fl_y, pp_y], [0, 0, 1]]), np.array(args.loc_sd)
         rref, Jref = vis_gps_bundle_adj(poses, pts3d, pts2d, a0, pose_idxs, pt3d_idxs, K, dist_coefs,
-                                        np.array([PX_ERR_SD]), meas_r, meas_aa, a0, meas_idxs, loc_err_sd, np.inf,
+                                        np.array([args.repr_sd]), meas_r, meas_aa, a0, meas_idxs, loc_err_sd, np.inf,
                                         max_nfev=10, skip_pose_n=0, huber_coef=HUBER_COEFS, poses_only=False,
                                         just_return_r_J=True)
 
