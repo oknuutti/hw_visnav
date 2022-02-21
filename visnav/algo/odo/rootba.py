@@ -46,8 +46,8 @@ class RootBundleAdjuster:
     MAX_INNER_ITERS = np.inf
 
     def __init__(self, ini_tr_rad, min_tr_rad, max_tr_rad, ini_vee, vee_factor, n_workers, max_iters, max_time,
-                 min_step_quality, xtol, rtol, ftol, max_repr_err, jacobi_scaling_eps,
-                 lin_cg_maxiter, lin_cg_tol, preconditioner_type, huber_coefs, use_weighted_residuals):
+                 min_step_quality, xtol, rtol, ftol, max_repr_err, jacobi_scaling_eps, lin_cg_maxiter, lin_cg_tol,
+                 preconditioner_type, huber_coefs, use_weighted_residuals, inter_batch_repr_weight):
         self.ini_lambda = 1 / ini_tr_rad
         self.min_lambda = 1 / max_tr_rad
         self.max_lambda = 1 / min_tr_rad
@@ -67,6 +67,7 @@ class RootBundleAdjuster:
             preconditioner_type=preconditioner_type,
             huber_coefs=huber_coefs,
             use_weighted_residuals=use_weighted_residuals,
+            inter_batch_repr_weight=inter_batch_repr_weight,
             n_workers=n_workers,
         )
 
@@ -239,7 +240,7 @@ class LinearizerQR:
 
     def __init__(self, problem, jacobi_scaling_eps=0, lin_cg_maxiter=500, lin_cg_tol=1e-5,
                  preconditioner_type=PRECONDITIONER_TYPE_SCHUR_JACOBI, staged_execution=True,
-                 huber_coefs=None, use_weighted_residuals=False, n_workers=0):
+                 huber_coefs=None, use_weighted_residuals=False, inter_batch_repr_weight=1.0, n_workers=0):
         self.problem = problem
         self.dtype = self.problem.dtype
 
@@ -256,7 +257,8 @@ class LinearizerQR:
         self._new_linearization_point = True
         self._precond_mx = None                 # precond_blocks_
         self._lqr = InnerLinearizerQR(self.problem, jacobi_scaling_eps=self.jacobi_scaling_eps, n_workers=n_workers,
-                                      huber_coefs=huber_coefs, use_weighted_residuals=use_weighted_residuals)
+                                      huber_coefs=huber_coefs, use_weighted_residuals=use_weighted_residuals,
+                                      inter_batch_repr_weight=inter_batch_repr_weight)
     # def start_iter(self):
     #     pass
     #

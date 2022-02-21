@@ -28,7 +28,7 @@ class InnerLinearizerQR:
     ) = range(4)
 
     def __init__(self, problem, jacobi_scaling_eps=1e-5, huber_coefs=None, use_weighted_residuals=False,
-                 use_own_sp_mx=NUMBA_LEVEL >= 4, n_workers=0):
+                 inter_batch_repr_weight=1.0, use_own_sp_mx=NUMBA_LEVEL >= 4, n_workers=0):
         self.problem = problem
         self.dtype = self.problem.dtype
         self.idx_dtype = problem.IDX_DTYPE
@@ -39,6 +39,7 @@ class InnerLinearizerQR:
         self.huber_coef_loc = huber_coefs[1]
         self.huber_coef_ori = huber_coefs[2]
         self.use_weighted_residuals = use_weighted_residuals
+        self.inter_batch_repr_weight = inter_batch_repr_weight
         self.use_own_sp_mx = use_own_sp_mx
         self.n_workers = min(n_workers, mp.cpu_count() - 1)
         # self.worker_pool = mp.Pool(self.n_workers) if self.n_workers > 1 else None
@@ -101,13 +102,14 @@ class InnerLinearizerQR:
                 self._state = self.STATE_NUMERICAL_FAILURE
                 return
 
-        if self.problem.akaze_repr_err_count == 0:
+        if self.problem.inter_batch_repr_count == 0:
             rr, (Jrb, Jrp, Jrl), err = self._apply_huber(rr, (Jrb, Jrp, Jrl), m, self.huber_coef_repr)
             self._total_error = err
         else:
-            c = self.problem.akaze_repr_err_count
+            c = self.problem.inter_batch_repr_count
             rr1, (Jrb1, Jrp1, Jrl1), err1 = self._apply_huber(rr[:-c], (Jrb[:-c, :], Jrp[:-c, :], Jrl[:-c, :]), m, self.huber_coef_repr)
-            rr2, (Jrb2, Jrp2, Jrl2), err2 = self._apply_huber(rr[-c:], (Jrb[-c:, :], Jrp[-c:, :], Jrl[-c:, :]), m, self.huber_coef_repr)
+            rr2, (Jrb2, Jrp2, Jrl2), err2 = self._apply_huber(rr[-c:], (Jrb[-c:, :], Jrp[-c:, :], Jrl[-c:, :]), m, self.huber_coef_repr,
+                                                              extra_weight=self.inter_batch_repr_weight)
             rr = self._sp_vstack((rr1, rr2))
             Jrb = self._sp_vstack((Jrb1, Jrb2))
             Jrp = self._sp_vstack((Jrp1, Jrp2))
@@ -288,10 +290,10 @@ class InnerLinearizerQR:
     def _augment_idxs(idxs, size):
         return (np.repeat(idxs[:, None] * size, size, axis=1) + np.arange(size, dtype=idxs.dtype)[None, :]).flatten()
 
-    def _apply_huber(self, r, arr_J, total_nr, huber_coef):
+    def _apply_huber(self, r, arr_J, total_nr, huber_coef, extra_weight=1.0):
         huber_coef = np.inf if huber_coef is None else huber_coef
 
-        residual_weight = total_nr / len(r) if self.use_weighted_residuals else 1.0
+        residual_weight = extra_weight * (total_nr / len(r) if self.use_weighted_residuals else 1.0)
 
         abs_r = np.abs(r)
         I = abs_r > huber_coef
@@ -330,12 +332,13 @@ class InnerLinearizerQR:
         nr, nx, na = self.problem.pts2d.size, self.problem.meas_r.size, self.problem.meas_aa.size
         rr, *rxra = self.problem.residual(parts=True)
 
-        if self.problem.akaze_repr_err_count == 0:
+        if self.problem.inter_batch_repr_count == 0:
             _, _, err = self._apply_huber(rr, None, nr+nx+na, self.huber_coef_repr)
         else:
-            c = self.problem.akaze_repr_err_count
+            c = self.problem.inter_batch_repr_count
             _, _, err1 = self._apply_huber(rr[:-c], None, nr+nx+na, self.huber_coef_repr)
-            _, _, err2 = self._apply_huber(rr[-c:], None, nr+nx+na, self.huber_coef_repr)
+            _, _, err2 = self._apply_huber(rr[-c:], None, nr+nx+na, self.huber_coef_repr,
+                                           extra_weight=self.inter_batch_repr_weight)
             err = err1 + err2
         total_error = err
 

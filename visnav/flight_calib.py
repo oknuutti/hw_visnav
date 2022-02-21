@@ -21,8 +21,8 @@ from visnav.missions.nokia import NokiaSensor
 from visnav.run import plot_results
 
 DEBUG = 0
-PX_ERR_SD = 1.0
-LOC_ERR_SD = (2.0, 3.0, 2.0) if 1 else (np.inf,)
+PX_ERR_SD = 0.5
+LOC_ERR_SD = (6.0, 6.0, 6.0) if 1 else (np.inf,)
 ORI_ERR_SD = (math.radians(1.0) if 0 else np.inf,)
 SENSOR_NAME = 'cam'
 FEATURE_NAME = 'gftt'
@@ -42,10 +42,10 @@ PRE_BA_DIST_ENABLED = False
 ) = ERROR_TYPES = range(6)
 
 ERROR_COEFS = dict(zip(ERROR_TYPES, (
-    1,
+    100,
     100,
     1,
-    1,
+    0.1,
     1,
     1,
 )))
@@ -72,6 +72,7 @@ def main():
     parser.add_argument('--opt-loc', action='store_true', help='use gps measure error')
     parser.add_argument('--opt-disp', action='store_true', help='use dispersion around estimated surface as a measure')
     parser.add_argument('--opt-pitch', action='store_true', help='expect pitch to not change')
+    parser.add_argument('--opt-ground', type=float, help='expect the ground to be at this altitude [m] in the final frame')
     args = parser.parse_args()
 
     cf_args = []
@@ -146,8 +147,13 @@ def main():
         elif args.opt_pitch:
             error_types.add(ERROR_TYPE_PITCH)
 
+        ground_alt = TAKEOFF_LAWN_ALT
+        if args.opt_ground is not None:
+            error_types.add(ERROR_TYPE_ALTITUDE)
+            ground_alt = args.opt_ground
+
         cf_args.append((width, height, pp_x, pp_y, poses, pts3d, pts2d, cam_idxs, pt3d_idxs,
-                        meas_r, meas_aa, meas_idxs, obs_kp, error_types,
+                        meas_r, meas_aa, meas_idxs, obs_kp, ground_alt, error_types,
                         x0[0] if args.fix_fl else None, x0[1:] if args.fix_dist else None))
 
     print('optimizing focal length and radial distortion coefs...')
@@ -159,13 +165,13 @@ def main():
         hi_bounds += (0.12,)
         diff_step += (0.001,)
     elif len(x0) - 1 == 2:
-        lo_bounds += (-0.5, -0.5)
-        hi_bounds += (0.5, 0.5)
-        diff_step += (0.001, 0.001)
+        lo_bounds += (-0.2, -0.6)
+        hi_bounds += (0.2, 0.6)
+        diff_step += (0.001, 0.01)
     elif len(x0) - 1 == 4:
         lo_bounds += (-0.5, -0.5, -0.01, -0.01)
         hi_bounds += (0.5, 0.5, 0.01, 0.01)
-        diff_step += (0.001, 0.001, 0.001, 0.001)
+        diff_step += (0.001, 0.01, 0.01, 0.01)
     else:
         assert False, 'not supported'
 
@@ -194,7 +200,7 @@ def costfun(x, cf_args, plot=False):
 
 
 def traj_costfun(x, width, height, pp_x, pp_y, poses, pts3d, pts2d, cam_idxs, pt3d_idxs,
-                 meas_r, meas_aa, meas_idxs, obs_kp, error_types, def_fl=None, def_dist=None, plot=False):
+                 meas_r, meas_aa, meas_idxs, obs_kp, ground_alt, error_types, def_fl=None, def_dist=None, plot=False):
     if def_fl is None and def_dist is None:
         fl, dist_coefs = abs(x[0]), x[1:]
     elif def_dist is None:
@@ -254,9 +260,13 @@ def traj_costfun(x, width, height, pp_x, pp_y, poses, pts3d, pts2d, cam_idxs, pt
             pose_cf = new_poses[meas_idxs[-1], :]
             loc_wf = (-Pose(pose_cf[3:], tools.angleaxis_to_q(pose_cf[:3]))).loc
 
-            end_distance = normal.dot(loc_wf[:, None] - centroid)
-            end_meas_alt = -meas_r[-1, 1] - TAKEOFF_LAWN_ALT  # neg y-axis is altitude
-            err_alt = (end_distance - end_meas_alt)[0, 0]
+            is_takeoff = ERROR_TYPE_CURVATURE in error_types
+            end_meas_alt = -meas_r[-1 if is_takeoff else 0, 2] - ground_alt  # neg z-axis is altitude
+            if 1:
+                end_distance = np.abs(normal.dot(loc_wf[:, None] - centroid.flatten()[:, None]))
+                err_alt = (end_meas_alt - end_distance)[0, 0]
+            else:
+                err_alt = np.quantile(-new_pts3d[:, 2], 0.2) - ground_alt
             errs.append(ERROR_COEFS[ERROR_TYPE_ALTITUDE] * err_alt / end_meas_alt)
             labels.append('alt')
 
@@ -294,7 +304,7 @@ def run_ba(width, height, pp_x, pp_y, fl, dist_coefs, poses, pts3d, pts2d, cam_i
     cam = Camera(width, height, cam_mx=np.array([[fl, 0, pp_x], [0, fl, pp_y], [0, 0, 1]]),
                  dist_coefs=np.array(dist_coefs5, dtype=np.float32))
     norm_pts2d = pts2d.squeeze() if optimize_dist else cam.undistort(pts2d).squeeze()
-    new_poses, new_pts3d, dist_ba, cam_intr_ba, _, ba_errs = vis_gps_bundle_adj(
+    new_poses, new_pts3d, dist_ba, cam_intr_ba, _, _, ba_errs = vis_gps_bundle_adj(
         poses, pts3d, norm_pts2d, np.zeros((0, 1)), cam_idxs, pt3d_idxs, cam.intrinsic_camera_mx(), dist_coefs,
         np.array([PX_ERR_SD]), meas_r, meas_aa, np.zeros((0, 1)), meas_idxs,
         np.array(LOC_ERR_SD), np.array(ORI_ERR_SD), px_err_weight=np.array([1]), n_cam_intr=n_cam_intr,
@@ -373,9 +383,9 @@ def get_ba_params(path, ff, lf, results, kapt, sensor_id):
             for id3, uv in kps_uv.items()
     ])))
 
-    meas_idxs = np.array([i for i, r in enumerate(results) if r[1] is not None and i < len(poses)], dtype=int)
-    meas_q = {i: results[i][0].prior.quat.conj() for i in meas_idxs}
-    meas_r = np.array([tools.q_times_v(meas_q[i], -results[i][0].prior.loc) for i in meas_idxs], dtype=np.float32)
+    meas_idxs = np.array([i for i, r in enumerate(results) if r['meas'] is not None and i < len(poses)], dtype=int)
+    meas_q = {i: results[i]['pose'].prior.quat.conj() for i in meas_idxs}
+    meas_r = np.array([tools.q_times_v(meas_q[i], -results[i]['pose'].prior.loc) for i in meas_idxs], dtype=np.float32)
     meas_aa = np.array([tools.q_to_angleaxis(meas_q[i], compact=True) for i in meas_idxs], dtype=np.float32)
 
     return poses, pts3d, pts2d, cam_idxs, pt3d_idxs, meas_r, meas_aa, meas_idxs, obs_kp

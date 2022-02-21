@@ -86,6 +86,9 @@ def main():
     parser.add_argument('--repr-sd', type=float, default=PX_ERR_SD, help='reprojectrion error standard deviation [px]')
     parser.add_argument('--loc-sd', nargs='+', type=float, default=LOC_ERR_SD, help='location error standard deviation [m]')
     parser.add_argument('--ori-sd', nargs='+', type=float, default=ORI_ERR_SD, help='orientation error standard deviation [deg]')
+    parser.add_argument('--inter-batch-repr-weight', type=float, default=1.0,
+                        help='weight of inter-batch reprojection errors (default=1.0, '
+                             'in addition to error count balancing between regular reprojection errors)')
     parser.add_argument('--fix-fl', action='store_true', help='do not optimize focal length')
     parser.add_argument('--fix-pp', action='store_true', help='do not optimize principal point')
     parser.add_argument('--fix-dist', action='store_true', help='do not optimize distortion coefs')
@@ -153,25 +156,27 @@ def run_fe(args):
         if kapt.descriptors is None:
             kapt.descriptors = {}
 
-        if args.feature_name in kapt.keypoints:
-            # remove all previous features of same type
-            for img_file in kapt.keypoints[args.feature_name]:
-                os.unlink(get_keypoints_fullpath(args.feature_name, kapt_path, img_file))
-                os.unlink(get_descriptors_fullpath(args.feature_name, kapt_path, img_file))
-            # remove also related 3d-points and observations
-            rem_pt3d = []
-            for pt3d_id, obs in kapt.observations.items():
-                if args.feature_name in obs:
-                    obs.pop(args.feature_name)
-                    if len(obs) == 0:
-                        rem_pt3d.append(pt3d_id)
+        # remove all previous extra features
+        rem_pt3d = []
+        for feature_name in ('akaze', 'r2d2'):
+            if feature_name in kapt.keypoints:
+                for img_file in kapt.keypoints[feature_name]:
+                    os.unlink(get_keypoints_fullpath(feature_name, kapt_path, img_file))
+                    os.unlink(get_descriptors_fullpath(feature_name, kapt_path, img_file))
+
+                # remove also related 3d-points and observations
+                for pt3d_id, obs in kapt.observations.items():
+                    if feature_name in obs:
+                        obs.pop(feature_name)
+                        if len(obs) == 0:
+                            rem_pt3d.append(pt3d_id)
+        if len(rem_pt3d) > 0:
             for pt3d_id in rem_pt3d:
                 kapt.observations.pop(pt3d_id)
-            if len(rem_pt3d) > 0:
-                min_id, max_id, tot_ids = np.min(rem_pt3d), np.max(rem_pt3d), len(rem_pt3d)
-                assert max_id - min_id + 1 == tot_ids and len(kapt.points3d) - 1 == max_id, \
-                       'can only remove all the 3d-points after a certain index'
-                kapt.points3d = kapt.points3d[:min_id, :]
+            min_id, max_id, tot_ids = np.min(rem_pt3d), np.max(rem_pt3d), len(rem_pt3d)
+            assert max_id - min_id + 1 == tot_ids and len(kapt.points3d) - 1 == max_id, \
+                   'can only remove all the 3d-points after a certain index'
+            kapt.points3d = kapt.points3d[:min_id, :]
 
         kapt.keypoints[args.feature_name] = kt.Keypoints(args.feature_name, np.float32, 2)
 
@@ -409,6 +414,7 @@ def run_ba(args):
 
         huber_coefs=HUBER_COEFS,
         use_weighted_residuals=True,
+        inter_batch_repr_weight=args.inter_batch_repr_weight,
     )
 
     akaze_pts3d, akaze_obser_map = [None] * 2
@@ -910,18 +916,16 @@ def get_pairs(all_obser, all_kps3d, bid1, bid2):
     all_fids2, all_obs2 = zip(*[(fid, obs) for fid, obs in all_fids[bid2].items()])
     all_fids2, all_obs2 = map(lambda x: np.array(x, dtype=np.uint32), (all_fids2, all_obs2))
 
-    # TODO: debug
-
     tree = cKDTree(all_obs2 > 0)
     d, idxs2 = tree.query(all_obs1 > 0, p=1)
 
     common = np.logical_and(all_obs1, all_obs2[idxs2, :])
-    I = np.sum(common, axis=1) >= (MIN_INLIERS if 0 else 1)
+    I = np.sum(common, axis=1) >= (MIN_INLIERS if 1 else 1)
     idx = np.where(I)[0]
     kps3d = np.array([all_kps3d[row, :] for row in common[I, :]], dtype=object)
 
     fids1 = all_fids1[I]
-    kids1 = np.array([all_obs1[i, common[i, :]] - 1 for i in idx], dtype=object)  # TODO: for some reason 0s selected => -1 => 4294967295
+    kids1 = np.array([all_obs1[i, common[i, :]] - 1 for i in idx], dtype=object)
 
     fids2 = all_fids2[idxs2[I]]
     kids2 = np.array([all_obs2[idxs2[i], common[i, :]] - 1 for i in idx], dtype=object)
