@@ -646,7 +646,7 @@ def save_and_plot(problem, args, arr_kapt, pt3d_gftt_n, log=False, save=False, p
                      else Keypoint(pt3d=pts3d[j, :]) for j in range(len(pts3d))]
 
         if save:
-            with open(os.path.join(path, 'ba-result.pickle'), 'wb') as fh:
+            with open(os.path.join(path, 'result.pickle'), 'wb') as fh:
                 pickle.dump((keyframes, map3d, frame_names, meta_names, gt, ba_errs), fh)
 
             kapt, width, height = arr_kapt[i]
