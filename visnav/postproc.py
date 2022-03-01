@@ -127,19 +127,30 @@ def run_ni(args):
         kapt_path = os.path.join(path, 'kapture')
         kapt = kapture_from_dir(kapt_path)
         sensor_id, width, height, fl_x, fl_y, pp_x, pp_y, *dist_coefs = cam_params = get_cam_params(kapt, SENSOR_NAME)
+        if np.isclose(np.sum(np.abs(dist_coefs)), 0.0):
+            logger.warning('at %s already an idealized camera without any distortion coefs!' % path)
+            continue
 
         cam = cam_obj(cam_params)
-        map_u, map_v = cv2.initUndistortRectifyMap(cam.cam_mx, cam.dist_coefs, None,
+        map_u, map_v = cv2.initUndistortRectifyMap(cam.cam_mx, np.array(cam.dist_coefs), None,
                                                    cam.cam_mx, (cam.width, cam.height), cv2.CV_16SC2)
 
-        # undistort image
+        # undistort images and keypoints
         for fid, img_files in tqdm(kapt.records_camera.items(), desc='Undistorting images'):
-            img_path = get_record_fullpath(kapt_path, img_files[sensor_id])
+            img_file = img_files[sensor_id]
+            img_path = get_record_fullpath(kapt_path, img_file)
             img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
             undist_img = cv2.remap(img, map_u, map_v, interpolation=cv2.INTER_LINEAR)
             cv2.imwrite(img_path, undist_img)
 
+            for feature_name, kp_type in kapt.keypoints.items():
+                if img_file in kp_type:
+                    kp_file_path = get_keypoints_fullpath(feature_name, kapt_path, img_file)
+                    pts2d = cam.undistort(image_keypoints_from_file(kp_file_path, kp_type.dtype, kp_type.dsize))
+                    image_keypoints_to_file(kp_file_path, pts2d)
+
         # idealize cam distortion
+        cam_params = np.array(cam_params)
         cam_params[-len(dist_coefs):] = 0.0
         set_cam_params(kapt, SENSOR_NAME, cam_params)
         kapture_to_dir(kapt_path, kapt)
@@ -326,13 +337,15 @@ def find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d
         for fid1, kid1, fid2, kid2, pt3d in tqdm(zip(fids1, kids1, fids2, kids2, pts3d),
                                                  total=len(fids1), desc='%s - %s pairs' % (bid1, bid2)):
             repr_kps = []
-            for bid, fid in [(bid1, fid1), (bid2, fid2)]:
-                pose, cam = poses[(bid, fid)], cam_obj(cam_params[bid])
+            cam1, cam2 = map(lambda bid: cam_obj(cam_params[bid]), (bid1, bid2))
+            for bid, fid, cam in [(bid1, fid1, cam1), (bid2, fid2, cam2)]:
+                pose = poses[(bid, fid)]
                 pts3d_cf = tools.q_times_mx(pose.quat, pt3d) + pose.loc
                 repr_kps.append(np.atleast_2d(cam.project(pts3d_cf.astype(np.float32)) + 0.5).astype(int))
 
             plot_matches(img_files[(bid1, fid1)], img_files[(bid2, fid2)],
-                         pts2d[(bid1, fid1)][kid1.astype(int)], pts2d[(bid2, fid2)][kid2.astype(int)],
+                         cam1.distort(pts2d[(bid1, fid1)][kid1.astype(int)].squeeze()),
+                         cam2.distort(pts2d[(bid2, fid2)][kid2.astype(int)].squeeze()),
                          repr_kps1=repr_kps[0], repr_kps2=repr_kps[1])
         return
 
@@ -350,16 +363,17 @@ def find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d
     for fid1, idx2 in pbar:
         if idx2 < len(fids2):
             # match features, verify with 3d-2d-ransac both ways, add 3d points to list
-            d = []
+            d, cams = [], []
             for path, fid in zip((path1, path2), (fid1, fids2[idx2])):
                 bid = path2batchid(path)
-                cam = cam_obj(cam_params[bid])
+                cams.append(cam_obj(cam_params[bid]))
                 pts3d = np.array([obser[(bid, fid, i)] for i in range(len(pts2d[(bid, fid)]))])
-                d.append((cam.cam_mx, pts2d[(bid, fid)], descr[(bid, fid)], pts3d))
+                d.append((cams[-1].cam_mx, pts2d[(bid, fid)], descr[(bid, fid)], pts3d))
 
             if plot:
                 plot_matches(img_files[(bid1, fid1)], img_files[(bid2, fids2[idx2])],
-                             pts2d[(bid1, fid1)], pts2d[(bid2, fids2[idx2])], kps_only=True)
+                             cams[0].distort(pts2d[(bid1, fid1)].squeeze()),
+                             cams[1].distort(pts2d[(bid2, fids2[idx2])].squeeze()), kps_only=True)
 
             matches1, matches2 = match_and_validate(*d[0], *d[1], feature_name)
 
@@ -383,8 +397,10 @@ def find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d
                 successes += 1
                 pbar.set_postfix({'successful matches': successes})
                 if plot:
+                    cam1, cam2 = map(lambda bid: cam_obj(cam_params[bid]), (bid1, bid2))
                     plot_matches(img_files[(bid1, fid1)], img_files[(bid2, fids2[idx2])],
-                                 d[0][1][matches1, ...], d[1][1][matches2, ...])
+                                 cam1.distort(d[0][1][matches1, ...].squeeze()),
+                                 cam2.distort(d[1][1][matches2, ...].squeeze()))
 
 
 #@profile
@@ -936,7 +952,7 @@ def get_pairs(all_obser, all_kps3d, bid1, bid2):
 
 def plot_matches(img_path1, img_path2, kps1, kps2, repr_kps1=None, repr_kps2=None, kps_only=False):
     def arr2kp(arr, size=7):
-        return [cv2.KeyPoint(p[0, 0], p[0, 1], size) for p in arr]
+        return [cv2.KeyPoint(p[0], p[1], size) for p in arr.squeeze()]
 
     img1, img2 = map(lambda x: cv2.imread(x), (img_path1, img_path2))
 

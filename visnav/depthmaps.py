@@ -254,6 +254,9 @@ def set_cam_params(kapt, sensor_name, sensor_params):
     sid = None
     for id, s in kapt.sensors.items():
         if s.name == sensor_name:
+            if id == sensor_params[0]:
+                # if sensor params start with sensor id, remove it
+                sensor_params = sensor_params[1:]
             s.sensor_params[1:len(sensor_params) + 1] = sensor_params
             sid = id
             break
