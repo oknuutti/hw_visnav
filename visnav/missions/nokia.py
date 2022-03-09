@@ -88,7 +88,7 @@ class NokiaSensor(Mission):
     w2b = Pose(None, tools.eul_to_q((np.pi, -np.pi / 2), 'xz'))
     b2c = Pose(None, tools.eul_to_q((np.pi / 2,), 'z'))
 
-    def __init__(self, *args, verbosity=2, high_quality=False, ori_off_q=None,
+    def __init__(self, *args, verbosity=2, high_quality=False, ori_off_q=None, alt_scale=1.0,
                  use_gimbal=False, cam_mx=None, cam_dist=None, undist_img=False, **kwargs):
         self.verbosity = verbosity
         self.high_quality = high_quality
@@ -98,6 +98,7 @@ class NokiaSensor(Mission):
         self.cam_mx = cam_mx or CALIB_K
 
         self.ori_off_q = ori_off_q
+        self.alt_scale = alt_scale
 
         tmp = cam_dist or DIST_COEFFS
         self.cam_dist_n = np.where(np.array(tmp) != 0)[0][-1] + 1
@@ -212,6 +213,8 @@ class NokiaSensor(Mission):
                     t_t = t_time[t_id]
                     lat, lon, alt, roll, pitch, yaw, *gimbal = t_data[t_id]
                     gimbal_roll, gimbal_pitch, gimbal_yaw = map(math.radians, gimbal)
+
+                    alt = alt * self.alt_scale
 
                     incremental = False
                     nadir_pointing = True

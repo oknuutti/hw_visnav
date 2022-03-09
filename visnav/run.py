@@ -27,6 +27,7 @@ def main():
     parser.add_argument('--data', '-d', metavar='DATA', help='path to data')
     parser.add_argument('--meta', '-t', metavar='META', help='path to meta data')
     parser.add_argument('--video-toff', '--dt', type=float, metavar='dT', help='video time offset compared to metadata')
+    parser.add_argument('--alt-scale', '--as', type=float, default=1.0, metavar='sc', help='scale telemetry altitude with this value')
     parser.add_argument('--res', '-r', metavar='OUT', help='path to the result pickle')
     parser.add_argument('--debug-out', '-o', metavar='OUT', help='path to the debug output folder')
     parser.add_argument('--kapture', metavar='OUT', help='path to kapture-format export folder')
@@ -78,7 +79,7 @@ def main():
                       [0.,            0., 1.]]
         mission = NokiaSensor(args.data, data_path=args.meta, video_toff=args.video_toff, use_gimbal=args.use_gimbal,
                               undist_img=args.undist_img, cam_mx=cam_mx, cam_dist=args.cam_dist,
-                              verbosity=args.verbosity, high_quality=args.high_quality,
+                              verbosity=args.verbosity, high_quality=args.high_quality, alt_scale=args.alt_scale,
                               ori_off_q=tools.ypr_to_q(*map(math.radians, args.ori_off_ypr)) if args.ori_off_ypr else None,
                               first_frame=ff, last_frame=lf)
 

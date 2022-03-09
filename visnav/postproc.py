@@ -41,15 +41,24 @@ VO_FEATURE_NAME = 'gftt'
 EXTRACTED_FEATURE_NAME = 'akaze'
 EXTRACTED_FEATURE_COUNT = 3000
 EXTRACTED_FEATURE_GRID = (1, 1)
-EXTRACTED_FEATURE_PARAMS = {'akaze': {
-    'descriptor_type': cv2.AKAZE_DESCRIPTOR_MLDB,  # default: cv2.AKAZE_DESCRIPTOR_MLDB
-    'descriptor_channels': 3,  # default: 3
-    'descriptor_size': 0,  # default: 0
-    'diffusivity': cv2.KAZE_DIFF_CHARBONNIER,  # default: cv2.KAZE_DIFF_PM_G2
-    'threshold': 0.00005,  # default: 0.001
-    'nOctaves': 4,  # default: 4
-    'nOctaveLayers': 8,  # default: 4
-}}
+EXTRACTED_FEATURE_PARAMS = {
+    'akaze': {
+        'descriptor_type': cv2.AKAZE_DESCRIPTOR_MLDB,  # default: cv2.AKAZE_DESCRIPTOR_MLDB
+        'descriptor_channels': 3,  # default: 3
+        'descriptor_size': 0,   # default: 0
+        'diffusivity': cv2.KAZE_DIFF_CHARBONNIER,  # default: cv2.KAZE_DIFF_PM_G2
+        'threshold': 0.00005,   # default: 0.001
+        'nOctaves': 4,          # default: 4
+        'nOctaveLayers': 8,     # default: 4
+    },
+    'sift': {
+        'nfeatures': EXTRACTED_FEATURE_COUNT,
+        'nOctaveLayers': 6,         # default: 3
+        'contrastThreshold': 0.01,  # default: 0.04
+        'edgeThreshold': 25,        # default: 10
+        'sigma': 1.6,               # default: 1.6
+    },
+}
 MAX_REPR_ERROR = 8
 MIN_INLIERS = 15
 
@@ -104,7 +113,7 @@ def main():
                         help='After all is done, normalize images based on current camera params')
     parser.add_argument('--fe-n', type=int, default=10, help='Extract AKAZE features every n frames')
     parser.add_argument('--fe-triang-int', type=int, default=5, help='AKAZE feature triangulation interval in keyframes')
-    parser.add_argument('--feature-name', default=EXTRACTED_FEATURE_NAME, choices=('akaze', 'r2d2'), help='what features to extract')
+    parser.add_argument('--feature-name', default=EXTRACTED_FEATURE_NAME, choices=('akaze', 'sift', 'r2d2'), help='what features to extract')
     args = parser.parse_args()
 
     if not args.skip_fe and not args.plot_only:
@@ -169,7 +178,7 @@ def run_fe(args):
 
         # remove all previous extra features
         rem_pt3d = []
-        for feature_name in ('akaze', 'r2d2'):
+        for feature_name in ('akaze', 'sift', 'r2d2'):
             if feature_name in kapt.keypoints:
                 for img_file in kapt.keypoints[feature_name]:
                     os.unlink(get_keypoints_fullpath(feature_name, kapt_path, img_file))
@@ -194,6 +203,9 @@ def run_fe(args):
         if args.feature_name == 'akaze':
             kapt.descriptors[args.feature_name] = kt.Descriptors(args.feature_name, np.uint8, 61,
                                                                  args.feature_name, 'hamming')
+        elif args.feature_name == 'sift':
+            kapt.descriptors[args.feature_name] = kt.Descriptors(args.feature_name, np.float32, 128,
+                                                                 args.feature_name, 'L2')
         else:
             assert args.feature_name == 'r2d2', 'invalid feature %s' % (args.feature_name,)
             kapt.descriptors[args.feature_name] = kt.Descriptors(args.feature_name, np.float32, 128,
@@ -740,6 +752,13 @@ def extract_features(img_path, sc_q, args):
     if args.feature_name == 'akaze':
         if extract_features.detector is None:
             extract_features.detector = cv2.AKAZE_create(**EXTRACTED_FEATURE_PARAMS[args.feature_name])
+        det = extract_features.detector
+        img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+        kps = detect_gridded(det, img, None, *EXTRACTED_FEATURE_GRID, EXTRACTED_FEATURE_COUNT)
+        kps, descs = det.compute(img, kps)
+    elif args.feature_name == 'sift':
+        if extract_features.detector is None:
+            extract_features.detector = cv2.SIFT_create(**EXTRACTED_FEATURE_PARAMS[args.feature_name])
         det = extract_features.detector
         img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
         kps = detect_gridded(det, img, None, *EXTRACTED_FEATURE_GRID, EXTRACTED_FEATURE_COUNT)
