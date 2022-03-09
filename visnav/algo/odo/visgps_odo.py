@@ -162,7 +162,7 @@ class VisualGPSNav(VisualOdometry):
 
         # possibly do camera calibration before bundle adjustment
         if not self.cam_calibrated and len(keyframes) >= self.ba_interval:  #  self.ba_interval, self.max_keyframes
-            # experimental, doesnt work0
+            # experimental, doesnt work
             self.calibrate_cam(keyframes)
             if 0:
                 # disable for continuous calibration

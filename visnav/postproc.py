@@ -421,7 +421,7 @@ def run_ba(args):
     solver = RootBundleAdjuster(
         ini_tr_rad=args.ini_tr,
         min_tr_rad=1e-15 if args.float32 else 1e-32,
-        max_tr_rad=1e7 if args.float32 else 1e16,
+        max_tr_rad=3e6 if args.float32 else 1e16,
         ini_vee=2.0,
         vee_factor=2.0,
         n_workers=args.workers,
