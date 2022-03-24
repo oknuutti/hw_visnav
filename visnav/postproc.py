@@ -28,6 +28,7 @@ from visnav.algo.odo.rootba import RootBundleAdjuster, LinearizerQR
 from visnav.algo.odo.vis_gps_bundleadj import vis_gps_bundle_adj, numerical_jacobian
 from visnav.algo.tools import Pose
 from visnav.depthmaps import get_cam_params, set_cam_params
+from visnav.iotools.terrainmodel import TerrainModel
 from visnav.missions.nokia import NokiaSensor
 from visnav.run import plot_results
 
@@ -66,7 +67,6 @@ logger = tools.get_logger("main")
 
 
 # TODO: the following:
-#  - (6) implement image normalization and cam idealization for depth map estimation (here or at depthmaps.py?)
 #  - ? find intra batch global keyframe matches
 #  /- try https://pythonhosted.org/sppy/ to speed up sparse matrix manipulations,
 #  /  maybe https://pypi.org/project/minieigen/ helps also?
@@ -81,6 +81,8 @@ def main():
     parser.add_argument('--nadir-looking', action='store_true', help='is cam looking down? used for plots only')
     parser.add_argument('--plot', action='store_true', help='plot result')
     parser.add_argument('--plot-only', action='store_true', help='plot initial result, exit')
+    parser.add_argument('--ref-model-dem', type=str, help='plot reference model along initial result, geotiff file')
+    parser.add_argument('--ref-model-orto', type=str, help='plot reference model along initial result, orto image')
     parser.add_argument('--plot-matches-only', action='store_true', help='plot akaze feature matches, exit')
     parser.add_argument('--ini-fl', type=float, help='initial value for focal length')
     parser.add_argument('--ini-cx', type=float, help='initial value for x principal point')
@@ -461,6 +463,13 @@ def run_ba(args):
     arr_pts3d, arr_pt3d_idxs, arr_meas_r, arr_meas_aa, arr_meas_idxs = [], [], [], [], []
     arr_akaze_obser, arr_frames, batch_ids, arr_kapt = [], [], [], []
 
+    ref_model = None
+    if args.plot_only and args.ref_model_dem:
+        assert args.ref_model_orto, 'give both dem and orto'
+        ref_model = TerrainModel(args.ref_model_dem, args.ref_model_orto, NokiaSensor.COORD0,
+                                 NokiaSensor.b2c.to_global(NokiaSensor.w2b, False),
+                                 bounds=(0.250, 0.458, 0.417, 0.667))  # (t, l, b, r)
+
     for i, path in enumerate(args.path):
         with open(os.path.join(path, 'result.pickle'), 'rb') as fh:
             orig_keyframes, map3d, frame_names, meta_names, *_ = pickle.load(fh)
@@ -475,7 +484,7 @@ def run_ba(args):
 
         if args.plot_only:
             plot_results(orig_keyframes, map3d, frame_names, meta_names, nadir_looking=args.nadir_looking)
-            replay_kapt(kapt_path, kapt)
+            replay_kapt(kapt_path, kapt, ref_model=ref_model)
             continue
 
         if args.ini_fl:
@@ -1006,16 +1015,16 @@ def replay_probem(img_paths: List[str], p: Problem):
     replay(img_paths, p.pts2d, p.cam_params, p.poses, p.pose_idxs, p.pts3d, p.pt3d_idxs)
 
 
-def replay_kapt(kapt_path: str, kapt: Kapture = None, frame_ids=None):
+def replay_kapt(kapt_path: str, kapt: Kapture = None, frame_ids=None, ref_model=None):
     if kapt is None:
         kapt = kapture_from_dir(kapt_path)
     cam_params = get_cam_params(kapt, SENSOR_NAME)
     frames, poses, pts3d, pts2d, pose_idxs, pt3d_idxs, *_ = get_ba_params(kapt_path, None, kapt, cam_params[0])
     img_paths = [get_record_fullpath(kapt_path, f[1]) for f in frames]
-    replay(img_paths, pts2d, cam_params, poses, pose_idxs, pts3d, pt3d_idxs)
+    replay(img_paths, pts2d, cam_params, poses, pose_idxs, pts3d, pt3d_idxs, ref_model=ref_model)
 
 
-def replay(img_paths, pts2d, cam_params, poses, pose_idxs, pts3d, pt3d_idxs, frame_ids=None):
+def replay(img_paths, pts2d, cam_params, poses, pose_idxs, pts3d, pt3d_idxs, frame_ids=None, ref_model=None):
     assert len(img_paths) == len(poses)
     assert len(pts2d) == len(pose_idxs)
     assert len(pts2d) == len(pt3d_idxs)
@@ -1043,6 +1052,13 @@ def replay(img_paths, pts2d, cam_params, poses, pose_idxs, pts3d, pt3d_idxs, fra
             image = cv2.circle(image, (x, y), kp_size, kp_color, 1)   # negative thickness => filled circle
             image = cv2.rectangle(image, (xp-2, yp-2), (xp+2, yp+2), kp_color, 1)
             image = cv2.line(image, (xp, yp), (x, y), kp_color, 1)
+
+        if ref_model is not None:
+            ref_image = ref_model.project(cam, pose)
+            image = np.concatenate((image, ref_image), axis=1)
+            image = cv2.resize(image, None, fx=0.5, fy=0.5)
+            # TODO: try to find correct altitude and focal length for #31?
+            #  - estimate them somehow by matching with ortho image?
 
         cv2.imshow('keypoint reprojection', image)
 

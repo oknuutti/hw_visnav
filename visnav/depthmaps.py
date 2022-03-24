@@ -32,6 +32,13 @@ def main():
                         help='output dense folder name')
     parser.add_argument('-e', '--export',
                         help='export depth maps here')
+    parser.add_argument('--export-bits', type=int, default=32, choices=(16, 24, 32),
+                        help='Export depth and geometry using float16/24/32 exr-files (default 32). Safe range of '
+                             'values can be calculated using (2**ceil(log(trg_prec * 2**x)/log(2)) - 1), where '
+                             'trg_prec is the target precision and x is the length of the significand '
+                             '(10, 15, 23 for 16, 24, 32 bit floats, respectively). '
+                             'E.g., if ground resolution at 100m for fl=2315px is 0.043m (100/2315), the safe range '
+                             'for different choices would be [-63, 63], [-2047, 2047], and [-524287, 524287].')
     parser.add_argument('-c', '--cmd',
                         help='path to colmap command')
     parser.add_argument('--composite-cmd',
@@ -58,6 +65,8 @@ def main():
     parser.add_argument('--filter-geom-consistency-max-cost', type=float, default=1.0,
                         help='--PatchMatchStereo.filter_geom_consistency_max_cost  arg (=1.0)')
 
+    parser.add_argument('--plot-only', action='store_true',
+                        help='plot only export results')
     parser.add_argument('--skip-import', action='store_true',
                         help='skip importing kapture to colmap format')
     parser.add_argument('--skip-depth-est', action='store_true',
@@ -79,6 +88,10 @@ def main():
 
     if not args.export:
         args.export = os.path.join(args.kapture, 'reconstruction')
+
+    if args.plot_only:
+        plot_only(args.export, args.plot)
+        exit()
 
     if args.composite_cmd:
         cmd = args.composite_cmd.split(' ')
@@ -126,12 +139,22 @@ def main():
         sensor_id, width, height, fl_x, fl_y, pp_x, pp_y, *dist_coefs = get_cam_params(kapt, args.sensor)
         file2id = {fn[sensor_id]: id for id, fn in kapt.records_camera.items()}
 
-        exr_params_d = exr_params_xyz = (cv2.IMWRITE_EXR_TYPE, cv2.IMWRITE_EXR_TYPE_FLOAT)
-        if hasattr(cv2, 'IMWRITE_EXR_COMPRESSION'):
-            # supported in OpenCV 4, see descriptions at
-            #   https://rainboxlab.org/downloads/documents/EXR_Data_Compression.pdf
-            exr_params_d += (cv2.IMWRITE_EXR_COMPRESSION, cv2.IMWRITE_EXR_COMPRESSION_PXR24)    # zip 24bit floats
-            exr_params_xyz += (cv2.IMWRITE_EXR_COMPRESSION, cv2.IMWRITE_EXR_COMPRESSION_ZIP)    # zip 32bit floats
+        if args.export_bits == 16:
+            exr_params_d = exr_params_xyz = (cv2.IMWRITE_EXR_TYPE, cv2.IMWRITE_EXR_TYPE_HALF)
+        else:
+            exr_params_d = exr_params_xyz = (cv2.IMWRITE_EXR_TYPE, cv2.IMWRITE_EXR_TYPE_FLOAT)
+            if args.export_bits == 24:
+                if hasattr(cv2, 'IMWRITE_EXR_COMPRESSION'):
+                    # supported in OpenCV 4, see descriptions at
+                    #   https://rainboxlab.org/downloads/documents/EXR_Data_Compression.pdf
+                    #   or https://www.openexr.com/documentation/TechnicalIntroduction.pdf
+                    exr_params_d += (cv2.IMWRITE_EXR_COMPRESSION, cv2.IMWRITE_EXR_COMPRESSION_PXR24)  # zip 24bit floats
+                    exr_params_xyz += (cv2.IMWRITE_EXR_COMPRESSION, cv2.IMWRITE_EXR_COMPRESSION_PXR24)
+                else:
+                    logging.warning('This version of OpenCV does not support PXR24 compression, defaulting to float32')
+            elif hasattr(cv2, 'IMWRITE_EXR_COMPRESSION'):
+                exr_params_d += (cv2.IMWRITE_EXR_COMPRESSION, cv2.IMWRITE_EXR_COMPRESSION_ZIP)  # zip 32bit floats
+                exr_params_xyz += (cv2.IMWRITE_EXR_COMPRESSION, cv2.IMWRITE_EXR_COMPRESSION_ZIP)
 
         logging.info('Exporting geometric depth maps in EXR format...')
         for fname in tqdm.tqdm(os.listdir(depth_path), mininterval=3):
@@ -192,6 +215,52 @@ def main():
                     # mask = np.logical_not(np.isnan(depth)).astype(np.uint8)*255
                     # nl = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
                     # mask2 = cv2.erode(mask, nl)
+
+
+def plot_only(path, frame=None):
+    import matplotlib.pyplot as plt
+    from matplotlib import cm
+    from mpl_toolkits.mplot3d import Axes3D
+    from visnav.missions.nokia import NokiaSensor
+
+    w2b, b2c = NokiaSensor.w2b, NokiaSensor.b2c
+    by_geom, skip = True, 10
+
+    depth_path = os.path.join(path, 'depth')
+    geom_path = os.path.join(path, 'geometry')
+
+    for fname in tqdm.tqdm(os.listdir(geom_path if by_geom else depth_path)):
+        m = re.search(r'(.*?)\.(d|xyz)\.exr', fname)
+        if not m:
+            continue
+
+        depth_file = os.path.join(depth_path, m[1] + '.d.exr')
+        geom_file = os.path.join(geom_path, m[1] + '.xyz.exr')
+        other_exists = os.path.exists(depth_file if by_geom else geom_file)
+
+        if not frame or m[1] == frame:
+            # plot depth
+            if not by_geom or other_exists:
+                plt.figure(1)
+                depth = cv2.imread(os.path.join(depth_path, fname), cv2.IMREAD_UNCHANGED)
+                plt.imshow(depth)
+
+            # plot geometry
+            if by_geom or other_exists:
+                xyz = cv2.imread(geom_file, cv2.IMREAD_UNCHANGED)
+                xyz = xyz.reshape((-1, 3))
+                x, y, z = tools.q_times_mx(w2b.quat * b2c.quat, xyz[::skip, :]).T
+
+                f, ax = plt.subplots(1, 1)
+                ax.set_aspect('equal')
+                ax.set_xlabel("east", fontsize=12)
+                ax.set_ylabel("north", fontsize=12)
+                line = ax.scatter(x, y, s=5, c=z, marker='o', vmin=-5., vmax=100., cmap=cm.get_cmap('jet'))
+                f.colorbar(line)
+                tools.hover_annotate(f, ax, line, ['%.1f' % v for v in z])
+                f.gca().set_title(m[1])
+
+            plt.show()
 
 
 def filter_depth(depth, args, return_interm=False):

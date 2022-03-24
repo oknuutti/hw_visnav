@@ -181,12 +181,6 @@ class Pose:
     def __repr__(self):
         return 'loc: %s\nori: %s (ypr: %s)' % (self.loc, self.quat, np.array(q_to_ypr(self.quat))/np.pi*180)
 
-    def new(self, dr, dq) -> 'Pose':
-        assert False, 'deprecated'
-        return Pose(
-            q_times_v(dq, self.loc) + dr,
-            (dq * self.quat).normalized())
-
     @classproperty
     def identity(cls) -> 'Pose':
         return Pose(np.array([0, 0, 0]), quaternion.one)
