@@ -776,7 +776,7 @@ def extract_features(img_path, sc_q, args):
         kps = detect_gridded(det, img, None, *EXTRACTED_FEATURE_GRID, EXTRACTED_FEATURE_COUNT)
         kps, descs = det.compute(img, kps)
     else:
-        model_path = os.path.exists(os.path.join(CNN_MODEL_PATH, args.feature_name + '.ckpt'))
+        model_path = os.path.join(CNN_MODEL_PATH, args.feature_name + '.ckpt')
         type = 'r2d2' if args.feature_name == 'r2d2' else 'own'
 
         assert type == 'r2d2' or os.path.exists(model_path), \
