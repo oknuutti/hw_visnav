@@ -7,14 +7,11 @@ import numpy as np
 import quaternion
 import cv2
 
-from TelemetryParsing import readTelemetryCsv
-
 from visnav.algo import tools
 from visnav.algo.tools import Pose
 from visnav.algo.model import Camera
 from visnav.algo.odo.base import Measure
 from visnav.algo.odo.visgps_odo import VisualGPSNav
-from visnav.algo.odometry import VisualOdometry
 
 from visnav.missions.base import Mission
 
@@ -37,6 +34,7 @@ class ToyNokiaSensor(Mission):
             self.real_cam.dist_coefs = [0, 0, 0, 0, 0]
 
     def init_data(self):
+        from TelemetryParsing import readTelemetryCsv
         t_time, *t_data = readTelemetryCsv(self.data_path, None, None)
         coord0 = t_data[0][0], t_data[1][0], t_data[2][0]
         time0 = t_time[0].astype(np.float64) / 1e6
