@@ -5,18 +5,24 @@ import numpy as np
 import cv2
 
 from navex.extract import Extractor
-from navex.models.r2d2orig import R2D2
+try:
+    from navex.models.r2d2orig import R2D2
+    r2d2_imported = True
+except:
+    r2d2_imported = False
 
 from visnav.algo import tools
 
 
 class CNN_Detector:
-    def __init__(self, type='r2d2', max_feats=2000, gpu=False):
+    def __init__(self, type='r2d2', model_path=None, max_feats=2000, gpu=False):
         self.type = type
         if self.type == 'r2d2':
+            assert r2d2_imported, 'Type r2d2 was selected, however, import of the original r2d2 codebase failed'
             model_path = R2D2.DEFAULT_MODEL
         else:
-            assert False, 'feature of type "%s" not supported' % (type,)
+            assert type == 'own', 'feature of type "%s" not supported' % (type,)
+            assert os.path.exists(model_path), 'no file found at %s' % model_path
 
         self.extractor = Extractor(model_path, gpu=gpu, top_k=max_feats, border=None, feat_d=0.001, scale_f=2**(1/4),
                                    min_size=256, max_size=1024, min_scale=0.0, max_scale=1.0, det_lim=0.7, qlt_lim=0.7)

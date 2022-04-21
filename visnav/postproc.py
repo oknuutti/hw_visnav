@@ -28,7 +28,6 @@ from visnav.algo.odo.rootba import RootBundleAdjuster, LinearizerQR
 from visnav.algo.odo.vis_gps_bundleadj import vis_gps_bundle_adj, numerical_jacobian
 from visnav.algo.tools import Pose
 from visnav.depthmaps import get_cam_params, set_cam_params
-from visnav.iotools.terrainmodel import TerrainModel
 from visnav.missions.nokia import NokiaSensor
 from visnav.run import plot_results
 
@@ -38,6 +37,7 @@ LOC_ERR_SD = (6.0,) if 1 else (np.inf,)
 ORI_ERR_SD = (math.radians(30.0) if 0 else np.inf,)
 HUBER_COEFS = None  # (1.0, 5.0, 0.5)
 SENSOR_NAME = 'cam'
+CNN_MODEL_PATH = os.path.join('data', 'models')
 VO_FEATURE_NAME = 'gftt'
 EXTRACTED_FEATURE_NAME = 'akaze'
 EXTRACTED_FEATURE_COUNT = 3000
@@ -115,7 +115,8 @@ def main():
                         help='After all is done, normalize images based on current camera params')
     parser.add_argument('--fe-n', type=int, default=10, help='Extract AKAZE features every n frames')
     parser.add_argument('--fe-triang-int', type=int, default=5, help='AKAZE feature triangulation interval in keyframes')
-    parser.add_argument('--feature-name', default=EXTRACTED_FEATURE_NAME, choices=('akaze', 'sift', 'r2d2'), help='what features to extract')
+    parser.add_argument('--feature-name', default=EXTRACTED_FEATURE_NAME,
+                        help='what features to extract (akaze, sift, r2d2, or base-filename of own cnn model)')
     args = parser.parse_args()
 
     if not args.skip_fe and not args.plot_only:
@@ -180,8 +181,8 @@ def run_fe(args):
 
         # remove all previous extra features
         rem_pt3d = []
-        for feature_name in ('akaze', 'sift', 'r2d2'):
-            if feature_name in kapt.keypoints:
+        for feature_name in kapt.keypoints.keys():
+            if feature_name != VO_FEATURE_NAME:
                 for img_file in kapt.keypoints[feature_name]:
                     os.unlink(get_keypoints_fullpath(feature_name, kapt_path, img_file))
                     os.unlink(get_descriptors_fullpath(feature_name, kapt_path, img_file))
@@ -209,7 +210,8 @@ def run_fe(args):
             kapt.descriptors[args.feature_name] = kt.Descriptors(args.feature_name, np.float32, 128,
                                                                  args.feature_name, 'L2')
         else:
-            assert args.feature_name == 'r2d2', 'invalid feature %s' % (args.feature_name,)
+            assert args.feature_name == 'r2d2' or is_valid_feature(args.feature_name), \
+                'invalid feature %s' % (args.feature_name,)
             kapt.descriptors[args.feature_name] = kt.Descriptors(args.feature_name, np.float32, 128,
                                                                  args.feature_name, 'L2')
 
@@ -466,6 +468,7 @@ def run_ba(args):
     ref_model = None
     if args.plot_only and args.ref_model_dem:
         assert args.ref_model_orto, 'give both dem and orto'
+        from visnav.iotools.terrainmodel import TerrainModel
         ref_model = TerrainModel(args.ref_model_dem, args.ref_model_orto, NokiaSensor.COORD0,
                                  NokiaSensor.b2c.to_global(NokiaSensor.w2b, False),
                                  bounds=(0.250, 0.458, 0.417, 0.667))  # (t, l, b, r)
@@ -772,17 +775,22 @@ def extract_features(img_path, sc_q, args):
         img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
         kps = detect_gridded(det, img, None, *EXTRACTED_FEATURE_GRID, EXTRACTED_FEATURE_COUNT)
         kps, descs = det.compute(img, kps)
-    elif args.feature_name == 'r2d2':
+    else:
+        model_path = os.path.exists(os.path.join(CNN_MODEL_PATH, feature_name + '.ckpt'))
+        type = 'r2d2' if args.feature_name == 'r2d2' else 'own'
+
+        assert type == 'r2d2' or os.path.exists(model_path), \
+            'feature extractor "%s" not implemented' % args.feature_name
+
         if extract_features.detector is None:
             from visnav.algo.cnndet import CNN_Detector
-            extract_features.detector = CNN_Detector(args.feature_name, gpu=None)
+            extract_features.detector = CNN_Detector(type, model_path, gpu=None)
         img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
         kps, descs = extract_features.detector.normalizeDetectAndCompute(img, sc_q)
-    else:
-        assert False, 'feature extractor "%s" not implemented' % args.feature_name
 
     kps = np.array([k.pt for k in kps], dtype='f4').reshape((-1, 2))
     return kps, descs
+
 
 extract_features.detector = None
 
