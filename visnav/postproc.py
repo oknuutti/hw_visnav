@@ -210,7 +210,7 @@ def run_fe(args):
             kapt.descriptors[args.feature_name] = kt.Descriptors(args.feature_name, np.float32, 128,
                                                                  args.feature_name, 'L2')
         else:
-            assert args.feature_name == 'r2d2' or is_valid_feature(args.feature_name), \
+            assert args.feature_name == 'r2d2' or os.path.exists(os.path.join(CNN_MODEL_PATH, args.feature_name + '.ckpt')), \
                 'invalid feature %s' % (args.feature_name,)
             kapt.descriptors[args.feature_name] = kt.Descriptors(args.feature_name, np.float32, 128,
                                                                  args.feature_name, 'L2')
