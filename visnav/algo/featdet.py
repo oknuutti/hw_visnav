@@ -4,7 +4,7 @@ import cv2
 # TODO: implement better non max suppression? e.g. like this: https://github.com/BAILOOL/ANMS-Codes
 
 
-def detect_gridded(detector, img, mask, rows, cols, k, refine=True):
+def detect_gridded(detector, img, mask, rows, cols, k, refine=True, margin=32):
     assert mask is None or img.shape[:2] == mask.shape, 'wrong size mask'
     ks = k // (rows * cols)
     if getattr(detector, 'setMaxFeatures', None) is not None:
@@ -17,8 +17,10 @@ def detect_gridded(detector, img, mask, rows, cols, k, refine=True):
         h, w = img.shape[:2]
         xs = np.uint32(np.rint(np.linspace(0, w, num=cols+1)))
         ys = np.uint32(np.rint(np.linspace(0, h, num=rows+1)))
-        ystarts, yends = ys[:-1], ys[1:]
-        xstarts, xends = xs[:-1], xs[1:]
+
+        # expand xs and ys by the detector margin
+        ystarts, yends = np.clip(ys[:-1] - margin, 0), np.clip(ys[1:] + margin, None, h)
+        xstarts, xends = np.clip(xs[:-1] - margin, 0), np.clip(xs[1:] + margin, None, w)
         keypoints = []
         for y1, y2 in zip(ystarts, yends):
             for x1, x2 in zip(xstarts, xends):

@@ -1,20 +1,23 @@
 syntax:regex
 ^[^/]*\.txt$
+^[^/]*\.bat$
 ^[^/]*\.pdf$
 ^[^/]*\.docx$
 
 syntax:glob
 
 # custom own stuff
-hwproto-apps/
+.tmp.drivedownload/
+3rdparty/
 arducam/
 data/
-.tmp.drivedownload/
+hwproto-apps/
+navex/
+notes/
+.idea/workspace.xml
 *.out
 *.pickle
 *.prof
-3rdparty/
-.idea/workspace.xml
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

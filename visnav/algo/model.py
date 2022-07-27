@@ -23,7 +23,7 @@ from visnav.settings import *
 from visnav.algo import tools
 
 
-class Parameter():
+class Parameter:
     def __init__(self, min_val, max_val, def_val=None, estimate=True, is_gl_z=False):
         self._min_val = min_val
         self._max_val = max_val

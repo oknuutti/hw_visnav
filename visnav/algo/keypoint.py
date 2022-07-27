@@ -89,7 +89,6 @@ class KeypointAlgo(AlgorithmBase):
         self.RENDER_SHADOWS = True
         self.RENDER_TEXTURES = True
 
-
     def solve_pnp(self, orig_sce_img, outfile, feat=ORB, use_feature_db=False, adjust_sc_rot = False,
             add_noise=False, scale_cam_img=False, vary_scale=False, match_mask_params=None, verbose=1, **kwargs):
 

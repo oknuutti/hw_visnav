@@ -4,6 +4,7 @@
     <content url="file://$MODULE_DIR$">
       <sourceFolder url="file://$MODULE_DIR$" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/3rdparty/nokia-ds" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/3rdparty/nokia_navint" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/arducam" />
       <excludeFolder url="file://$MODULE_DIR$/3rdparty" />
       <excludeFolder url="file://$MODULE_DIR$/data" />

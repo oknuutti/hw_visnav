@@ -178,6 +178,11 @@ class Pose:
     def to_mx(self):
         return np.hstack((quaternion.as_rotation_matrix(self.quat), self.loc.reshape((-1, 1))))
 
+    @staticmethod
+    def from_mx(mx):
+        assert mx.shape in ((4, 4), (3, 4)), 'matrix shape needs to be (4, 4) or (4, 3)'
+        return Pose(mx[:3, 3:4], quaternion.from_rotation_matrix(mx[:3, :3]))
+
     def __repr__(self):
         return 'loc: %s\nori: %s (ypr: %s)' % (self.loc, self.quat, np.array(q_to_ypr(self.quat))/np.pi*180)
 

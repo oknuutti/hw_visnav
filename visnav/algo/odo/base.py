@@ -7,8 +7,17 @@
 #
 
 # TODO IDEAS:
-#   - use a prior in bundle adjustment that is updated with discarded keyframes
+#     - supply initial points to LK-feature tracker based on predicted state and existing 3d points
+#     - backward optical flow for additional accuracy like in vins?
+#     - keyframe pruning from the middle like in orb-slam
+#     - using a changing subset of keypoints like in HybVIO ()
+#     - inverse distance formulation, project covariance also (see vins)
+#     - when get basic stuff working:
+#           - try ransac again with loose repr err param values
+#           - try time-diff optimization (feedback for frame-skipping at nokia.py)
+#   -
 #   - use s/c state (pose, dot-pose, dot-dot-pose?) and covariance in ba optimization cost function
+#      ?- speed and angular speed priors that limit them to reasonably low values
 #   - option to use reduced frame ba for pose estimation instead of 3d-2d ransac from previous keyframe
 #   - use miniSAM or GTSAM for optimization?
 #       - https://github.com/dongjing3309/minisam
@@ -29,7 +38,7 @@ import cv2
 
 from visnav.algo import tools
 from visnav.algo.tools import Pose, DeltaPose
-from visnav.algo.bundleadj import vis_bundle_adj
+from visnav.algo.odo.vis_gps_bundleadj import vis_gps_bundle_adj
 from visnav.algo.featdet import detect_gridded
 
 logger = tools.get_logger("odo")
@@ -231,8 +240,12 @@ class VisualOdometry:
     DEF_BA_INTERVAL = 4                 # run ba every this many keyframes
     DEF_MAX_BA_FUN_EVAL = 30            # max cost function evaluations during ba
 
+    DEF_BA_DIST_COEF = False
+    DEF_BA_N_CAM_INTR = 0
+    DEF_ENABLE_MARGINALIZATION = False
+
     def __init__(self, cam, img_width=None, wf2bf: Pose = None, bf2cf: Pose = None,
-                 verbose=0, pause=0, **kwargs):
+                 verbose=0, pause=0, ba_err_logger=None, **kwargs):
         self.cam = cam
         self.img_width = img_width
         self.verbose = verbose
@@ -241,6 +254,7 @@ class VisualOdometry:
         self.pause = pause
         self.wf2bf = wf2bf or Pose.identity
         self.bf2cf = bf2cf or Pose.identity
+        self.ba_err_logger = ba_err_logger
 
         # set params
         for attr in dir(self.__class__):
@@ -298,6 +312,7 @@ class VisualOdometry:
         self._track_save_path = None     # for debug purposes
         self._track_image_height = 1200 if verbose <= 2 else 400  # for debug purposes
         self._track_image = None    # for debug purposes
+        self.curr_track_image = None
         self._track_colors = None   # for debug purposes
         self._map_image = None    # for debug purposes
         self._map_colors = None   # for debug purposes
@@ -1396,33 +1411,109 @@ class VisualOdometry:
                 pass
         return res
 
-    def _bundle_adjustment(self, keyframes=None, current_only=False, same_thread=False):
+    def _bundle_adjustment(self, keyframes=None, current_only=False, same_thread=False, skip_meas=True):
         logger.info('starting bundle adjustment')
-        with self._3d_map_lock:
-            if keyframes is None and current_only:
-                keyframes = self.state.keyframes[-1:]
-
-            keyframes, ids, poses_mx, pts3d, pts2d, v_pts2d, px_err_sd, cam_idxs, pt3d_idxs = \
-                self._get_visual_ba_args(keyframes, current_only)
-
-        skip_pose_n = 0 if current_only else 1
-
-        args = (poses_mx, pts3d, pts2d, cam_idxs, pt3d_idxs, self.cam.cam_mx)
-        kwargs = dict(max_nfev=self.max_ba_fun_eval, skip_pose_n=skip_pose_n, poses_only=current_only,
-                      huber_coef=self.repr_err(keyframes[-1]))
-
-        poses_ba, pts3d_ba = self._call_ba(vis_bundle_adj, args, kwargs, parallize=not same_thread)
 
         with self._new_frame_lock:
-            self._update_poses(keyframes, ids, poses_ba, pts3d_ba, skip_pose_n=skip_pose_n,
-                               pop_ba_queue=not same_thread)
+            if keyframes is None:
+                if current_only:
+                    keyframes = self.state.keyframes[-1:]
+                else:
+                    keyframes = self.state.keyframes
 
-        if not self.cam_calibrated and len(keyframes) >= self.max_keyframes:  #  self.ba_interval:
+        # possibly do camera calibration before bundle adjustment
+        if not self.cam_calibrated and len(keyframes) >= self.ba_interval:  #  self.ba_interval, self.max_keyframes
             # experimental, doesnt work
             self.calibrate_cam(keyframes)
             if 0:
                 # disable for continuous calibration
                 self.cam_calibrated = True
+
+        with self._new_frame_lock:
+            dist_coefs = None
+            if self.ba_dist_coef and not current_only and len(keyframes) >= self.max_keyframes:
+                assert np.where(np.array(self.cam.dist_coefs) != 0)[0][-1] + 1 <= 2, 'too many distortion coefficients'
+                dist_coefs = self.cam.dist_coefs[:2]
+
+            keyframes, ids, poses_mx, pts3d, pts2d, v_pts2d, px_err_sd, cam_idxs, pt3d_idxs = \
+                    self._get_visual_ba_args(keyframes, current_only, distorted=dist_coefs is not None)
+            skip_pose_n = (1 if skip_meas else 0) if not current_only else 0
+
+            if not skip_meas:
+                meas_idxs = np.array([i for i, kf in enumerate(keyframes) if kf.measure is not None], dtype=int)
+                meas_q = {i: keyframes[i].pose.prior.quat.conj() for i in meas_idxs}
+                meas_r = np.array([tools.q_times_v(meas_q[i], -keyframes[i].pose.prior.loc) for i in meas_idxs])
+                meas_aa = np.array([tools.q_to_angleaxis(meas_q[i], compact=True) for i in meas_idxs])
+                t_off = np.array([keyframes[i].measure.time_off + keyframes[i].measure.time_adj for i in meas_idxs]).reshape((-1, 1))
+                if 1:  # use velocity measure instead of pixel vel
+                    v_pts2d = np.array([tools.q_times_v(meas_q[i], -keyframes[i].pose.prior.vel) for i in meas_idxs])
+            else:
+                meas_idxs, meas_r, meas_aa, t_off = [np.empty(0)] * 4
+
+            if not current_only:
+                rem_kf_ids = self.prune_keyframes()
+                rem_kp_ids = self.prune_map3d(rem_kf_ids)
+                logger.info('pruning %d keyframes and %d keypoints' % (len(rem_kf_ids), len(rem_kp_ids)))
+
+        meas_idxs = meas_idxs.astype(int)
+        meas_r = meas_r.reshape((-1, 3))
+        meas_aa = meas_aa.reshape((-1, 3))
+
+        args = (poses_mx, pts3d, pts2d, v_pts2d, cam_idxs, pt3d_idxs, self.cam.cam_mx, dist_coefs, px_err_sd, meas_r,
+                meas_aa, t_off, meas_idxs, self.loc_err_sd, self.ori_err_sd)
+        kwargs = dict(max_nfev=self.max_ba_fun_eval, skip_pose_n=skip_pose_n, huber_coef=(1, 5, 0.5),
+                      poses_only=current_only, weighted_residuals=True)
+
+        if self.ba_n_cam_intr and not current_only and len(keyframes) >= self.max_keyframes:
+            kwargs['n_cam_intr'] = self.ba_n_cam_intr
+
+        if self.enable_marginalization and not current_only:
+            kf_ids = [kf.id for kf in keyframes]
+            kwargs.update(dict(
+                prior_k=self.state.ba_prior[0],
+                prior_x=self.state.ba_prior[1],
+                prior_r=self.state.ba_prior[2],
+                prior_J=self.state.ba_prior[3],
+                prior_cam_idxs=np.where(np.in1d(self.state.ba_prior_fids, kf_ids))[0],
+                marginalize_pose_idxs=np.where(np.in1d(kf_ids, rem_kf_ids))[0],
+                marginalize_pt3d_idxs=np.where(np.in1d(ids, rem_kp_ids))[0],
+            ))
+
+        poses_ba, pts3d_ba, dist_ba, cam_intr, t_off, new_prior, errs = \
+            self._call_ba(vis_gps_bundle_adj, args, kwargs, parallize=not same_thread)
+
+        if self.enable_marginalization and not current_only:
+            self.state.ba_prior = new_prior
+            self.state.ba_prior_fids = kf_ids
+
+        if dist_ba is not None:
+            print('\nDIST: %s\n' % dist_ba)
+        if cam_intr is not None:
+            print('\nCAM INTR: %s\n' % cam_intr)
+
+        if 0 and not current_only:
+            # show result
+            from visnav.postproc import replay
+            replay([kf.image for kf in keyframes], pts2d, self.cam, poses_ba, cam_idxs, pts3d_ba, pt3d_idxs,
+                   frame_ids=[kf.id for kf in keyframes])
+
+        with self._new_frame_lock:
+            for i, dt in zip(meas_idxs, t_off):
+                keyframes[i].measure.time_adj = dt - keyframes[i].measure.time_off
+
+            self._update_poses(keyframes, ids, poses_ba, pts3d_ba, dist_ba, cam_intr, skip_pose_n=skip_pose_n, pop_ba_queue=not same_thread)
+
+            if not current_only:
+                self.del_keyframes(rem_kf_ids)
+                self.del_keypoints(rem_kp_ids, kf_lim=None if self.enable_marginalization else self.min_retain_obs)
+
+        if 0 and not current_only:
+            # show result
+            from visnav.run import replay_keyframes
+            replay_keyframes(self.cam, self.all_keyframes(), self.all_pts3d())
+
+        if self.ba_err_logger is not None and not current_only:
+            self.ba_err_logger(keyframes[-1].id, errs)
 
     def _update_poses(self, keyframes, ids, poses_ba, pts3d_ba, dist_ba=None, cam_intr=None, skip_pose_n=1, pop_ba_queue=True):
         if np.any(np.isnan(poses_ba)) or np.any(np.isnan(pts3d_ba)):
@@ -1757,7 +1848,7 @@ class VisualOdometry:
 
         for id, (x0, y0), (x1, y1) in zip(ids, uv0, uv1):
             self._track_image = cv2.line(self._track_image, (x1, y1), (x0, y0), self._col(id), 1)
-        track_img = cv2.add(track_img, self._track_image)
+        track_img = self.curr_track_image = cv2.add(track_img, self._track_image)
 
         if self._map_image is not None:
             s = self._track_image_height

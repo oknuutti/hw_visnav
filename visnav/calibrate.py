@@ -15,10 +15,11 @@ def main():
     parser.add_argument('--path', '-f', action='append', help='path to the calibration images / video(s)')
     parser.add_argument('--skip', '-i', type=int, default=1, help='frame interval (1=no skipping, 2=use every other frame, etc)')
     parser.add_argument('--offset', '-o', type=int, default=0, help='skip these many images from the start')
+    parser.add_argument('--rot', type=int, choices=[0, 90, -90, 180], default=0, help='rotate images with this many degrees')
     parser.add_argument('--nx', '-x', type=int, help='checker board corner count on x-axis')
     parser.add_argument('--ny', '-y', type=int, help='checker board corner count on y-axis')
     parser.add_argument('--cell-size', '-s', type=float, help='cell width and height in mm')
-    parser.add_argument('--dist-coef-np', '-np', type=int, default=5, help='how many distortion coeffs to estimate [0-5]')
+    parser.add_argument('--dist-coef-n', '-n', type=int, default=5, help='how many distortion coeffs to estimate [0-5]')
     parser.add_argument('--fix-pp', action='store_true', help='fix principal point')
     parser.add_argument('--fix-aspect', action='store_true', help='fix aspect ratio')
     parser.add_argument('--pause', action='store_true', help='pause after each image during corner detection')
@@ -42,6 +43,10 @@ def main():
     shape = None
 
     def process_img(img, name):
+        if args.rot:
+            rot = {180: cv2.ROTATE_180, -90: cv2.ROTATE_90_COUNTERCLOCKWISE, 90: cv2.ROTATE_90_CLOCKWISE}[args.rot]
+            img = cv2.rotate(img, rot)
+
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         shape = gray.shape
 
