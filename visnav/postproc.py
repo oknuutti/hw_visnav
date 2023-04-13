@@ -60,6 +60,7 @@ EXTRACTED_FEATURE_PARAMS = {
         'sigma': 1.6,               # default: 1.6
     },
 }
+EXTRACTED_FEATURE_PARAMS['rsift'] = EXTRACTED_FEATURE_PARAMS['sift']
 MAX_REPR_ERROR = 8
 MIN_INLIERS = 15
 
@@ -206,7 +207,7 @@ def run_fe(args):
         if args.feature_name == 'akaze':
             kapt.descriptors[args.feature_name] = kt.Descriptors(args.feature_name, np.uint8, 61,
                                                                  args.feature_name, 'hamming')
-        elif args.feature_name == 'sift':
+        elif args.feature_name in ('sift', 'rsift'):
             kapt.descriptors[args.feature_name] = kt.Descriptors(args.feature_name, np.float32, 128,
                                                                  args.feature_name, 'L2')
         else:
@@ -768,13 +769,16 @@ def extract_features(img_path, sc_q, args):
         img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
         kps = detect_gridded(det, img, None, *EXTRACTED_FEATURE_GRID, EXTRACTED_FEATURE_COUNT)
         kps, descs = det.compute(img, kps)
-    elif args.feature_name == 'sift':
+    elif args.feature_name in ('rsift', 'sift'):
         if extract_features.detector is None:
             extract_features.detector = cv2.SIFT_create(**EXTRACTED_FEATURE_PARAMS[args.feature_name])
         det = extract_features.detector
         img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
         kps = detect_gridded(det, img, None, *EXTRACTED_FEATURE_GRID, EXTRACTED_FEATURE_COUNT)
         kps, descs = det.compute(img, kps)
+        if args.feature_name == 'rsift' and descs is not None and np.array(descs).size > 0:
+            descs = np.array(descs)
+            descs = np.sqrt(descs / np.sum(descs, axis=1, keepdims=True))
     else:
         model_path = os.path.join(CNN_MODEL_PATH, args.feature_name + '.ckpt')
         type = 'r2d2' if args.feature_name == 'r2d2' else 'own'
