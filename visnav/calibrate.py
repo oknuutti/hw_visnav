@@ -5,6 +5,7 @@ import warnings
 import matplotlib.pyplot as plt
 import numpy as np
 import cv2
+from tqdm import tqdm
 
 from visnav.algo import tools
 
@@ -15,6 +16,7 @@ def main():
     parser.add_argument('--path', '-f', action='append', help='path to the calibration images / video(s)')
     parser.add_argument('--skip', '-i', type=int, default=1, help='frame interval (1=no skipping, 2=use every other frame, etc)')
     parser.add_argument('--offset', '-o', type=int, default=0, help='skip these many images from the start')
+    parser.add_argument('--preproc', type=int, default=0, help='rescale image brightness before processing')
     parser.add_argument('--rot', type=int, choices=[0, 90, -90, 180], default=0, help='rotate images with this many degrees')
     parser.add_argument('--nx', '-x', type=int, help='checker board corner count on x-axis')
     parser.add_argument('--ny', '-y', type=int, help='checker board corner count on y-axis')
@@ -48,6 +50,12 @@ def main():
             img = cv2.rotate(img, rot)
 
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        if args.preproc:
+            # min_v, max_v = np.quantile(gray, (0.03, 0.999))
+            # gray = np.clip(255*(gray.astype(float) - min_v)/(max_v - min_v) + 0.5, 0, 255).astype(np.uint8)
+            gray = cv2.resize(gray, None, fx=0.5, fy=0.5)
+            img = cv2.resize(img, None, fx=0.5, fy=0.5)
+
         shape = gray.shape
 
         # Find the chess board corners
@@ -79,10 +87,10 @@ def main():
         if os.path.isdir(path):
             files = [fname for fname in os.listdir(path) if fname[-4:] in ('.bmp', '.jpg', '.png')]
             files = sorted(files)
-            for i, fname in enumerate(files):
-                if i >= args.offset and (i - args.offset) % args.skip == 0:
-                    img = cv2.imread(os.path.join(path, fname))
-                    shape = process_img(img, fname)
+            files = [fname for i, fname in enumerate(files) if i >= args.offset and (i - args.offset) % args.skip == 0]
+            for fname in tqdm(files):
+                img = cv2.imread(os.path.join(path, fname))
+                shape = process_img(img, fname)
 
         else:
             cap = cv2.VideoCapture(path)

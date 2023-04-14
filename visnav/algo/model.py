@@ -810,7 +810,7 @@ class Camera:
         self.f_stop = None
         self.aperture = None
         self.dist_coefs = ([0.]*5) if dist_coefs is None else dist_coefs
-        self.cam_mx = cam_mx  # camera matrix estimated using cv2.calibrateCamera
+        self.cam_mx = np.array(cam_mx) if cam_mx is not None else None  # camera matrix estimated using cv2.calibrateCamera
         self.undist_proj_mx = undist_proj_mx  # new camera matrix estimated using cv2.getOptimalNewCameraMatrix
 
         self.emp_coef = emp_coef
@@ -836,6 +836,10 @@ class Camera:
             self.gain = 1 / self.px_saturation_e
 
         assert sensor_size is None or x_fov is None or focal_length is None, 'give only two of sensor_size, focal_length and fov'
+
+        if x_fov is None and self.cam_mx is not None:
+            self.x_fov = x_fov = math.degrees(math.atan(self.width / self.cam_mx[0, 0] / 2) * 2)
+            self.y_fov = y_fov = math.degrees(math.atan(self.height / self.cam_mx[1, 1] / 2) * 2)
 
         if sensor_size is not None:
             sw, sh = sensor_size  # in mm
@@ -865,14 +869,7 @@ class Camera:
                 self.aperture = aperture
 
     def pixel_solid_angle(self, x, y):
-        # Using pinhole camera model and
-        # Mazonka, Oleg (2012). "Solid Angle of Conical Surfaces, Polyhedral Cones, and Intersecting Spherical Caps",
-        # https://arxiv.org/abs/1205.1396
-        # ignoring identity (23): "sum(arg(z_j)) == arg(prod(z_j)"
-
-        # in latex:
-        #   \Omega=2\pi- \sum_{j=1}^{np} \arg [&(\vec{s}_{j-1} \cdot \vec{s}_{j})(\vec{s}_{j} \cdot \vec{s}_{j+1})
-        #   -(\vec{s}_{j-1} \cdot \vec{s}_{j+1})+i(\vec{s}_{j-1} \cdot (\vec{s}_{j} \times \vec{s}_{j+1}))]
+        # This is not noisy as Mazonka impl above, also, turns out px solid angle is relative to cos(theta)**3
 
         x0 = self.width / 2
         y0 = self.height / 2
@@ -880,40 +877,20 @@ class Camera:
         ph = self.sensor_height / self.height
 
         # distance of image plane from projection point
-        dz = self.sensor_width / 2 / math.tan(math.radians(self.x_fov / 2))
+        sz = self.focal_length  # or equivalently: self.sensor_width / 2 / math.tan(math.radians(self.x_fov / 2))
 
-        # edges of the projected pixel onto the unit circle, distances in mm
-        # counter clockwise order, otherwise get whole sphere with px area removed
-        edges = np.array([
-            tools.normalize_v([pw * (x - x0 + 0.5), ph * (y - y0 - 0.5), dz]),  # 1
-            tools.normalize_v([pw * (x - x0 + 0.5), ph * (y - y0 + 0.5), dz]),  # 4
-            tools.normalize_v([pw * (x - x0 - 0.5), ph * (y - y0 + 0.5), dz]),  # 3
-            tools.normalize_v([pw * (x - x0 - 0.5), ph * (y - y0 - 0.5), dz]),  # 2
-        ])
-        n = len(edges)
+        sx0, sx1, sx2 = pw * (x - x0 - 0.5), pw * (x - x0), pw * (x - x0 + 0.5)
+        sy0, sy1, sy2 = ph * (y - y0 - 0.5), ph * (y - y0), ph * (y - y0 + 0.5)
 
-        # rotate index so that -1 is np-1
-        s = lambda j: edges[(j + n) % n]
+        ax = tools.angle_between_v(np.array([sx0, sy1, sz]), np.array([sx2, sy1, sz]))
+        ay = tools.angle_between_v(np.array([sx1, sy0, sz]), np.array([sx1, sy2, sz]))
+        return ax * ay
 
-        # calculations inside the product operator
-        tmp = [s(j - 1).dot(s(j)) * s(j).dot(s(j + 1))
-               - s(j - 1).dot(s(j + 1))
-               + 1j * s(j - 1).dot(np.cross(s(j), s(j + 1)))
-               for j in range(n)]
-
-        if 1:
-            # Original from paper:
-            # Omega = 2*np.pi - np.angle(np.prod(tmp))
-
-            # in Mazonka 2012 the identity (23) "sum(arg(z_j)) == arg(prod(z_j)" seems flawed,
-            # at least could not make it work on numpy as the different sides give different answers,
-            # if skip the identity (23), then all seems to work fine
-            Omega = 2 * np.pi - np.sum(np.angle(tmp))
-        else:
-            # Curiously, seems that at least sometimes sum(arg(z_j)) == arg(prod(z_j) + 2*pi
-            Omega = - np.angle(np.prod(tmp))
-
-        return Omega
+    def cos4(self, x, y):
+        cam_mx = self.intrinsic_camera_mx()
+        pp, fl = cam_mx[0:2, 2], (cam_mx[0, 0] + cam_mx[1, 1]) / 2
+        off_angle = np.arctan(np.linalg.norm(np.array([x, y]) - pp.flatten()) / fl)
+        return math.cos(off_angle) ** 4
 
     @property
     def aperture_area(self):

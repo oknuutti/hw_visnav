@@ -16,8 +16,7 @@ import scipy.linalg as spl
 from scipy.optimize import least_squares
 
 from visnav.algo import tools
-from visnav.algo.odo.base import LogWriter
-from visnav.algo.tools import Manifold
+from visnav.algo.tools import Manifold, LogWriter
 
 GLOBAL_ADJ = 0      # 3: all incl rotation, 2: location and scale, 1: scale only
 FIXED_PITCH_AND_ROLL = 0
@@ -33,7 +32,7 @@ RESTRICT_3D_POINT_Y = False
 def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, v_pts2d: np.ndarray,
                        cam_idxs: np.ndarray, pt3d_idxs: np.ndarray, K: np.ndarray, dist_coefs: np.ndarray,
                        px_err_sd: np.ndarray, meas_r: np.ndarray, meas_aa: np.ndarray, t_off: np.ndarray,
-                       meas_idxs: np.ndarray, loc_err_sd: float, ori_err_sd: float,
+                       meas_idxs: np.ndarray, loc_err_sd: float = np.inf, ori_err_sd: float = np.inf,
                        prior_r: np.ndarray = None, prior_J: np.ndarray = None, prior_x: np.ndarray = None,
                        prior_k: np.ndarray = None, prior_cam_idxs: np.ndarray = None, prior_weight = 1.0,
                        marginalize_pose_idxs: np.ndarray = None, marginalize_pt3d_idxs: np.ndarray = None,
@@ -68,6 +67,7 @@ def vis_gps_bundle_adj(poses: np.ndarray, pts3d: np.ndarray, pts2d: np.ndarray, 
     assert len(cam_idxs.shape) == 1, 'wrong shape pose_idxs: %s' % (cam_idxs.shape,)
     assert len(pt3d_idxs.shape) == 1, 'wrong shape pt3d_idxs: %s' % (pt3d_idxs.shape,)
     assert K.shape == (3, 3), 'wrong shape K: %s' % (K.shape,)
+    assert marginalize_pose_idxs is None or skip_pose_n == 0, 'cant skip poses if marginalizing'
 
     #assert not skip_pose0, 'some bug with skipping first pose optimization => for some reason cost stays high, maybe problem with A?'
 

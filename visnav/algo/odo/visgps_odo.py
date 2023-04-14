@@ -6,31 +6,18 @@ import quaternion
 
 from visnav.algo import tools
 from visnav.algo.tools import Pose
-from visnav.algo.odo.base import VisualOdometry, State
-from visnav.algo.odo.vis_gps_bundleadj import vis_gps_bundle_adj
-
-logger = logging.getLogger("odo").getChild("visgps")
-
-
-class VisualGPSState(State):
-    def __init__(self):
-        super(VisualGPSState, self).__init__()
-        self.ba_prior = (None,) * 4
-        self.ba_prior_fids = np.array([])
+from visnav.algo.odo.base import VisualOdometry
 
 
 class VisualGPSNav(VisualOdometry):
     DEF_LOC_ERR_SD = 10     # in meters
     DEF_ORI_ERR_SD = math.radians(10)
 
-    def __init__(self, *args, geodetic_origin=None, ori_off_q=None, **kwargs):
-        super(VisualGPSNav, self).__init__(*args, **kwargs)
+    def __init__(self, *args, geodetic_origin=None, ori_off_q=None, logger=None, **kwargs):
+        logger = logger or logging.getLogger("odo").getChild("visgps")
+        super(VisualGPSNav, self).__init__(*args, logger=logger, **kwargs)
         self.geodetic_origin = geodetic_origin    # (lat, lon, height)
         self.ori_off_q = ori_off_q
-
-    @staticmethod
-    def get_new_state():
-        return VisualGPSState()
 
     def initialize_frame(self, time, image, measure):
         nf = super(VisualGPSNav, self).initialize_frame(time, image, measure)
@@ -107,7 +94,7 @@ class VisualGPSNav(VisualOdometry):
         if new_frame.measure:
             if all_meas:
                 is_new_kf = True
-                logger.debug('new kf: new gps measure')
+                self.logger.debug('new kf: new gps measure')
             else:
                 is_new_kf = None
         elif require_meas:
@@ -116,11 +103,11 @@ class VisualGPSNav(VisualOdometry):
             is_new_kf = False
         elif len(new_frame.kps_uv) / self.max_keypoints < self.new_kf_min_kp_ratio * 0.8:
             is_new_kf = True
-            logger.debug('new kf: too few keypoints, no gps measure')
+            self.logger.debug('new kf: too few keypoints, no gps measure')
         elif len([pt for pt in self.state.map3d.values() if pt.inlier_count > 0 and pt.active]) < self.min_inliers * 2:
             is_new_kf = len(self.triangulation_kps(new_frame)) > 0
             if is_new_kf:
-                logger.debug('new kf: active 3d points < 2 x min_inliers, no gps measure')
+                self.logger.debug('new kf: active 3d points < 2 x min_inliers, no gps measure')
         else:
             is_new_kf = False
 

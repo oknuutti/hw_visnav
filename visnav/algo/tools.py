@@ -7,7 +7,12 @@ import sys
 import dateutil.parser as dparser
 
 import numpy as np
-import numba as nb
+
+try:
+    import numba as nb
+except ImportError:
+    nb = None
+
 import quaternion  # adds to numpy  # noqa # pylint: disable=unused-import
 
 # import scipy
@@ -130,6 +135,23 @@ class Time:
 
     def __sub__(self, other: 'Time'):
         return Time(self.unix - other.unix)
+
+
+class LogWriter:
+    def __init__(self, log_queue=None, logger=None):
+        self.log_queue = log_queue
+        self.logger = logger or logging.getLogger(__name__)
+
+    def write(self, msg):
+        if msg.strip() != '':
+            if self.log_queue is None:
+                self.logger.info(msg)
+            else:
+                self.log_queue.put(('info', msg))
+
+    def flush(self):
+        if hasattr(self.log_queue, 'flush'):
+            self.log_queue.flush()
 
 
 class Pose:
@@ -694,6 +716,8 @@ def q_times_v(q, v):
 
 
 def q_times_mx(q, mx):
+    if len(mx) == 0:
+        return np.zeros((0, 3))
     qqmx = q * mx2qmx(mx) * q.conj()
     aqqmx = quaternion.as_float_array(qqmx)
     return aqqmx[:, 1:]
@@ -1403,8 +1427,7 @@ def dlogR_dR(R):
                    [0, 0, a3]])
     return np.hstack((S1, S2, S3))
 
-
-@nb.njit(nogil=True, parallel=False, cache=True)
+@maybe_decorate(nb.njit(nogil=True, parallel=False, cache=True), nb is not None)
 def make_givens(a, b, dtype=np.float64):
     # based on https://www.math.usm.edu/lambers/mat610/sum10/lecture9.pdf
 
@@ -1429,7 +1452,7 @@ def make_givens(a, b, dtype=np.float64):
                      [s, c]], dtype=dtype)
 
 
-@nb.njit(nogil=True, parallel=False, cache=True)
+@maybe_decorate(nb.njit(nogil=True, parallel=False, cache=True), nb is not None)
 def apply_givens(A, G, i, j):
     I = np.array([i, j], dtype=np.int32)
     AI = A[I, :]

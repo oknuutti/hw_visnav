@@ -19,8 +19,8 @@ def detect_gridded(detector, img, mask, rows, cols, k, refine=True, margin=32):
         ys = np.uint32(np.rint(np.linspace(0, h, num=rows+1)))
 
         # expand xs and ys by the detector margin
-        ystarts, yends = np.clip(ys[:-1] - margin, 0), np.clip(ys[1:] + margin, None, h)
-        xstarts, xends = np.clip(xs[:-1] - margin, 0), np.clip(xs[1:] + margin, None, w)
+        ystarts, yends = np.clip(ys[:-1] - margin, 0, None), np.clip(ys[1:] + margin, None, h)
+        xstarts, xends = np.clip(xs[:-1] - margin, 0, None), np.clip(xs[1:] + margin, None, w)
         keypoints = []
         for y1, y2 in zip(ystarts, yends):
             for x1, x2 in zip(xstarts, xends):

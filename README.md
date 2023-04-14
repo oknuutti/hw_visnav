@@ -35,8 +35,10 @@ xvfb-run --server-args="-screen 0 1024x768x24" python -mr cProfile -o profile1.p
 
 ## For processing drone videos:
 ```
-conda create -np drone -c conda-forge python=3.8 pip numpy numba quaternion scipy opencv python-dateutil tqdm
+conda create -n drone -c conda-forge python=3.10 pip numpy numba quaternion scipy opencv python-dateutil tqdm \
+                                     matplotlib
 conda activate drone
+pip install opencv-contrib-python
 pip install pygeodesy
 pip install --no-deps kapture
 ```
