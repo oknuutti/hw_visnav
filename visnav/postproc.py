@@ -337,7 +337,7 @@ def find_matches(path1, path2, cam_params, poses, kps, descr, obser, res_pts3d, 
             poses[(bid, frame_id)] = Pose(traj.t, traj.r)
             _kps = image_keypoints_from_file(
                 get_keypoints_fullpath(feature_name, kapt_path, img_file), kp_type.dtype, kp_type.dsize)
-            _kps[:, :2] = cam.undistort(_kps[:, :2])
+            _kps[:, :, 2] = cam.undistort(_kps[:, :, 2])
             kps[(bid, frame_id)] = _kps
             descr[(bid, frame_id)] = image_descriptors_from_file(
                 get_descriptors_fullpath(feature_name, kapt_path, img_file), ds_type.dtype, ds_type.dsize)
