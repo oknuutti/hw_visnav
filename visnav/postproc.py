@@ -9,7 +9,7 @@ import numpy as np
 import quaternion
 from kapture import Kapture
 from kapture.io.records import get_record_fullpath
-from scipy.spatial.ckdtree import cKDTree
+from scipy.spatial import cKDTree
 
 from tqdm import tqdm
 #from memory_profiler import profile
@@ -202,7 +202,8 @@ def run_fe(args):
                    'can only remove all the 3d-points after a certain index'
             kapt.points3d = kapt.points3d[:min_id, :]
 
-        kapt.keypoints[args.feature_name] = kt.Keypoints(args.feature_name, np.float32, 2)
+        # NOTE: size changed 2=>3, breaks compatibility with previous versions, for scale restricted matching
+        kapt.keypoints[args.feature_name] = kt.Keypoints(args.feature_name, np.float32, 3)
 
         if args.feature_name == 'akaze':
             kapt.descriptors[args.feature_name] = kt.Descriptors(args.feature_name, np.uint8, 61,
@@ -792,7 +793,7 @@ def extract_features(img_path, sc_q, args):
         img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
         kps, descs = extract_features.detector.normalizeDetectAndCompute(img, sc_q)
 
-    kps = np.array([k.pt for k in kps], dtype='f4').reshape((-1, 2))
+    kps = np.array([(*k.pt, k.size) for k in kps], dtype='f4').reshape((-1, 2))
     return kps, descs
 
 

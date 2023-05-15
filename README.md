@@ -36,7 +36,7 @@ xvfb-run --server-args="-screen 0 1024x768x24" python -mr cProfile -o profile1.p
 ## For processing drone videos:
 ```
 conda create -n drone -c conda-forge python=3.10 pip numpy numba quaternion scipy opencv python-dateutil tqdm \
-                                     matplotlib
+                                     matplotlib rasterio
 conda activate drone
 pip install opencv-contrib-python
 pip install pygeodesy
