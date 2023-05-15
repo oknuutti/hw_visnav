@@ -312,7 +312,7 @@ def path2batchid(path):
     return path.split('/')[-1].split('-')[0]
 
 
-def find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d, res_obser, feature_name,
+def find_matches(path1, path2, cam_params, poses, kps, descr, obser, res_pts3d, res_obser, feature_name,
                  plot=False, img_files=None, plot_only=False, desc=None):
     # find all frames with akaze features, load poses and observations
     bid1, bid2 = map(path2batchid, (path1, path2))
@@ -337,7 +337,8 @@ def find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d
             poses[(bid, frame_id)] = Pose(traj.t, traj.r)
             _kps = image_keypoints_from_file(
                 get_keypoints_fullpath(feature_name, kapt_path, img_file), kp_type.dtype, kp_type.dsize)
-            pts2d[(bid, frame_id)] = cam.undistort(_kps[:, :2])     # TODO: support scale restricted matching
+            _kps[:, :2] = cam.undistort(_kps[:, :2])
+            kps[(bid, frame_id)] = _kps
             descr[(bid, frame_id)] = image_descriptors_from_file(
                 get_descriptors_fullpath(feature_name, kapt_path, img_file), ds_type.dtype, ds_type.dsize)
 
@@ -363,8 +364,8 @@ def find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d
                 repr_kps.append(np.atleast_2d(cam.project(pts3d_cf.astype(np.float32)) + 0.5).astype(int))
 
             plot_matches(img_files[(bid1, fid1)], img_files[(bid2, fid2)],
-                         cam1.distort(pts2d[(bid1, fid1)][kid1.astype(int)].squeeze()),
-                         cam2.distort(pts2d[(bid2, fid2)][kid2.astype(int)].squeeze()),
+                         cam1.distort(kps[(bid1, fid1)][kid1.astype(int)].squeeze()[:, :2]),
+                         cam2.distort(kps[(bid2, fid2)][kid2.astype(int)].squeeze()[:, :2]),
                          repr_kps1=repr_kps[0], repr_kps2=repr_kps[1])
         return
 
@@ -386,13 +387,13 @@ def find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d
             for path, fid in zip((path1, path2), (fid1, fids2[idx2])):
                 bid = path2batchid(path)
                 cams.append(cam_obj(cam_params[bid]))
-                pts3d = np.array([obser[(bid, fid, i)] for i in range(len(pts2d[(bid, fid)]))])
-                d.append((cams[-1].cam_mx, pts2d[(bid, fid)], descr[(bid, fid)], pts3d))
+                pts3d = np.array([obser[(bid, fid, i)] for i in range(len(kps[(bid, fid)]))])
+                d.append((cams[-1].cam_mx, kps[(bid, fid)], descr[(bid, fid)], pts3d))
 
             if plot:
                 plot_matches(img_files[(bid1, fid1)], img_files[(bid2, fids2[idx2])],
-                             cams[0].distort(pts2d[(bid1, fid1)].squeeze()),
-                             cams[1].distort(pts2d[(bid2, fids2[idx2])].squeeze()), kps_only=True)
+                             cams[0].distort(kps[(bid1, fid1)].squeeze()[:, :2]),
+                             cams[1].distort(kps[(bid2, fids2[idx2])].squeeze()[:, :2]), kps_only=True)
 
             matches1, matches2 = match_and_validate(*d[0], *d[1], feature_name)
 
@@ -418,8 +419,8 @@ def find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d
                 if plot:
                     cam1, cam2 = map(lambda bid: cam_obj(cam_params[bid]), (bid1, bid2))
                     plot_matches(img_files[(bid1, fid1)], img_files[(bid2, fids2[idx2])],
-                                 cam1.distort(d[0][1][matches1, ...].squeeze()),
-                                 cam2.distort(d[1][1][matches2, ...].squeeze()))
+                                 cam1.distort(d[0][1][matches1, ...].squeeze()[:, :2]),
+                                 cam2.distort(d[1][1][matches2, ...].squeeze()[:, :2]))
 
 
 #@profile
@@ -856,13 +857,17 @@ def triangulate(kapt, cam_params, img_file1, kps1, descs1, img_file2, kps2, desc
     if np.sum(mask) < MIN_INLIERS:
         return None, None, None
 
-    return (pts3d[mask, :], *zip(*[[m.queryIdx, m.trainIdx] for m in matches[mask]])
+    return (pts3d[mask, :], *zip(*[[m.queryIdx, m.trainIdx] for m in matches[mask]]))
 
 
 def match_and_validate(cam_mx1, kps1, descr1, pts3d1, cam_mx2, kps2, descr2, pts3d2, feature_name):
+    pts2d1, scale1 = kps1[:, :2], kps1[:, 2]
+    pts2d2, scale2 = kps2[:, :2], kps2[:, 2]
+
     if descr1 is None or descr2 is None or len(descr1) < MIN_INLIERS or len(descr2) < MIN_INLIERS:
         return None, None
 
+    # TODO: support scale restricted matching
     # match features based on descriptors, cross check for validity, sort keypoints so that indices indicate matches
     matcher = cv2.BFMatcher(cv2.NORM_HAMMING if feature_name == 'akaze' else cv2.NORM_L2, True)
     matches = matcher.match(descr1, descr2)
@@ -871,14 +876,14 @@ def match_and_validate(cam_mx1, kps1, descr1, pts3d1, cam_mx2, kps2, descr2, pts
         return None, None
 
     matches = np.array(matches)
-    kps1, pts3d1 = map(lambda x: x[[m.queryIdx for m in matches], :], (kps1, pts3d1))
-    kps2, pts3d2 = map(lambda x: x[[m.trainIdx for m in matches], :], (kps2, pts3d2))
+    pts2d1, pts3d1 = map(lambda x: x[[m.queryIdx for m in matches], :], (pts2d1, pts3d1))
+    pts2d2, pts3d2 = map(lambda x: x[[m.trainIdx for m in matches], :], (pts2d2, pts3d2))
 
     # kps1 and kps2 already undistorted
 
     # 3d-2d ransac on both, need same features to be inliers
     inliers = set(range(len(kps1)))
-    for pts3d, cam_mx, kps in zip((pts3d1, pts3d2), (cam_mx2, cam_mx1), (kps2, kps1)):
+    for pts3d, cam_mx, kps in zip((pts3d1, pts3d2), (cam_mx2, cam_mx1), (pts2d2, pts2d1)):
         ok, rv, r, inl = cv2.solvePnPRansac(pts3d, kps, cam_mx, None, iterationsCount=10000,
                                             reprojectionError=MAX_REPR_ERROR, flags=cv2.SOLVEPNP_AP3P)
         inliers = inliers.intersection(inl.flatten() if inl is not None else [])
