@@ -335,8 +335,9 @@ def find_matches(path1, path2, cam_params, poses, pts2d, descr, obser, res_pts3d
             frame_id = img2fid[img_file]
             traj = kapt.trajectories[(frame_id, sensor_id)]
             poses[(bid, frame_id)] = Pose(traj.t, traj.r)
-            pts2d[(bid, frame_id)] = cam.undistort(image_keypoints_from_file(
-                get_keypoints_fullpath(feature_name, kapt_path, img_file), kp_type.dtype, kp_type.dsize))
+            _kps = image_keypoints_from_file(
+                get_keypoints_fullpath(feature_name, kapt_path, img_file), kp_type.dtype, kp_type.dsize)
+            pts2d[(bid, frame_id)] = cam.undistort(_kps[:, :2])     # TODO: support scale restricted matching
             descr[(bid, frame_id)] = image_descriptors_from_file(
                 get_descriptors_fullpath(feature_name, kapt_path, img_file), ds_type.dtype, ds_type.dsize)
 
@@ -793,7 +794,7 @@ def extract_features(img_path, sc_q, args):
         img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
         kps, descs = extract_features.detector.normalizeDetectAndCompute(img, sc_q)
 
-    kps = np.array([(*k.pt, k.size) for k in kps], dtype='f4').reshape((-1, 2))
+    kps = np.array([(*k.pt, k.size) for k in kps], dtype='f4').reshape((-1, 3))
     return kps, descs
 
 
@@ -818,8 +819,8 @@ def triangulate(kapt, cam_params, img_file1, kps1, descs1, img_file2, kps2, desc
         return None, None, None
 
     matches = np.array(matches)
-    kps1 = kps1[[m.queryIdx for m in matches], :]
-    kps2 = kps2[[m.trainIdx for m in matches], :]
+    kps1 = kps1[[m.queryIdx for m in matches], :2]
+    kps2 = kps2[[m.trainIdx for m in matches], :2]
 
     # get camera parameters, undistort keypoints
     sensor_id, cam = cam_params[0], cam_obj(cam_params)
@@ -855,7 +856,7 @@ def triangulate(kapt, cam_params, img_file1, kps1, descs1, img_file2, kps2, desc
     if np.sum(mask) < MIN_INLIERS:
         return None, None, None
 
-    return (pts3d[mask, :], *zip(*[[m.queryIdx, m.trainIdx] for m in matches[mask]]))
+    return (pts3d[mask, :], *zip(*[[m.queryIdx, m.trainIdx] for m in matches[mask]])
 
 
 def match_and_validate(cam_mx1, kps1, descr1, pts3d1, cam_mx2, kps2, descr2, pts3d2, feature_name):
