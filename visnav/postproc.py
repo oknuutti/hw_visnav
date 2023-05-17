@@ -944,10 +944,10 @@ def scale_restricted_match(sc1, des1, sc2, des2, norm, octave_levels=4):
     sd_mode = scipy.optimize.minimize_scalar(lambda x: -kde(x), method='bounded',
                                              bounds=(sd_mean - 1.5 * lvl_sc, sd_mean + 1.5 * lvl_sc)).x
 
-    match_mask = (s1.view((K1, 1)).expand((K1, K2)) + sd_mode
-                  - s2.view((1, K2)).expand((K1, K2))).abs() < lvl_sc * (match_levels - 1 + 0.6)
-    mask1 = match_mask.any(dim=1).view(-1)
-    mask2 = match_mask.any(dim=0).view(-1)
+    match_mask = np.abs(np.repeat(s1[:, None], K2, axis=1) + sd_mode
+                        - np.repeat(s2[None, :], K1, axis=0)) < lvl_sc * (match_levels - 1 + 0.6)
+    mask1 = match_mask.any(axis=1).flatten()
+    mask2 = match_mask.any(axis=0).flatten()
     match_mask = match_mask[mask1, :][:, mask2]
 
     # scale restricted matching
