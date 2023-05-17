@@ -929,7 +929,8 @@ def scale_restricted_match(sc1, des1, sc2, des2, norm, octave_levels=4):
         return np.array([[sx/sy, sy] for sx, sy in arr]).reshape((-1, 2)).T
 
     # get scale difference
-    I1, I2 = [m.queryIdx for m in matches], [m.trainIdx for m in matches]
+    I1 = np.array([m.queryIdx for m in matches])
+    I2 = np.array([m.trainIdx for m in matches])
     sd = s2[I2] - s1[I1]
 
     # gaussian kernel density estimate
