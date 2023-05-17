@@ -814,22 +814,24 @@ def cam_obj(cam_params):
 
 
 def triangulate(kapt, cam_params, img_file1, kps1, descs1, img_file2, kps2, descs2, feature_name):
+    pts2d1, scale1 = kps1[:, :2], kps1[:, 2]
+    pts2d2, scale2 = kps2[:, :2], kps2[:, 2]
+
     if descs1 is None or descs2 is None or len(descs1) < MIN_INLIERS or len(descs2) < MIN_INLIERS:
         return None, None, None
 
-    # match features based on descriptors, cross check for validity, sort keypoints so that indices indicate matches
-    matcher = cv2.BFMatcher(cv2.NORM_HAMMING if feature_name == 'akaze' else cv2.NORM_L2, True)
-    matches = matcher.match(descs1, descs2)
+    # match features based on descriptors, cross-check for validity, sort keypoints so that indices indicate matches
+    matches = scale_restricted_match(scale1, descs1, scale2, descs2, 'hamming' if feature_name == 'akaze' else 2)
     if len(matches) < MIN_INLIERS:
         return None, None, None
 
     matches = np.array(matches)
-    kps1 = kps1[[m.queryIdx for m in matches], :2]
-    kps2 = kps2[[m.trainIdx for m in matches], :2]
+    pts2d1 = pts2d1[[m.queryIdx for m in matches], :]
+    pts2d2 = pts2d2[[m.trainIdx for m in matches], :]
 
     # get camera parameters, undistort keypoints
     sensor_id, cam = cam_params[0], cam_obj(cam_params)
-    kps1, kps2 = map(lambda x: cam.undistort(x).squeeze(), (kps1, kps2))
+    pts2d1, pts2d2 = map(lambda x: cam.undistort(x).squeeze(), (pts2d1, pts2d2))
 
     # get camera frame pose matrices
     img2fid = dict([(fname[sensor_id], id) for id, fname in kapt.records_camera.items()])
@@ -838,12 +840,12 @@ def triangulate(kapt, cam_params, img_file1, kps1, descs1, img_file2, kps2, desc
 
     # triangulate matched keypoints
     kps4d = cv2.triangulatePoints(cam.cam_mx.dot(pose1), cam.cam_mx.dot(pose2),
-                                  kps1.reshape((-1, 1, 2)), kps2.reshape((-1, 1, 2)))
+                                  pts2d1.reshape((-1, 1, 2)), pts2d2.reshape((-1, 1, 2)))
     pts3d = (kps4d.T[:, :3] / kps4d.T[:, 3:])
 
     # filter out bad triangulation results
     mask = np.ones((len(matches),), dtype=bool)
-    for pose, kps in zip((pose1, pose2), (kps1, kps2)):
+    for pose, kps in zip((pose1, pose2), (pts2d1, pts2d2)):
         pose44 = np.eye(4)
         pose44[:3, :] = pose
 
@@ -874,7 +876,7 @@ def match_and_validate(cam_mx1, kps1, descr1, pts3d1, cam_mx2, kps2, descr2, pts
     # scale restricted matching of features based on descriptors,
     # mutual matching for validity
     matches = scale_restricted_match(scale1, descr1, scale2, descr2,
-                                     norm=cv2.NORM_HAMMING if feature_name == 'akaze' else cv2.NORM_L2)
+                                     norm='hamming' if feature_name == 'akaze' else 2)
 
     if matches is None or len(matches) < MIN_INLIERS:
         return None, None
@@ -898,9 +900,46 @@ def match_and_validate(cam_mx1, kps1, descr1, pts3d1, cam_mx2, kps2, descr2, pts
     return (*zip(*[[m.queryIdx, m.trainIdx] for m in matches[list(inliers)]]),)
 
 
-def match(des1, des2, norm, mask=None):
-    matcher = cv2.BFMatcher(norm, True)
-    matches = matcher.match(des1, des2, mask=mask)
+def match(des1, des2, norm, mask=None, mutual=True, ratio=False):
+    K1, D = des1.shape
+    K2, _ = des2.shape
+
+    if K1 == 0 or K2 == 0:
+        return []
+
+    d1 = np.repeat(des1[:, None, :], K2, axis=1)
+    d2 = np.repeat(des2[None, :, :], K1, axis=0)
+    if isinstance(norm, int):
+        dist = np.linalg.norm(d1 - d2, ord=norm, axis=2)
+    else:
+        assert norm == 'hamming', 'only "hamming" or int (1,2, ...) norms are supported'
+        assert des1.dtype == np.uint8 and des2.dtype == np.uint8, 'binary descriptors need to be of type byte'
+        d1 = np.unpackbits(d1, axis=2)
+        d2 = np.unpackbits(d2, axis=2)
+        dist = np.sum(d1 != d2, axis=2)
+
+    if mask is not None:
+        if mask.dtype in (bool, np.bool, np.uint8):
+            dist[~mask.astype(bool)] = np.inf
+        else:
+            dist = dist * mask
+
+    idx1 = np.argmin(dist, axis=1)
+    min1 = dist[np.arange(0, K1), idx1]
+    mask = np.ones((K1,), dtype=bool)
+
+    if mutual:
+        # check that matches are mutually closest
+        idx2 = np.argmin(dist, axis=0)
+        mask *= (idx2[idx1] == np.arange(0, K1))
+
+    if ratio > 0:
+        # do ratio test, need second closest match
+        dist[:, idx1] = np.inf
+        min1b = np.min(dist, dim=2)
+        mask *= min1 / min1b < ratio
+
+    matches = [cv2.DMatch(i, idx1[i], min1[i]) for i in range(K1) if mask[i]]
     return matches
 
 
@@ -952,7 +991,6 @@ def scale_restricted_match(sc1, des1, sc2, des2, norm, octave_levels=4):
 
     # scale restricted matching
     matches = match(des1[mask1, :], des2[mask2, :], norm, mask=match_mask)
-
     if mask1.sum() > 0 and mask2.sum() > 0:
         I1, I2 = np.where(mask1)[0], np.where(mask2)[0]
         for m in matches:
