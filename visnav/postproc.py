@@ -7,6 +7,7 @@ from typing import List
 import cv2
 import numpy as np
 import quaternion
+import scipy
 from kapture import Kapture
 from kapture.io.records import get_record_fullpath
 from scipy.spatial import cKDTree
@@ -867,10 +868,10 @@ def match_and_validate(cam_mx1, kps1, descr1, pts3d1, cam_mx2, kps2, descr2, pts
     if descr1 is None or descr2 is None or len(descr1) < MIN_INLIERS or len(descr2) < MIN_INLIERS:
         return None, None
 
-    # TODO: support scale restricted matching
-    # match features based on descriptors, cross check for validity, sort keypoints so that indices indicate matches
-    matcher = cv2.BFMatcher(cv2.NORM_HAMMING if feature_name == 'akaze' else cv2.NORM_L2, True)
-    matches = matcher.match(descr1, descr2)
+    # scale restricted matching of features based on descriptors,
+    # mutual matching for validity
+    matches = scale_restricted_match(scale1, descr1, scale2, descr2,
+                                     norm=cv2.NORM_HAMMING if feature_name == 'akaze' else cv2.NORM_L2)
 
     if matches is None or len(matches) < MIN_INLIERS:
         return None, None
@@ -892,6 +893,75 @@ def match_and_validate(cam_mx1, kps1, descr1, pts3d1, cam_mx2, kps2, descr2, pts
         return None, None
 
     return (*zip(*[[m.queryIdx, m.trainIdx] for m in matches[list(inliers)]]),)
+
+
+def match(des1, des2, norm, mask=None):
+    matcher = cv2.BFMatcher(norm, True)
+    matches = matcher.match(des1, des2, mask=mask)
+    return matches
+
+
+def scale_restricted_match(sc1, des1, sc2, des2, norm, octave_levels=4):
+    K1, K2 = len(sc1), len(sc2)
+
+    # log scales used
+    s1, s2 = sc1.squeeze().log(), sc2.squeeze().log()
+
+    # initial matching for scale difference estimation
+    matches = match(des1, des2, norm)
+
+    # one level scale difference
+    lvl_sc = np.log(2) / octave_levels
+    match_levels = 1
+
+    def group_sd(sd):
+        x, y = np.unique(sd, return_counts=True)
+        arr = []    # [sum(x*y), sum(y)]
+        for i in range(len(x)):
+            if i > 0 and abs(x[i] - arr[-1][0] / arr[-1][1]) < lvl_sc * 0.1:
+                arr[-1][0] += x[i]*y[i]
+                arr[-1][1] += y[i]
+            else:
+                arr.append([x[i]*y[i], y[i]])
+        return np.array([[sx/sy, sy] for sx, sy in arr]).reshape((-1, 2)).T
+
+    # get scale difference
+    I1, I2 = [m.queryIdx for m in matches], [m.trainIdx for m in matches]
+    sd = s2[I2] - s1[I1]
+
+    # gaussian kernel density estimate
+    try:
+        kde = scipy.stats.gaussian_kde(sd, bw_method=3 * lvl_sc)
+    except np.linalg.LinAlgError as e:
+        print('Gaussian KDE failed')
+        return None
+    sd_mean = np.mean(sd)
+
+    # get mode, start from the mean
+    sd_mode = scipy.optimize.minimize_scalar(lambda x: -kde(x), method='bounded',
+                                             bounds=(sd_mean - 1.5 * lvl_sc, sd_mean + 1.5 * lvl_sc)).x
+
+    match_mask = (s1.view((1, K1, 1)).expand((1, K1, K2)) + sd_mode
+                  - s2.view((1, 1, K2)).expand((1, K1, K2))).abs() < lvl_sc * (match_levels - 1 + 0.6)
+    mask1 = match_mask.any(dim=2).view(-1)
+    mask2 = match_mask.any(dim=1).view(-1)
+    match_mask = match_mask[:, mask1, :][:, :, mask2]
+
+    # scale restricted matching
+    matches = match(des1[I1[mask1], :], des2[I2[mask2], :], norm, mask=match_mask)
+
+    if mask1.sum() > 0 and mask2.sum() > 0:
+        for m in matches:
+            m.queryIdx = I1[mask1][m.queryIdx]
+            m.trainIdx = I2[mask2][m.trainIdx]
+    else:
+        s, n = group_sd(sd)
+        print(f'No features pass scale restriction, details:'
+              f' n1: {mask1.sum()}, n2: {mask2.sum()}, sd_mode: {sd_mode}, sd_mean: {sd_mean},'
+              f' s: {s.tolist()}, n: {n.tolist()}')
+        return None
+
+    return matches
 
 
 def join_batches(arr_pts2d, arr_cam_params, arr_cam_param_idxs, arr_poses, arr_pose_idxs, arr_pts3d, arr_pt3d_idxs,
