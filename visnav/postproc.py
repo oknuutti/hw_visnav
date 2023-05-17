@@ -7,9 +7,12 @@ from typing import List
 import cv2
 import numpy as np
 import quaternion
-import scipy
 from kapture import Kapture
 from kapture.io.records import get_record_fullpath
+
+import scipy
+import scipy.stats
+import scipy.optimize
 from scipy.spatial import cKDTree
 
 from tqdm import tqdm
