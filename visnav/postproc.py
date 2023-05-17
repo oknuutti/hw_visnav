@@ -905,7 +905,7 @@ def scale_restricted_match(sc1, des1, sc2, des2, norm, octave_levels=4):
     K1, K2 = len(sc1), len(sc2)
 
     # log scales used
-    s1, s2 = sc1.squeeze().log(), sc2.squeeze().log()
+    s1, s2 = np.log(sc1.squeeze()), np.log(sc2.squeeze())
 
     # initial matching for scale difference estimation
     matches = match(des1, des2, norm)
