@@ -905,8 +905,6 @@ def match(des1, des2, norm, mask=None):
 
 
 def scale_restricted_match(sc1, des1, sc2, des2, norm, octave_levels=4):
-    K1, K2 = len(sc1), len(sc2)
-
     # log scales used
     s1, s2 = np.log(sc1.squeeze()), np.log(sc2.squeeze())
 
@@ -945,6 +943,7 @@ def scale_restricted_match(sc1, des1, sc2, des2, norm, octave_levels=4):
     sd_mode = scipy.optimize.minimize_scalar(lambda x: -kde(x), method='bounded',
                                              bounds=(sd_mean - 1.5 * lvl_sc, sd_mean + 1.5 * lvl_sc)).x
 
+    K1, K2 = len(sc1), len(sc2)
     match_mask = np.abs(np.repeat(s1[:, None], K2, axis=1) + sd_mode
                         - np.repeat(s2[None, :], K1, axis=0)) < lvl_sc * (match_levels - 1 + 0.6)
     mask1 = match_mask.any(axis=1).flatten()
@@ -952,12 +951,13 @@ def scale_restricted_match(sc1, des1, sc2, des2, norm, octave_levels=4):
     match_mask = match_mask[mask1, :][:, mask2]
 
     # scale restricted matching
-    matches = match(des1[I1[mask1], :], des2[I2[mask2], :], norm, mask=match_mask)
+    matches = match(des1[mask1, :], des2[mask2, :], norm, mask=match_mask)
 
     if mask1.sum() > 0 and mask2.sum() > 0:
+        I1, I2 = np.where(mask1)[0], np.where(mask2)[0]
         for m in matches:
-            m.queryIdx = I1[mask1][m.queryIdx]
-            m.trainIdx = I2[mask2][m.trainIdx]
+            m.queryIdx = I1[m.queryIdx]
+            m.trainIdx = I2[m.trainIdx]
     else:
         s, n = group_sd(sd)
         print(f'No features pass scale restriction, details:'
